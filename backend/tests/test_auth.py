@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from tests.conftest import make_user
+from tests.conftest import delete_user, make_user
 
 
 def test_health_check(client: TestClient) -> None:
@@ -123,23 +123,11 @@ def test_me_with_garbage_token_is_unauthorized(client: TestClient) -> None:
 
 def test_me_with_token_of_deleted_user(client: TestClient) -> None:
     email = "deleted.user@example.com"
-    user = make_user(client, email)
+    user = make_user(email)
     login = client.post("/api/auth/login", json=user)
     token = login.json()["access_token"]
 
-    async def delete_user() -> None:
-        from motor.motor_asyncio import AsyncIOMotorClient
-
-        from app.core.config import settings
-
-        db_client = AsyncIOMotorClient(settings.mongo_uri)
-        db = db_client[settings.mongo_db_name]
-
-        await db.users.delete_one({"email": email})
-
-    import asyncio
-
-    asyncio.run(delete_user())
+    delete_user(email)
 
     response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 401
@@ -166,3 +154,16 @@ def test_update_profile_rejects_blank_name(client: TestClient, auth_headers: dic
     response = client.patch("/api/auth/me", headers=auth_headers, json={"name": "   "})
     assert response.status_code == 422
     assert response.json()["code"] == "validation_error"
+
+
+def test_unauthorized_uses_the_error_envelope(client: TestClient) -> None:
+    response = client.get("/api/auth/me")
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Not authenticated", "code": "unauthenticated"}
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+def test_unknown_route_uses_the_error_envelope(client: TestClient) -> None:
+    response = client.get("/api/does-not-exist")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found", "code": "not_found"}
