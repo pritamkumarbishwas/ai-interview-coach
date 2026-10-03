@@ -79,3 +79,49 @@ async def test_generate_structured_max_retries_exceeded() -> None:
         await service.generate_structured("Evaluate this", MockResponseSchema, max_retries=3)
 
     assert mock_client.call_count == 3
+
+
+class FailingAsyncOpenAI:
+    """Mimics a client whose calls always raise `error`."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        self.call_count = 0
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs):
+        self.call_count += 1
+        raise self.error
+
+
+class FakeStatusError(Exception):
+    """Minimal stand-in for an API error that carries an HTTP status."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+@pytest.mark.asyncio
+async def test_generate_structured_does_not_retry_client_errors() -> None:
+    """A 401 will fail identically on every attempt, so fail immediately."""
+    service = LLMService()
+    mock_client = FailingAsyncOpenAI(FakeStatusError(401))
+    service.client = mock_client
+
+    with pytest.raises(FakeStatusError):
+        await service.generate_structured("Evaluate this", MockResponseSchema)
+
+    assert mock_client.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_generate_structured_retries_server_errors() -> None:
+    service = LLMService()
+    mock_client = FailingAsyncOpenAI(FakeStatusError(503))
+    service.client = mock_client
+
+    with pytest.raises(FakeStatusError):
+        await service.generate_structured("Evaluate this", MockResponseSchema)
+
+    assert mock_client.call_count == 3
