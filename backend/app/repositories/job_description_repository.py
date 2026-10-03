@@ -23,9 +23,7 @@ class JobDescriptionRepository:
         result = await db[self.collection_name].insert_one(doc)
         return str(result.inserted_id)
 
-    async def list_for_user(
-        self, db: AsyncIOMotorDatabase, user_id: str, limit: int
-    ) -> list[dict]:
+    async def list_for_user(self, db: AsyncIOMotorDatabase, user_id: str, limit: int) -> list[dict]:
         cursor = (
             db[self.collection_name]
             .find({"user_id": user_id}, LIST_PROJECTION)
@@ -34,9 +32,7 @@ class JobDescriptionRepository:
         )
         return [stringify_id(doc) async for doc in cursor]
 
-    async def find_owned(
-        self, db: AsyncIOMotorDatabase, jd_id: str, user_id: str
-    ) -> dict | None:
+    async def find_owned(self, db: AsyncIOMotorDatabase, jd_id: str, user_id: str) -> dict | None:
         return await find_owned_document(db, self.collection_name, jd_id, user_id)
 
     async def delete(self, db: AsyncIOMotorDatabase, jd_id: str, user_id: str) -> None:

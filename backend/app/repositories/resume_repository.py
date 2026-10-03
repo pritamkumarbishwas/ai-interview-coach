@@ -21,9 +21,7 @@ class ResumeRepository:
         result = await db[self.collection_name].insert_one(doc)
         return str(result.inserted_id)
 
-    async def list_for_user(
-        self, db: AsyncIOMotorDatabase, user_id: str, limit: int
-    ) -> list[dict]:
+    async def list_for_user(self, db: AsyncIOMotorDatabase, user_id: str, limit: int) -> list[dict]:
         cursor = (
             db[self.collection_name]
             .find({"user_id": user_id}, LIST_PROJECTION)

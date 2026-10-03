@@ -1,8 +1,8 @@
 from datetime import UTC, datetime
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo.errors import DuplicateKeyError
 from pymongo.collection import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from app.core.exceptions import ConflictError
 from app.models.user import User

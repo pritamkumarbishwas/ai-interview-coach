@@ -1,9 +1,6 @@
 line-length = 100
 target-version = "py312"
 
-# Legacy, unused Alembic files (the app uses MongoDB and creates indexes at startup).
-extend-exclude = ["migrations"]
-
 [lint]
 select = ["E", "F", "W", "I", "UP", "B", "RUF"]
 ignore = [

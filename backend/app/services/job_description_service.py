@@ -79,9 +79,7 @@ class JobDescriptionService:
             for doc in docs
         ]
 
-    async def get(
-        self, db: AsyncIOMotorDatabase, user_id: str, jd_id: str
-    ) -> JobDescription:
+    async def get(self, db: AsyncIOMotorDatabase, user_id: str, jd_id: str) -> JobDescription:
         doc = await self._require(db, user_id, jd_id)
         return JobDescription(**doc)
 
@@ -110,9 +108,7 @@ class JobDescriptionService:
                 responsibilities=[],
             )
 
-    async def _require(
-        self, db: AsyncIOMotorDatabase, user_id: str, jd_id: str
-    ) -> dict:
+    async def _require(self, db: AsyncIOMotorDatabase, user_id: str, jd_id: str) -> dict:
         doc = await self._job_descriptions.find_owned(db, jd_id, user_id)
         if doc is None:
             raise NotFoundError("Job description not found")

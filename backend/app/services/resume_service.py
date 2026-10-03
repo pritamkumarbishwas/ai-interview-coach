@@ -120,9 +120,7 @@ class ResumeService:
             structured_data=structured_data,
         )
 
-    async def list(
-        self, db: AsyncIOMotorDatabase, user_id: str, limit: int
-    ) -> list[ResumeSummary]:
+    async def list(self, db: AsyncIOMotorDatabase, user_id: str, limit: int) -> list[ResumeSummary]:
         docs = await self._resumes.list_for_user(db, user_id, limit)
         return [
             ResumeSummary(
