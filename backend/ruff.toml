@@ -1,0 +1,14 @@
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "RUF"]
+ignore = [
+    # FastAPI's documented idiom puts Depends()/File() in parameter defaults.
+    "B008",
+    # `assert last_error is not None` style guards are intentional.
+    "B011",
+]
+
+[lint.per-file-ignores]
+"tests/**" = ["B"]
