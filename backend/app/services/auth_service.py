@@ -50,15 +50,11 @@ class AuthService:
         logger.info("User logged in id=%s", user.id)
         return self._build_token_response(user)
 
-    async def get_user_or_none(self, db: AsyncIOMotorDatabase, user_id: str) -> User | None:
-        return await self._users.get_by_id(db, user_id)
-
     async def update_profile(
         self, db: AsyncIOMotorDatabase, user: User, payload: UserUpdate
     ) -> User:
-        await self._users.update_profile(db, user.id or "", name=payload.name)
-        updated = await self._users.get_by_id(db, user.id or "")
-        if updated is None:  # pragma: no cover - user was authenticated moments ago
+        updated = await self._users.update_profile(db, user.id or "", name=payload.name)
+        if updated is None:  # user was removed between authentication and this update
             raise AuthenticationError("User no longer exists")
         logger.info("Updated profile id=%s", updated.id)
         return updated

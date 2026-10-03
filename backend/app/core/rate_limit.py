@@ -59,9 +59,11 @@ _limiter = SlidingWindowRateLimiter(
 
 
 def client_key(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Rate-limit key: the client IP, optionally taken from a trusted proxy."""
+    if settings.trust_proxy_headers:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 
@@ -69,7 +71,7 @@ def rate_limit(scope: str) -> Callable[[Request], None]:
     """Dependency factory: `Depends(rate_limit("login"))`."""
 
     def dependency(request: Request) -> None:
-        if settings.environment.lower() == "test":
+        if settings.is_test:
             return
         _limiter.check(f"{scope}:{client_key(request)}")
 

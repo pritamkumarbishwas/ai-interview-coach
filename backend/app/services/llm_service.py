@@ -12,13 +12,24 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-VALID_PROVIDERS = ("openai", "groq")
 REQUEST_TIMEOUT_SECONDS = 90.0
 RETRY_BACKOFF_SECONDS = 1.0
+# Failures worth trying again: timeouts, rate limits, server errors and
+# unusable model output. Bad keys or bad requests fail identically every time.
+RETRYABLE_STATUS_CODES = {408, 409, 429}
 
 
 class LLMConfigurationError(RuntimeError):
     """Raised when the LLM provider is missing or misconfigured."""
+
+
+def _is_retryable(error: Exception) -> bool:
+    if isinstance(error, ValidationError):
+        return True  # the model answered, just not in the shape we asked for
+    status_code = getattr(error, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code in RETRYABLE_STATUS_CODES or status_code >= 500
+    return isinstance(error, APIError)  # connection-level failure, no status
 
 
 class LLMService:
@@ -30,12 +41,7 @@ class LLMService:
     """
 
     def __init__(self) -> None:
-        self.provider = settings.llm_provider.strip().lower()
-        if self.provider not in VALID_PROVIDERS:
-            raise LLMConfigurationError(
-                f"LLM_PROVIDER={self.provider!r} is not supported. "
-                f"Valid options: {', '.join(VALID_PROVIDERS)}."
-            )
+        self.provider = settings.llm_provider  # validated by `Settings`
         self.model = settings.groq_model if self.provider == "groq" else settings.openai_model
         self._client: AsyncOpenAI | None = None
 
@@ -122,15 +128,19 @@ class LLMService:
                 raw_json = response.choices[0].message.content or ""
                 logger.debug("Raw LLM response: %s", raw_json)
                 return schema.model_validate_json(raw_json)
-            except ValidationError as exc:
-                last_error = exc
-                logger.warning("Validation error on attempt %d/%d: %s", attempt, max_retries, exc)
-            except APIError as exc:
-                last_error = exc
-                logger.warning("LLM API error on attempt %d/%d: %s", attempt, max_retries, exc)
+            except LLMConfigurationError:
+                raise  # no API key configured: retrying cannot help
             except Exception as exc:
                 last_error = exc
-                logger.error("Unexpected error during LLM generation: %s", exc)
+                logger.warning(
+                    "LLM call failed (attempt %d/%d): %s: %s",
+                    attempt,
+                    max_retries,
+                    type(exc).__name__,
+                    exc,
+                )
+                if not _is_retryable(exc):
+                    raise
 
             if attempt < max_retries:
                 await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
