@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import {
   Award,
@@ -12,14 +12,16 @@ import {
   Trophy,
 } from "lucide-react";
 
+import { Alert } from "@/components/ui/alert";
 import { Avatar } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
-import { MOCK_STATS, MOCK_USER } from "@/data/mock";
+import { MOCK_STATS } from "@/data/mock";
 import { useAuth } from "@/hooks/use-auth";
+import { toApiError } from "@/lib/api";
+import { formatDate } from "@/lib/utils";
 
 const SKILLS = [
   "React",
@@ -52,14 +54,45 @@ const PREFERENCES = [
 ];
 
 export default function ProfilePage() {
-  const { user } = useAuth();
-  const name = user?.name ?? MOCK_USER.name;
-  const email = user?.email ?? MOCK_USER.email;
+  const { user, updateProfile } = useAuth();
+  const name = user?.name ?? "";
+  const email = user?.email ?? "";
+  const memberSince = user?.created_at ? formatDate(user.created_at) : "";
 
+  const [displayName, setDisplayName] = useState(name);
+  const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [preferences, setPreferences] = useState(
     Object.fromEntries(PREFERENCES.map((item) => [item.id, item.enabled])),
   );
+
+  useEffect(() => {
+    setDisplayName(name);
+  }, [name]);
+
+  useEffect(() => {
+    if (!saved) return;
+    const timer = window.setTimeout(() => setSaved(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [saved]);
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextName = displayName.trim();
+    if (!nextName || saving) return;
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      await updateProfile({ name: nextName });
+      setSaved(true);
+    } catch (caught) {
+      setError(toApiError(caught).message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -74,56 +107,56 @@ export default function ProfilePage() {
         <div className="space-y-6 lg:col-span-2">
           <Card>
             <CardHeader title="Account" />
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-4">
-                <Avatar name={name} size="lg" />
-                <div>
-                  <p className="text-base font-semibold text-ink">{name}</p>
-                  <p className="flex items-center gap-1.5 text-[13px] text-ink-2">
-                    <Mail className="h-3.5 w-3.5" aria-hidden />
-                    {email}
-                  </p>
-                  <Badge tone="brand" className="mt-1.5">
-                    {MOCK_USER.title}
-                  </Badge>
+            <CardContent>
+              <form onSubmit={onSubmit} className="space-y-4" noValidate>
+                <div className="flex items-center gap-4">
+                  <Avatar name={name} size="lg" />
+                  <div>
+                    <p className="text-base font-semibold text-ink">{name}</p>
+                    <p className="flex items-center gap-1.5 text-[13px] text-ink-2">
+                      <Mail className="h-3.5 w-3.5" aria-hidden />
+                      {email}
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Full name" htmlFor="name">
-                  <Input id="name" defaultValue={name} />
-                </Field>
-                <Field label="Email" htmlFor="email">
-                  <Input id="email" type="email" defaultValue={email} />
-                </Field>
-                <Field label="Target role" htmlFor="target-role">
-                  <Input id="target-role" defaultValue={MOCK_USER.title} />
-                </Field>
-                <Field
-                  label="Member since"
-                  htmlFor="since"
-                  hint="Read-only"
-                >
-                  <Input id="since" defaultValue={MOCK_USER.memberSince} disabled />
-                </Field>
-              </div>
+                {error ? <Alert tone="error">{error}</Alert> : null}
 
-              <div className="flex items-center gap-3 pt-1">
-                <Button
-                  icon={<Save className="h-4 w-4" />}
-                  onClick={() => {
-                    setSaved(true);
-                    window.setTimeout(() => setSaved(false), 2000);
-                  }}
-                >
-                  Save changes
-                </Button>
-                {saved ? (
-                  <span className="text-[13px] font-medium text-success">
-                    Changes saved
-                  </span>
-                ) : null}
-              </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Full name" htmlFor="name" required>
+                    <Input
+                      id="name"
+                      value={displayName}
+                      onChange={(event) => setDisplayName(event.target.value)}
+                    />
+                  </Field>
+                  <Field label="Email" htmlFor="email" hint="Read-only">
+                    <Input id="email" type="email" value={email} disabled />
+                  </Field>
+                  <Field
+                    label="Member since"
+                    htmlFor="since"
+                    hint="Read-only"
+                  >
+                    <Input id="since" value={memberSince} disabled />
+                  </Field>
+                </div>
+
+                <div className="flex items-center gap-3 pt-1">
+                  <Button
+                    type="submit"
+                    loading={saving}
+                    icon={<Save className="h-4 w-4" />}
+                  >
+                    Save changes
+                  </Button>
+                  {saved ? (
+                    <span className="text-[13px] font-medium text-success">
+                      Changes saved
+                    </span>
+                  ) : null}
+                </div>
+              </form>
             </CardContent>
           </Card>
 

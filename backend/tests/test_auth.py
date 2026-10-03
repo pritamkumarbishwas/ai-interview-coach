@@ -143,3 +143,26 @@ def test_me_with_token_of_deleted_user(client: TestClient) -> None:
 
     response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 401
+
+
+def test_update_profile_changes_name(
+    client: TestClient, auth_headers: dict, registered_user: dict
+) -> None:
+    response = client.patch("/api/auth/me", headers=auth_headers, json={"name": "Renamed User"})
+    assert response.status_code == 200
+    assert response.json()["name"] == "Renamed User"
+    assert response.json()["email"] == registered_user["email"]
+
+    me = client.get("/api/auth/me", headers=auth_headers)
+    assert me.json()["name"] == "Renamed User"
+
+
+def test_update_profile_requires_auth(client: TestClient) -> None:
+    response = client.patch("/api/auth/me", json={"name": "Anyone"})
+    assert response.status_code == 401
+
+
+def test_update_profile_rejects_blank_name(client: TestClient, auth_headers: dict) -> None:
+    response = client.patch("/api/auth/me", headers=auth_headers, json={"name": "   "})
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"

@@ -53,6 +53,11 @@ export default function ResultsPage() {
         )
       : 0;
 
+  const best =
+    results.length > 0
+      ? Math.max(...results.map((item) => item.score ?? 0))
+      : 0;
+
   return (
     <div className="space-y-6">
       <section className="flex flex-wrap items-end justify-between gap-4">
@@ -84,7 +89,7 @@ export default function ResultsPage() {
         <div className="rounded-card border border-line bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
           <p className="text-[13px] font-medium text-ink-2">Best score</p>
           <p className="mt-2 flex items-center gap-2 text-[26px] font-bold leading-none text-ink">
-            {Math.max(...results.map((item) => item.score ?? 0))}
+            {best}
             <span className="text-base font-medium text-ink-3">%</span>
             <Award className="h-5 w-5 text-brand" aria-hidden />
           </p>

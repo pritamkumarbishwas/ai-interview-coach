@@ -69,7 +69,9 @@ class LLMService:
             api_key=api_key,
             base_url=base_url,
             timeout=REQUEST_TIMEOUT_SECONDS,
-            max_retries=2,
+            # The retry loop lives in `generate_structured`; letting the SDK
+            # retry as well would multiply worst-case latency.
+            max_retries=0,
         )
 
     async def generate_structured(self, prompt: str, schema: type[T], max_retries: int = 3) -> T:

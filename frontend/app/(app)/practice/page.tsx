@@ -6,14 +6,13 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
-  Briefcase,
   Check,
   FileText,
   FileUp,
   Mic,
-  Target,
 } from "lucide-react";
 
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/input";
@@ -31,6 +30,14 @@ const DIFFICULTIES = ["Beginner", "Intermediate", "Advanced"] as const;
 
 const EXPERIENCE_LEVELS = ["Entry", "Mid", "Senior"] as const;
 
+const ACCEPTED_EXTENSIONS = [".pdf", ".docx"];
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+
+function clampQuestionCount(value: number): number {
+  if (!Number.isFinite(value)) return 10;
+  return Math.min(15, Math.max(5, Math.round(value)));
+}
+
 export default function PracticePage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -46,9 +53,28 @@ export default function PracticePage() {
     "Intermediate",
   );
   const [questionCount, setQuestionCount] = useState(10);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const acceptFile = (file?: File) => {
-    if (file) setResumeName(file.name);
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    if (!ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+      setResumeName(null);
+      setFileError("Only PDF and DOCX files are supported.");
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setResumeName(null);
+      setFileError("That file is larger than 5 MB.");
+      return;
+    }
+    setFileError(null);
+    setResumeName(file.name);
+  };
+
+  const removeFile = () => {
+    setResumeName(null);
+    setFileError(null);
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -58,6 +84,7 @@ export default function PracticePage() {
   };
 
   const canContinue = step === 1 || (step === 2 && jobDescription.trim().length > 0);
+  const canStart = role.trim().length > 0;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -145,7 +172,7 @@ export default function PracticePage() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => setResumeName(null)}
+                    onClick={removeFile}
                     className="mt-1.5 text-[13px] font-medium text-danger hover:underline"
                   >
                     Remove
@@ -163,12 +190,20 @@ export default function PracticePage() {
                       type="file"
                       accept=".pdf,.docx"
                       className="sr-only"
-                      onChange={(event) => acceptFile(event.target.files?.[0])}
+                      onChange={(event) => {
+                        acceptFile(event.target.files?.[0]);
+                        event.target.value = "";
+                      }}
                     />
                   </label>
                 </>
               )}
             </div>
+            {fileError ? (
+              <Alert tone="error" className="mt-3">
+                {fileError}
+              </Alert>
+            ) : null}
             <p className="mt-3 text-center text-xs text-ink-3">
               Optional — you can skip this and still start an interview.
             </p>
@@ -300,6 +335,7 @@ export default function PracticePage() {
                 max={15}
                 value={questionCount}
                 onChange={(event) => setQuestionCount(Number(event.target.value))}
+                onBlur={() => setQuestionCount(clampQuestionCount(questionCount))}
               />
             </Field>
           </CardContent>
@@ -326,7 +362,11 @@ export default function PracticePage() {
           </Button>
         ) : (
           <Button
-            onClick={() => router.push("/interviews/fsd-01")}
+            onClick={() => {
+              setQuestionCount(clampQuestionCount(questionCount));
+              router.push("/interviews/fsd-01");
+            }}
+            disabled={!canStart}
             icon={<Mic className="h-4 w-4" />}
           >
             Start AI Interview

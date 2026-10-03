@@ -76,8 +76,6 @@ async def test_generate_structured_max_retries_exceeded() -> None:
     service.client = mock_client
 
     with pytest.raises(ValidationError):
-        await service.generate_structured(
-            "Evaluate this", MockResponseSchema, max_retries=3
-        )
+        await service.generate_structured("Evaluate this", MockResponseSchema, max_retries=3)
 
     assert mock_client.call_count == 3

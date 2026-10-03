@@ -21,6 +21,7 @@ interface AuthContextValue {
   status: AuthStatus;
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
+  updateProfile: (input: { name: string }) => Promise<void>;
   logout: () => void;
 }
 
@@ -69,6 +70,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus("authenticated");
   }, []);
 
+  const updateProfile = useCallback(async (input: { name: string }) => {
+    const updated = await authService.updateProfile(input);
+    setUser(updated);
+  }, []);
+
   const logout = useCallback(() => {
     clearToken();
     setUser(null);
@@ -77,8 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, status, login, register, logout }),
-    [user, status, login, register, logout],
+    () => ({ user, status, login, register, updateProfile, logout }),
+    [user, status, login, register, updateProfile, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

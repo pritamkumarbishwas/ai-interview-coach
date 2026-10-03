@@ -38,3 +38,12 @@ export async function fetchMe(): Promise<User> {
     throw toApiError(error);
   }
 }
+
+export async function updateProfile(input: { name: string }): Promise<User> {
+  try {
+    const { data } = await api.patch<User>("/auth/me", input);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}

@@ -13,7 +13,7 @@ from app.core.security import (
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
-from app.schemas.user import UserOut
+from app.schemas.user import UserOut, UserUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +52,16 @@ class AuthService:
 
     async def get_user_or_none(self, db: AsyncIOMotorDatabase, user_id: str) -> User | None:
         return await self._users.get_by_id(db, user_id)
+
+    async def update_profile(
+        self, db: AsyncIOMotorDatabase, user: User, payload: UserUpdate
+    ) -> User:
+        await self._users.update_profile(db, user.id or "", name=payload.name)
+        updated = await self._users.get_by_id(db, user.id or "")
+        if updated is None:  # pragma: no cover - user was authenticated moments ago
+            raise AuthenticationError("User no longer exists")
+        logger.info("Updated profile id=%s", updated.id)
+        return updated
 
     def _build_token_response(self, user: User) -> TokenResponse:
         token = create_access_token(subject=user.id)

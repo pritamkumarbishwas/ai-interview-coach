@@ -1,5 +1,3 @@
-import { cx } from "@/lib/utils";
-
 interface ScoreBarProps {
   label: string;
   score: number;

@@ -1,3 +1,5 @@
+import logging
+
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -16,6 +18,8 @@ from app.schemas.job_description import (
 )
 from app.services.llm_service import llm_service
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 SNIPPET_LENGTH = 180
@@ -32,8 +36,7 @@ async def create_job_description(
     current_user: User = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> JobDescriptionResponse:
-    prompt = EXTRACT_JD_INFO_PROMPT.format(text=payload.raw_text)
-    structured_data = await llm_service.generate_structured(prompt, JobDescriptionStructuredData)
+    structured_data = await _extract_structured_data(payload)
 
     jd = JobDescription(
         user_id=current_user.id,
@@ -52,6 +55,27 @@ async def create_job_description(
         company=jd.company,
         structured_data=structured_data,
     )
+
+
+async def _extract_structured_data(payload: JobDescriptionInput) -> JobDescriptionStructuredData:
+    """Enrich a posting with the LLM, but never fail the save because of it."""
+    prompt = EXTRACT_JD_INFO_PROMPT.format(text=payload.raw_text)
+    try:
+        return await llm_service.generate_structured(
+            prompt, JobDescriptionStructuredData, max_retries=2
+        )
+    # Saving the posting must not depend on the LLM being reachable.
+    except Exception as exc:
+        logger.warning(
+            "JD extraction unavailable (%s: %s); storing the posting unstructured",
+            type(exc).__name__,
+            exc,
+        )
+        return JobDescriptionStructuredData(
+            role_title=payload.title,
+            required_skills=[],
+            responsibilities=[],
+        )
 
 
 @router.get("", response_model=list[JobDescriptionSummary])

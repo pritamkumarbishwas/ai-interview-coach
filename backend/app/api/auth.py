@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.core.rate_limit import rate_limit
 from app.models.user import User
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
-from app.schemas.user import UserOut
+from app.schemas.user import UserOut, UserUpdate
 from app.services.auth_service import AuthService
 
 router = APIRouter()
@@ -48,3 +48,17 @@ async def login(
 )
 async def me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.patch(
+    "/me",
+    response_model=UserOut,
+    summary="Update the currently authenticated user's profile",
+)
+async def update_me(
+    payload: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: AuthService = Depends(get_auth_service),
+) -> User:
+    return await service.update_profile(db, current_user, payload)

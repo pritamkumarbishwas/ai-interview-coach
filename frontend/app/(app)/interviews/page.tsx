@@ -75,8 +75,16 @@ export default function InterviewsPage() {
           />
         </div>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by type">
-          {(["All", "Technical", "Behavioral", "HR", "System Design"] as const).map(
-            (type) => (
+          {(
+            [
+              "All",
+              "Technical",
+              "Behavioral",
+              "HR",
+              "System Design",
+              "Mixed",
+            ] as const
+          ).map((type) => (
               <button
                 key={type}
                 type="button"

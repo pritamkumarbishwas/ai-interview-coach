@@ -14,9 +14,9 @@ import { InterviewFeed } from "@/components/interview/interview-feed";
 import { InterviewProgress } from "@/components/interview/interview-progress";
 import { LiveScore } from "@/components/interview/live-score";
 import { Modal } from "@/components/ui/modal";
+import { useAuth } from "@/hooks/use-auth";
 import {
   MOCK_CONVERSATION,
-  MOCK_CURRENT_QUESTION,
   MOCK_EVALUATION,
   MOCK_FEEDBACK,
   MOCK_FOLLOW_UP_EVALUATIONS,
@@ -24,7 +24,6 @@ import {
   MOCK_QUESTIONS,
   MOCK_SCORES,
   MOCK_SESSION_META,
-  MOCK_USER,
   type ChatMessage,
   type FeedbackItem,
   type MockEvaluation,
@@ -37,16 +36,25 @@ function formatTime(totalSeconds: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+const TOTAL_QUESTIONS = MOCK_QUESTIONS.length;
+
+const INITIAL_QUESTION_INDEX = Math.min(
+  Math.max(MOCK_SESSION_META.questionNumber - 1, 0),
+  TOTAL_QUESTIONS - 1,
+);
+
 export default function InterviewWorkspacePage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  const { user } = useAuth();
   const timers = useRef<number[]>([]);
 
   const [elapsed, setElapsed] = useState(MOCK_SESSION_META.startElapsedSeconds);
-  const [questionNumber, setQuestionNumber] = useState(
-    MOCK_SESSION_META.questionNumber,
+  const [questionIndex, setQuestionIndex] = useState(INITIAL_QUESTION_INDEX);
+  const [question, setQuestion] = useState(
+    MOCK_QUESTIONS[INITIAL_QUESTION_INDEX],
   );
-  const [question, setQuestion] = useState(MOCK_CURRENT_QUESTION);
+  const questionNumber = questionIndex + 1;
   const [messages, setMessages] = useState<ChatMessage[]>(MOCK_CONVERSATION);
   const [evaluation, setEvaluation] = useState<MockEvaluation | null>(
     MOCK_EVALUATION,
@@ -60,8 +68,8 @@ export default function InterviewWorkspacePage() {
   const [muted, setMuted] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
 
-  const totalQuestions = MOCK_SESSION_META.totalQuestions;
-  const isLastQuestion = questionNumber >= totalQuestions;
+  const totalQuestions = TOTAL_QUESTIONS;
+  const isLastQuestion = questionIndex >= TOTAL_QUESTIONS - 1;
   const followUpIndex = useRef(0);
 
   useEffect(() => {
@@ -119,9 +127,9 @@ export default function InterviewWorkspacePage() {
       router.push(`/interviews/${params.id}/result`);
       return;
     }
-    const nextNumber = questionNumber + 1;
-    const nextQuestion = MOCK_QUESTIONS[nextNumber - MOCK_SESSION_META.questionNumber];
-    setQuestionNumber(nextNumber);
+    const nextIndex = questionIndex + 1;
+    const nextQuestion = MOCK_QUESTIONS[nextIndex];
+    setQuestionIndex(nextIndex);
     setQuestion(nextQuestion);
     setEvaluation(null);
     setEvalState("idle");
@@ -184,7 +192,7 @@ export default function InterviewWorkspacePage() {
       </header>
 
       <section className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <CandidateVideo candidateName={MOCK_USER.name} />
+        <CandidateVideo candidateName={user?.name ?? "Candidate"} />
         <AIInterviewer
           status={aiStatus}
           question={question}

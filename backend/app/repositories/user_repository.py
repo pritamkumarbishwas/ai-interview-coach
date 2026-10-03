@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from bson import ObjectId
 from bson.errors import InvalidId
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -53,6 +55,16 @@ class UserRepository:
         except (InvalidId, TypeError):
             return
         await db.users.update_one({"_id": object_id}, {"$set": {"password_hash": new_hash}})
+
+    async def update_profile(self, db: AsyncIOMotorDatabase, user_id: str, *, name: str) -> None:
+        try:
+            object_id = ObjectId(user_id)
+        except (InvalidId, TypeError):
+            return
+        await db.users.update_one(
+            {"_id": object_id},
+            {"$set": {"name": name.strip(), "updated_at": datetime.now(UTC)}},
+        )
 
 
 user_repository = UserRepository()

@@ -19,10 +19,10 @@ import { StatCard } from "@/components/ui/stat-card";
 import {
   MOCK_INTERVIEWS,
   MOCK_STATS,
-  MOCK_USER,
   type InterviewTypeLabel,
 } from "@/data/mock";
-import { cx } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
+import { cx, greeting } from "@/lib/utils";
 
 const TYPE_TONES: Record<InterviewTypeLabel, BadgeTone> = {
   Technical: "ai",
@@ -51,14 +51,18 @@ const ONBOARDING_STEPS = [
 ];
 
 export default function DashboardPage() {
-  const name = MOCK_USER.name.split(" ")[0];
+  const { user } = useAuth();
+  const name = (user?.name ?? "").split(" ")[0];
   const recent = MOCK_INTERVIEWS.slice(0, 4);
 
   return (
     <div className="space-y-6">
       <section className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm text-ink-2">Good afternoon, {name} 👋</p>
+          <p className="text-sm text-ink-2">
+            {greeting()}
+            {name ? `, ${name}` : ""} 👋
+          </p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-ink lg:text-[28px]">
             Ready for your next interview?
           </h1>
