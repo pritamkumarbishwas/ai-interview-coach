@@ -302,7 +302,7 @@ cd backend
 - LLM calls are mocked; no real LLM API calls are made during test runs.
 - Lint: `ruff check .` and `ruff format --check .` (config in `backend/ruff.toml`).
 
-Current suite: **42 tests** — registration (success/validation/duplicate/case-normalisation), login (success/failure/throttled), `GET`/`PATCH /me`, resume upload (validation, happy path, LLM-down, cross-user isolation), list/404s, job-description create/list/get/delete (LLM mocked) plus save-while-LLM-is-down, health check, and `LLMService` configuration plus retry policy (transient failures retried, client errors not).
+Current suite: **48 tests** — registration (success/validation/duplicate/case-normalisation), login (success/failure/throttled), `GET`/`PATCH /me`, resume upload (validation, happy path, LLM-down, cross-user isolation), list/404s, job-description create/list/get/delete (LLM mocked) plus save-while-LLM-is-down, health check, `LLMService` configuration plus retry policy (transient failures retried, client errors not), and settings validation (CORS formats, LLM provider, production guards).
 
 ## Frontend Checks
 
