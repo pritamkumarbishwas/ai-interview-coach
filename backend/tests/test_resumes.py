@@ -173,6 +173,7 @@ def test_delete_resume_of_another_user_is_404(
     assert client.delete(f"/api/resumes/{resume_id}", headers=other).status_code == 404
     # The owner's copy is untouched.
     assert client.get(f"/api/resumes/{resume_id}", headers=auth_headers).status_code == 200
+    assert client.delete(f"/api/resumes/{resume_id}", headers=auth_headers).status_code == 204
 
 
 def test_list_resumes_returns_summaries(client: TestClient, auth_headers: dict) -> None:

@@ -4,7 +4,7 @@ An AI-powered platform where a candidate uploads their resume and a job descript
 
 > **Status: Phase 1 backend + redesigned frontend complete.** The backend delivers auth (JWT), resume upload/parsing, job-description management, health/rate limiting, and a pytest suite. The frontend is a full Next.js + TypeScript + Tailwind CSS product UI with a warm-orange design system. Login/register, profile, `/resumes`, and `/job-descriptions` are wired to the live backend; the interview flow (workspace, results, report) is still driven by **mock data** (`frontend/data/mock.ts`) until interview endpoints land.
 >
-> **Data-layer note:** the backend uses **MongoDB (Motor)** — connection settings live in `backend/.env` (`MONGO_URI`, `MONGO_DB_NAME`). Indexes are created automatically on startup; the leftover `migrations/` and `alembic.ini` under `backend/` are legacy and unused.
+> **Data-layer note:** the backend uses **MongoDB (Motor)** — connection settings live in `backend/.env` (`MONGO_URI`, `MONGO_DB_NAME`). Indexes are created automatically on startup; there are no migration files to run.
 
 ---
 
@@ -36,10 +36,10 @@ Design rules:
 - User registration with password hashing (Argon2)
 - Login returning a JWT access token; `PATCH /api/auth/me` updates your profile
 - Protected `GET /api/auth/me` via `Authorization: Bearer` header
-- Resume upload (PDF/DOCX, magic-byte checked, size limited), listing, download and delete
+- Resume upload (PDF/DOCX, magic-byte checked, size limited), listing and delete
 - Job-description create/list/get/delete with a stored summary snippet
-- In-memory rate limiting on `/register` and `/login`
-- Structured JSON error responses with proper HTTP status codes (401/404/409/413/422/500)
+- In-memory rate limiting on `/register`, `/login` and the AI-backed endpoints
+- Structured JSON error responses (`detail` + `code`) with proper HTTP status codes (400/401/403/404/409/413/422/429/500/503)
 - Request validation with Pydantic v2
 - Configurable settings from environment variables
 - Health check that reports database degradation as `503`
@@ -76,18 +76,15 @@ ai-interview-coach/
 │   │   ├── core/                   # config, security, database, logging, exceptions, rate_limit
 │   │   ├── models/                 # Pydantic domain models
 │   │   ├── schemas/                # Pydantic request/response models
-│   │   ├── services/               # business logic (auth, LLM, resume, JD)
+│   │   ├── services/               # business logic + document parsers (auth, LLM, resume, JD)
 │   │   ├── repositories/           # DB queries
-│   │   ├── prompts/                # prompt templates (later phases)
-│   │   └── utils/                  # document parsers (pdf/docx/text)
-│   ├── migrations/                 # legacy Alembic files (unused)
+│   │   ├── prompts/                # LLM prompt templates
 │   ├── data/resumes/               # uploaded files (private, gitignored)
 │   ├── tests/                      # pytest suite
 │   ├── requirements.txt
 │   ├── requirements-dev.txt
 │   ├── ruff.toml
 │   ├── Dockerfile
-│   └── alembic.ini                 # legacy (unused)
 ├── frontend/                       # Next.js app (see "Running Frontend")
 ├── data/knowledge_base/            # RAG knowledge sources (later phases)
 ├── docker-compose.yml
@@ -111,10 +108,12 @@ Copy `.env.example` to `.env` (repo root, used by docker compose) and to `backen
 | `MONGO_DB_NAME` | Database name | `ai_interview_coach` |
 | `STORAGE_DIR` | Resume storage directory | `data/resumes` |
 | `MAX_UPLOAD_BYTES` | Upload size limit (413 above) | `5242880` |
+| `MAX_BODY_BYTES` | Refuse whole request bodies above this size (413) | `10485760` |
 | `JWT_SECRET` | Signing secret (**required in production**) | dev-only value |
 | `JWT_ALGORITHM` | JWT algorithm | `HS256` |
 | `JWT_EXPIRES_MINUTES` | Token lifetime | `1440` |
-| `RATE_LIMIT_ATTEMPTS` / `RATE_LIMIT_WINDOW_SECONDS` | Login/register throttle | `20` / `60` |
+| `RATE_LIMIT_ATTEMPTS` / `RATE_LIMIT_WINDOW_SECONDS` | Throttle on auth and AI-backed endpoints | `20` / `60` |
+| `TRUST_PROXY_HEADERS` | Trust `X-Forwarded-For` for rate limiting (only behind your own proxy) | `false` |
 | `LLM_PROVIDER` | `openai` or `groq` | `groq` |
 | `GROQ_API_KEY` / `OPENAI_API_KEY` | Provider credentials | — |
 | `GROQ_MODEL` / `OPENAI_MODEL` | Model names | `openai/gpt-oss-20b` / `gpt-4o` |
@@ -303,7 +302,7 @@ cd backend
 - LLM calls are mocked; no real LLM API calls are made during test runs.
 - Lint: `ruff check .` and `ruff format --check .` (config in `backend/ruff.toml`).
 
-Current suite: **32 tests** — registration (success/validation/duplicate/case-normalisation), login (success/failure/throttled), `GET`/`PATCH /me`, resume upload validation/list/404s, job-description create/list/get/delete (LLM mocked) plus save-while-LLM-is-down, health check, and `LLMService` configuration/retry behaviour.
+Current suite: **39 tests** — registration (success/validation/duplicate/case-normalisation), login (success/failure), `GET`/`PATCH /me`, resume upload (validation, happy path, LLM-down, cross-user isolation), list/404s, job-description create/list/get/delete (LLM mocked) plus save-while-LLM-is-down, health check, and `LLMService` configuration/retry behaviour.
 
 ## Frontend Checks
 
@@ -325,3 +324,6 @@ No ESLint/Prettier is configured yet.
 - Uploads validated for extension, magic bytes, and size; stored outside the web root and never served publicly
 - CORS restricted to configured origins; security headers set in `next.config.ts`
 - Auth failures are surfaced as real 401s; an expired token clears storage and redirects to `/login`
+- Untrusted document text is wrapped in tags and capped at 20k chars before it reaches the model (prompt-injection and cost control)
+- Bodies above `MAX_BODY_BYTES` are refused before being read; `/api/docs` is disabled when `ENVIRONMENT=production`
+- `.env` files are gitignored; only `.env.example` is committed - real keys never belong in the repository
