@@ -1,23 +1,16 @@
+import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_JWT_SECRET = "dev-only-secret-change-me"
 SUPPORTED_LLM_PROVIDERS = ("openai", "groq")
 
 # <repo>/backend — the directory that owns the `app` package.
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-
-
-def resolve_storage_dir(raw: str | None = None) -> Path:
-    """Return an absolute directory for uploaded files (created on demand)."""
-    value = (raw or "").strip()
-    path = Path(value).expanduser() if value else BACKEND_ROOT / "data" / "resumes"
-    if not path.is_absolute():
-        path = BACKEND_ROOT / path
-    return path.resolve()
 
 
 class Settings(BaseSettings):
@@ -37,10 +30,8 @@ class Settings(BaseSettings):
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db_name: str = "ai_interview_coach"
 
-    # Absolute or relative path used to store uploaded resume files.
-    # Relative paths are resolved against the backend package root, so the
-    # default works both locally (<repo>/backend/data/resumes) and inside the
-    # container (/app/data/resumes).
+    # Where uploaded resume files are stored (absolute, or relative to the
+    # backend package root - see `resolve_storage_dir`).
     storage_dir: str = "data/resumes"
     max_upload_bytes: int = 5 * 1024 * 1024
     # Rejected before the body is read, so a huge upload cannot exhaust memory.
@@ -50,7 +41,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60 * 24
 
-    # Login/register throttling (per client IP, per process).
+    # Per-client-IP throttling (auth and AI-backed endpoints), per process.
     rate_limit_attempts: int = 20
     rate_limit_window_seconds: int = 60
 
@@ -59,7 +50,9 @@ class Settings(BaseSettings):
     # let clients pick their own rate-limit key.
     trust_proxy_headers: bool = False
 
-    cors_origins: list[str] = ["http://localhost:3000"]
+    # Comma-separated list (`http://a,http://b`) or JSON array - both forms
+    # are used in the shipped .env files, so parsing is left to the validator.
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
     llm_provider: str = "openai"
     openai_api_key: str | None = None
@@ -82,10 +75,19 @@ class Settings(BaseSettings):
 
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def _split_cors_origins(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",") if origin.strip()]
-        return value
+    def _parse_cors_origins(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError("CORS_ORIGINS is not a valid JSON array") from exc
+            if not isinstance(parsed, list):
+                raise ValueError("CORS_ORIGINS must be a list of origins")
+            return parsed
+        return [origin.strip() for origin in text.split(",") if origin.strip()]
 
     @model_validator(mode="after")
     def _check_production_secrets(self) -> "Settings":
@@ -111,3 +113,17 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def resolve_storage_dir() -> Path:
+    """Return the absolute directory for uploaded files (created on demand).
+
+    Relative values (the default `data/resumes`) resolve against the backend
+    package root, so they work both locally (<repo>/backend/data/resumes) and
+    inside the container (/app/data/resumes).
+    """
+    value = settings.storage_dir.strip()
+    path = Path(value).expanduser() if value else BACKEND_ROOT / "data" / "resumes"
+    if not path.is_absolute():
+        path = BACKEND_ROOT / path
+    return path.resolve()

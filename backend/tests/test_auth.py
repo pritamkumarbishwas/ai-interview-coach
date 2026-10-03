@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import delete_user, make_user
@@ -167,3 +168,24 @@ def test_unknown_route_uses_the_error_envelope(client: TestClient) -> None:
     response = client.get("/api/does-not-exist")
     assert response.status_code == 404
     assert response.json() == {"detail": "Not Found", "code": "not_found"}
+
+
+def test_login_is_rate_limited(
+    client: TestClient, registered_user: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Throttling is off for the suite; switch it on for this test only."""
+    from app.core import rate_limit as rate_limit_module
+
+    monkeypatch.setattr(rate_limit_module.settings, "environment", "development")
+    monkeypatch.setattr(rate_limit_module._limiter, "max_hits", 3)
+    try:
+        payload = {"email": registered_user["email"], "password": "wrong-password"}
+        responses = [client.post("/api/auth/login", json=payload) for _ in range(4)]
+    finally:
+        rate_limit_module._limiter._hits.clear()
+
+    assert [response.status_code for response in responses[:3]] == [401, 401, 401]
+    throttled = responses[3]
+    assert throttled.status_code == 429
+    assert throttled.json()["code"] == "rate_limited"
+    assert int(throttled.headers["Retry-After"]) >= 1

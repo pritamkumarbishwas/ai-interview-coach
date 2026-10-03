@@ -10,7 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 
 def to_object_id(value: str | None) -> ObjectId | None:
-    """Parse an id coming from the URL, or `None` when it is not a valid id."""
+    """Parse a string id, or return `None` when it is not a valid ObjectId."""
     try:
         return ObjectId(value)
     except (InvalidId, TypeError):
@@ -18,7 +18,7 @@ def to_object_id(value: str | None) -> ObjectId | None:
 
 
 def stringify_id(doc: dict) -> dict:
-    """Return a copy of `doc` with `_id` exposed as a string (the model alias)."""
+    """Expose `_id` as a string (the alias the models use) and return `doc`."""
     doc["_id"] = str(doc["_id"])
     return doc
 
