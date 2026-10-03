@@ -126,6 +126,17 @@ class LLMService:
                     temperature=0,
                 )
                 raw_json = response.choices[0].message.content or ""
+                
+                # Strip markdown code blocks if the LLM includes them
+                raw_json = raw_json.strip()
+                if raw_json.startswith("```json"):
+                    raw_json = raw_json[7:]
+                elif raw_json.startswith("```"):
+                    raw_json = raw_json[3:]
+                if raw_json.endswith("```"):
+                    raw_json = raw_json[:-3]
+                raw_json = raw_json.strip()
+                
                 logger.debug("Raw LLM response: %s", raw_json)
                 return schema.model_validate_json(raw_json)
             except LLMConfigurationError:

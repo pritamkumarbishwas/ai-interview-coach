@@ -41,10 +41,10 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         await db.job_descriptions.create_index(
             [("user_id", 1), ("created_at", -1)], name="ix_jd_user_created"
         )
-    except Exception:
-        # Most likely duplicate e-mails from before the unique index existed.
-        # Do not block startup, but make the problem impossible to miss.
-        logger.exception("Could not create MongoDB indexes")
+    except Exception as exc:
+        # If this fails, the application cannot safely enforce uniqueness constraints.
+        logger.critical("Could not create MongoDB indexes: %s", exc)
+        raise RuntimeError("Database index creation failed") from exc
     _indexes_ready = True
 
 

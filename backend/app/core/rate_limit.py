@@ -50,6 +50,10 @@ class SlidingWindowRateLimiter:
             return
         for key in [k for k, v in self._hits.items() if not v or v[-1] <= cutoff]:
             self._hits.pop(key, None)
+            
+        # Hard cap to prevent memory exhaustion from distributed attacks
+        if len(self._hits) > 20_000:
+            self._hits.clear()
 
 
 _limiter = SlidingWindowRateLimiter(

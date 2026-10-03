@@ -18,6 +18,9 @@ from app.schemas.user import UserOut, UserUpdate
 logger = logging.getLogger(__name__)
 
 
+_DUMMY_HASH = hash_password("dummy_password")
+
+
 class AuthService:
     def __init__(self, users: UserRepository) -> None:
         self._users = users
@@ -38,8 +41,15 @@ class AuthService:
 
     async def login(self, db: AsyncIOMotorDatabase, payload: LoginRequest) -> TokenResponse:
         user = await self._users.get_by_email(db, payload.email)
-        if user is None or not verify_password(payload.password, user.password_hash):
-            logger.warning("Failed login attempt for email=%s", payload.email)
+        
+        # Prevent user enumeration timing attack by ensuring constant-time validation
+        if user is None:
+            verify_password(payload.password, _DUMMY_HASH)
+            logger.warning("Failed login attempt for email=%s (user not found)", payload.email)
+            raise AuthenticationError("Invalid email or password")
+            
+        if not verify_password(payload.password, user.password_hash):
+            logger.warning("Failed login attempt for email=%s (wrong password)", payload.email)
             raise AuthenticationError("Invalid email or password")
 
         if needs_rehash(user.password_hash):
