@@ -34,6 +34,7 @@ from app.schemas.interview import (
 )
 from app.schemas.report import ReportGeneration, ReportOut
 from app.services.llm_service import llm_service
+from app.services.rag_service import rag_service
 
 logger = logging.getLogger(__name__)
 
@@ -502,6 +503,7 @@ class InterviewService:
             difficulty=interview.difficulty,
             resume_context=resume_context,
             jd_context=jd_context,
+            knowledge=await self._knowledge_block(interview, previous.topic),
             previous_question=previous.text,
             candidate_answer=answer_text,
             feedback=evaluation.feedback,
@@ -524,9 +526,35 @@ class InterviewService:
             difficulty=interview.difficulty,
             resume_context=resume_context,
             jd_context=jd_context,
+            knowledge=await self._knowledge_block(interview, topic=""),
             asked="\n".join(f"- {text}" for text in asked) or "(none yet)",
         )
         return await self._ask_for_question(interview, prompt)
+
+    async def _knowledge_block(self, interview: Interview, topic: str) -> str:
+        """Retrieved knowledge chunks for a question prompt.
+
+        RAG must never break question generation: a disabled flag, an empty
+        store, or an unreachable Qdrant all degrade to a placeholder block.
+        """
+        if not rag_service.enabled:
+            return "(knowledge base disabled)"
+        try:
+            chunks = await rag_service.retrieve_context(
+                role=interview.role,
+                topic=topic,
+                interview_type=interview.type,
+            )
+        except Exception as exc:
+            logger.warning(
+                "RAG retrieval failed, continuing without knowledge: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
+            return "(knowledge base unavailable)"
+        if not chunks:
+            return "(no matching knowledge found)"
+        return "\n".join(f"- [{chunk.topic}] {chunk.text[:600]}" for chunk in chunks)
 
     async def _load_context(
         self, db: AsyncIOMotorDatabase, interview: Interview

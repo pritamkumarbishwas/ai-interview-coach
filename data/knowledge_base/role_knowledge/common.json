@@ -1,0 +1,34 @@
+{
+  "chunks": [
+    {
+      "text": "STAR (Situation, Task, Action, Result) is the standard frame for behavioral answers. Situation and Task take one or two sentences; Action uses 'I' and covers the bulk of the answer; Result ends with a measurable outcome plus a lesson. Follow-ups like 'what would you do differently?' test whether the story is real.",
+      "topic": "behavioral",
+      "roles": ["*"],
+      "collection": "behavioral_questions"
+    },
+    {
+      "text": "When an interviewer probes a claimed skill, a strong candidate explains what happens under the hood (request path, query plan, deploy pipeline), names the constraint first, offers an alternative and why it lost, and includes a concrete failure mode. 'How would you know it worked?' should naturally lead to metrics and tests.",
+      "topic": "technical probing",
+      "roles": ["*"],
+      "collection": "interview_questions"
+    },
+    {
+      "text": "Backend reliability basics interviewers expect: timeouts on every outbound call, retries with jittered backoff and a limited budget, circuit breakers around flaky dependencies, idempotency keys on retried writes, and graceful degradation that serves a stale-but-valid response instead of failing outright.",
+      "topic": "reliability",
+      "roles": ["backend", "devops"],
+      "collection": "technical_concepts"
+    },
+    {
+      "text": "System-design interviews open with back-of-envelope estimation: QPS from DAUs, storage from retention, bandwidth from payload size, and a latency budget per hop. Writing the numbers down and revisiting them when the design changes is itself a scored behavior.",
+      "topic": "system design",
+      "roles": ["backend", "devops", "full-stack"],
+      "collection": "system_design"
+    },
+    {
+      "text": "Candidates for any role should close by asking how changes ship (CI/CD, review, rollback), what the current bottleneck is, how the team measures success, and what on-call looks like — questions that signal ownership and evaluate the employer in return.",
+      "topic": "role expectations",
+      "roles": ["*"],
+      "collection": "role_knowledge"
+    }
+  ]
+}

@@ -5,8 +5,14 @@ os.environ.setdefault("MONGO_DB_NAME", "test_ai_interview_coach")
 os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-production")
 os.environ.setdefault("JWT_EXPIRES_MINUTES", "60")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
+# Tests always use an embedded in-process Qdrant — never a server (and the
+# backend/.env value may point at a cloud instance). Forced, not setdefault.
+os.environ["QDRANT_URL"] = ":memory:"
 
 import asyncio
+import math
+import re
+import zlib
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from uuid import uuid4
@@ -70,6 +76,29 @@ def database() -> Iterator[None]:
     _drop_test_database()
     yield
     _drop_test_database()
+
+
+@pytest.fixture(autouse=True)
+def fake_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the real embedding model with a deterministic bag-of-words fake.
+
+    fastembed downloads a ~90MB ONNX model on first use — tests must never
+    trigger that. Tokens are hashed into fixed buckets with crc32 (stable
+    across processes, unlike hash()), then L2-normalized so cosine ranking
+    still reflects token overlap.
+    """
+
+    def embed_texts(texts: list[str]) -> list[list[float]]:
+        vectors: list[list[float]] = []
+        for text in texts:
+            buckets = [0.0] * 32
+            for token in re.findall(r"[a-z0-9]+", text.lower()):
+                buckets[zlib.crc32(token.encode()) % 32] += 1.0
+            norm = math.sqrt(sum(value * value for value in buckets)) or 1.0
+            vectors.append([value / norm for value in buckets])
+        return vectors
+
+    monkeypatch.setattr("app.services.embedding_service.embedding_service.embed_texts", embed_texts)
 
 
 @pytest.fixture()

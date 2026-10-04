@@ -60,6 +60,23 @@ class Settings(BaseSettings):
     groq_api_key: str | None = None
     groq_model: str = "llama3-8b-8192"
 
+    # RAG: Qdrant vector store + local fastembed embeddings.
+    # Switch off to compare question quality with and without retrieved context.
+    rag_enabled: bool = True
+    # http(s) URL talks to a Qdrant server (Docker container or Qdrant Cloud,
+    # with QDRANT_API_KEY); any other value is passed to qdrant-client as an
+    # embedded location — ":memory:" for tests or a directory for a
+    # persistent local store without Docker.
+    qdrant_url: str = "http://localhost:6333"
+    qdrant_api_key: str | None = None
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    embedding_cache_dir: str = "data/models"
+    # How many knowledge chunks each retrieval returns (spec: top 3-5).
+    rag_top_k: int = Field(default=5, ge=3, le=5)
+    # Markdown/JSON knowledge base ingested by scripts/ingest_knowledge_base.py.
+    # Relative paths resolve against the backend package root.
+    knowledge_base_dir: str = "../data/knowledge_base"
+
     @field_validator("llm_provider", mode="before")
     @classmethod
     def _validate_llm_provider(cls, value: object) -> object:
@@ -124,6 +141,29 @@ def resolve_storage_dir() -> Path:
     """
     value = settings.storage_dir.strip()
     path = Path(value).expanduser() if value else BACKEND_ROOT / "data" / "resumes"
+    if not path.is_absolute():
+        path = BACKEND_ROOT / path
+    return path.resolve()
+
+
+def resolve_embedding_cache_dir() -> Path:
+    """Where the fastembed ONNX model is downloaded (gitignored under backend/data)."""
+    value = settings.embedding_cache_dir.strip()
+    path = Path(value).expanduser() if value else BACKEND_ROOT / "data" / "models"
+    if not path.is_absolute():
+        path = BACKEND_ROOT / path
+    return path.resolve()
+
+
+def resolve_knowledge_base_dir() -> Path:
+    """The knowledge base ingested by scripts/ingest_knowledge_base.py.
+
+    Defaults to <repo>/data/knowledge_base (relative ../data/knowledge_base)
+    but accepts an absolute path — docker-compose mounts the repo data
+    directory at /knowledge_base and points KNOWLEDGE_BASE_DIR there.
+    """
+    value = settings.knowledge_base_dir.strip()
+    path = Path(value).expanduser() if value else BACKEND_ROOT.parent / "data" / "knowledge_base"
     if not path.is_absolute():
         path = BACKEND_ROOT / path
     return path.resolve()
