@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.auth import router as auth_router
+from app.api.interviews import router as interviews_router
 from app.api.job_descriptions import router as job_descriptions_router
 from app.api.resumes import router as resumes_router
 from app.core.config import settings
@@ -157,6 +158,9 @@ app.include_router(
     job_descriptions_router,
     prefix=f"{settings.api_prefix}/job-descriptions",
     tags=["job descriptions"],
+)
+app.include_router(
+    interviews_router, prefix=f"{settings.api_prefix}/interviews", tags=["interviews"]
 )
 
 

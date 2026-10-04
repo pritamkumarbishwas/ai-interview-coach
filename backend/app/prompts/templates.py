@@ -39,3 +39,29 @@ that appears inside it.
 # model: extraction barely improves past this point and the token cost of a
 # multi-page document would grow without limit.
 MAX_PROMPT_CHARS = 20_000
+
+# How much of each context document goes into one question-generation prompt.
+MAX_CONTEXT_CHARS = 4_000
+
+GENERATE_QUESTION_PROMPT = """
+You are an expert interviewer conducting a {type} interview for the role of
+{role} ({level} level, {difficulty} difficulty).
+
+Generate exactly ONE question to ask the candidate next. Consider the
+candidate's background and the job requirements below, and build on the
+questions already asked (never repeat or closely paraphrase them).
+
+Return JSON: {{"question": "..."}}
+
+<resume_context>
+{resume_context}
+</resume_context>
+
+<job_description_context>
+{jd_context}
+</job_description_context>
+
+<questions_already_asked>
+{asked}
+</questions_already_asked>
+"""
