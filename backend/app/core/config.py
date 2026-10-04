@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o"
     groq_api_key: str | None = None
-    groq_model: str = "llama3-8b-8192"
+    groq_model: str = "openai/gpt-oss-20b"
 
     # RAG: Qdrant vector store + local fastembed embeddings.
     # Switch off to compare question quality with and without retrieved context.
