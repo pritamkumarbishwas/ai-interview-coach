@@ -65,6 +65,7 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 export function Input({ invalid, className, ...props }: InputProps) {
   return (
     <input
+      suppressHydrationWarning
       className={cx(
         inputClasses,
         invalid && "border-danger focus:border-danger focus:ring-[#fdf0f0]",
@@ -80,6 +81,7 @@ export function PasswordInput({ invalid, className, ...props }: InputProps) {
   return (
     <div className="relative">
       <input
+        suppressHydrationWarning
         type={visible ? "text" : "password"}
         className={cx(
           inputClasses,
@@ -118,6 +120,7 @@ export function Textarea({
 }: TextareaProps) {
   return (
     <textarea
+      suppressHydrationWarning
       ref={ref}
       className={cx(
         inputClasses,
