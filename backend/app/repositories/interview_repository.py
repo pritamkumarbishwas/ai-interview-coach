@@ -16,6 +16,7 @@ LIST_PROJECTION = {
     "type": 1,
     "difficulty": 1,
     "status": 1,
+    "proctoring_mode": 1,
     "target_questions": 1,
     "created_at": 1,
     "questions.id": 1,
@@ -29,6 +30,7 @@ DASHBOARD_PROJECTION = {
     "type": 1,
     "difficulty": 1,
     "status": 1,
+    "proctoring_mode": 1,
     "target_questions": 1,
     "created_at": 1,
     "answers.id": 1,
@@ -193,6 +195,17 @@ class InterviewRepository:
                 "report": None,
             },
             {"$set": {"report": report.model_dump()}},
+            return_document=ReturnDocument.AFTER,
+        )
+    async def update_proctoring_session(
+        self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str, session: dict
+    ) -> dict | None:
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return None
+        doc = await db[self.collection_name].find_one_and_update(
+            {"_id": object_id, "user_id": user_id},
+            {"$set": {"proctoring_session": session}},
             return_document=ReturnDocument.AFTER,
         )
         return self._shape(doc) if doc else None

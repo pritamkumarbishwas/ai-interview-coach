@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.models.answer import Answer
-from app.models.interview import Difficulty, InterviewStatus, InterviewType, Level
+from app.models.interview import Difficulty, InterviewStatus, InterviewType, Level, ProctoringMode, ProctoringSession
 
 DEFAULT_TARGET_QUESTIONS = 5
 
@@ -15,6 +15,7 @@ class InterviewCreate(BaseModel):
     level: Level = "mid"
     type: InterviewType = "technical"
     difficulty: Difficulty = "intermediate"
+    proctoring_mode: ProctoringMode = "strict"
     target_questions: int = Field(default=DEFAULT_TARGET_QUESTIONS, ge=1, le=20)
 
 
@@ -33,6 +34,7 @@ class InterviewSummary(BaseModel):
     type: InterviewType
     difficulty: Difficulty
     status: InterviewStatus
+    proctoring_mode: ProctoringMode = "strict"
     question_count: int = 0
     answered_count: int = 0
     target_questions: int = DEFAULT_TARGET_QUESTIONS
@@ -48,6 +50,8 @@ class InterviewOut(BaseModel):
     type: InterviewType
     difficulty: Difficulty
     status: InterviewStatus
+    proctoring_mode: ProctoringMode = "strict"
+    proctoring_session: ProctoringSession | None = None
     target_questions: int = DEFAULT_TARGET_QUESTIONS
     questions: list[QuestionOut] = []
     answers: list[Answer] = []
@@ -55,6 +59,15 @@ class InterviewOut(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+
+class ProctoringConsent(BaseModel):
+    consent: bool
+
+
+class ProctoringEventCreate(BaseModel):
+    type: str
+    details: dict = {}
 
 
 class CurrentQuestionOut(BaseModel):

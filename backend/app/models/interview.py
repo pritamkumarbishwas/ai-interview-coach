@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -10,6 +11,8 @@ InterviewType = Literal["technical", "behavioral", "hr", "mixed", "system_design
 Difficulty = Literal["beginner", "intermediate", "advanced"]
 Level = Literal["junior", "mid", "senior"]
 InterviewStatus = Literal["created", "in_progress", "completed"]
+ProctoringMode = Literal["off", "camera_only", "strict"]
+ProctoringStatus = Literal["pending", "active", "paused", "completed", "failed"]
 
 # The interview state machine: `start` runs `created -> in_progress`, and
 # answering the final question runs `in_progress -> completed`.
@@ -18,7 +21,6 @@ STATUS_TRANSITIONS: dict[str, set[str]] = {
     "in_progress": {"completed"},
     "completed": set(),
 }
-
 
 def can_transition(current: str, target: str) -> bool:
     return target in STATUS_TRANSITIONS.get(current, set())
@@ -34,6 +36,21 @@ class Question(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class ProctoringEvent(BaseModel):
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    type: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    details: dict = Field(default_factory=dict)
+
+
+class ProctoringSession(BaseModel):
+    consent_given_at: datetime | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    status: ProctoringStatus = "pending"
+    events: list[ProctoringEvent] = Field(default_factory=list)
+
+
 class Interview(BaseModel):
     id: str | None = Field(default=None, alias="_id")
     user_id: str
@@ -44,6 +61,8 @@ class Interview(BaseModel):
     type: InterviewType = "technical"
     difficulty: Difficulty = "intermediate"
     status: InterviewStatus = "created"
+    proctoring_mode: ProctoringMode = "strict"
+    proctoring_session: ProctoringSession | None = None
     # The interview completes automatically once this many answers are scored.
     target_questions: int = 5
     questions: list[Question] = Field(default_factory=list)

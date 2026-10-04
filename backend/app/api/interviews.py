@@ -10,6 +10,7 @@ from app.schemas.interview import (
     InterviewCreate,
     InterviewOut,
     InterviewSummary,
+    ProctoringConsent,
 )
 from app.schemas.report import ReportOut
 from app.services.interview_service import InterviewService
@@ -57,6 +58,17 @@ async def start_interview(
 ) -> CurrentQuestionOut:
     """Transition `created -> in_progress` and generate the first question."""
     return await service.start(db, current_user.id, interview_id)
+
+
+@router.post("/{interview_id}/proctoring/consent", status_code=status.HTTP_204_NO_CONTENT)
+async def proctoring_consent(
+    interview_id: str,
+    payload: ProctoringConsent,
+    current_user: User = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: InterviewService = Depends(get_interview_service),
+) -> None:
+    await service.record_proctoring_consent(db, current_user.id, interview_id, payload.consent)
 
 
 @router.get("/{interview_id}/current-question", response_model=CurrentQuestionOut)

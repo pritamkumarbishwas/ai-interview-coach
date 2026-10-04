@@ -9,7 +9,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
 from app.models.answer import Answer, Evaluation
-from app.models.interview import Interview, Question, can_transition
+from app.models.interview import Interview, ProctoringSession, Question, can_transition
 from app.models.report import Report
 from app.prompts.templates import (
     EVALUATE_ANSWER_PROMPT,
@@ -70,6 +70,8 @@ def _interview_out(interview: Interview) -> InterviewOut:
         type=interview.type,
         difficulty=interview.difficulty,
         status=interview.status,
+        proctoring_mode=interview.proctoring_mode,
+        proctoring_session=interview.proctoring_session,
         target_questions=interview.target_questions,
         questions=[_question_out(q) for q in interview.questions],
         answers=interview.answers,
@@ -241,6 +243,7 @@ class InterviewService:
             level=payload.level,
             type=payload.type,
             difficulty=payload.difficulty,
+            proctoring_mode=payload.proctoring_mode,
             target_questions=payload.target_questions,
         )
         interview.id = await self._interviews.insert(db, interview)
@@ -257,6 +260,7 @@ class InterviewService:
                 type=doc.get("type", "technical"),
                 difficulty=doc.get("difficulty", "intermediate"),
                 status=doc.get("status", "created"),
+                proctoring_mode=doc.get("proctoring_mode", "strict"),
                 question_count=len(doc.get("questions") or []),
                 answered_count=len(doc.get("answers") or []),
                 target_questions=doc.get("target_questions", DEFAULT_TARGET_QUESTIONS),
@@ -282,6 +286,10 @@ class InterviewService:
             raise ConflictError(
                 f"Interview is {interview.status}; only a created interview can be started."
             )
+
+        if interview.proctoring_mode != "off":
+            if not interview.proctoring_session or not interview.proctoring_session.consent_given_at:
+                raise ConflictError("Proctoring consent must be recorded before starting.")
 
         first = await self._generate_question(db, interview, asked=[])
         doc = await self._interviews.start(db, interview_id, user_id, first)
@@ -607,3 +615,21 @@ class InterviewService:
         if doc is None:
             raise NotFoundError("Interview not found")
         return Interview(**doc)
+
+    async def record_proctoring_consent(
+        self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str, consent: bool
+    ) -> None:
+        interview = await self._require(db, user_id, interview_id)
+        if interview.status != "created":
+            raise ConflictError("Can only record consent before the interview starts.")
+            
+        if not consent:
+            raise ConflictError("Proctoring consent is required to continue.")
+            
+        now = datetime.now(UTC)
+        if interview.proctoring_session is None:
+            interview.proctoring_session = ProctoringSession(consent_given_at=now)
+        else:
+            interview.proctoring_session.consent_given_at = now
+            
+        await self._interviews.update_proctoring_session(db, interview_id, user_id, interview.proctoring_session.model_dump())
