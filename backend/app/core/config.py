@@ -32,28 +32,17 @@ class Settings(BaseSettings):
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db_name: str = "ai_interview_coach"
 
-    # Where uploaded resume files are stored (absolute, or relative to the
-    # backend package root - see `resolve_storage_dir`).
     storage_dir: str = "data/resumes"
     max_upload_bytes: int = 5 * 1024 * 1024
-    # Rejected before the body is read, so a huge upload cannot exhaust memory.
     max_body_bytes: int = 10 * 1024 * 1024
 
     jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60 * 24
 
-    # Per-client-IP throttling (auth and AI-backed endpoints), per process.
     rate_limit_attempts: int = 20
     rate_limit_window_seconds: int = 60
-
-    # Only enable when a reverse proxy in front of the app sets (and
-    # overwrites) X-Forwarded-For. Trusting it from the open internet would
-    # let clients pick their own rate-limit key.
     trust_proxy_headers: bool = False
-
-    # Comma-separated list (`http://a,http://b`) or JSON array - both forms
-    # are used in the shipped .env files, so parsing is left to the validator.
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]
 
     llm_provider: str = "openai"
@@ -62,21 +51,12 @@ class Settings(BaseSettings):
     groq_api_key: str | None = None
     groq_model: str = "openai/gpt-oss-20b"
 
-    # RAG: Qdrant vector store + local fastembed embeddings.
-    # Switch off to compare question quality with and without retrieved context.
     rag_enabled: bool = True
-    # http(s) URL talks to a Qdrant server (Docker container or Qdrant Cloud,
-    # with QDRANT_API_KEY); any other value is passed to qdrant-client as an
-    # embedded location — ":memory:" for tests or a directory for a
-    # persistent local store without Docker.
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = None
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_cache_dir: str = "data/models"
-    # How many knowledge chunks each retrieval returns (spec: top 3-5).
     rag_top_k: int = Field(default=5, ge=3, le=5)
-    # Markdown/JSON knowledge base ingested by scripts/ingest_knowledge_base.py.
-    # Relative paths resolve against the backend package root.
     knowledge_base_dir: str = "../data/knowledge_base"
 
     @field_validator("log_format", mode="before")
@@ -147,12 +127,6 @@ settings = get_settings()
 
 
 def resolve_storage_dir() -> Path:
-    """Return the absolute directory for uploaded files (created on demand).
-
-    Relative values (the default `data/resumes`) resolve against the backend
-    package root, so they work both locally (<repo>/backend/data/resumes) and
-    inside the container (/app/data/resumes).
-    """
     value = settings.storage_dir.strip()
     path = Path(value).expanduser() if value else BACKEND_ROOT / "data" / "resumes"
     if not path.is_absolute():
@@ -161,7 +135,6 @@ def resolve_storage_dir() -> Path:
 
 
 def resolve_embedding_cache_dir() -> Path:
-    """Where the fastembed ONNX model is downloaded (gitignored under backend/data)."""
     value = settings.embedding_cache_dir.strip()
     path = Path(value).expanduser() if value else BACKEND_ROOT / "data" / "models"
     if not path.is_absolute():
@@ -170,12 +143,6 @@ def resolve_embedding_cache_dir() -> Path:
 
 
 def resolve_knowledge_base_dir() -> Path:
-    """The knowledge base ingested by scripts/ingest_knowledge_base.py.
-
-    Defaults to <repo>/data/knowledge_base (relative ../data/knowledge_base)
-    but accepts an absolute path — docker-compose mounts the repo data
-    directory at /knowledge_base and points KNOWLEDGE_BASE_DIR there.
-    """
     value = settings.knowledge_base_dir.strip()
     path = Path(value).expanduser() if value else BACKEND_ROOT.parent / "data" / "knowledge_base"
     if not path.is_absolute():
