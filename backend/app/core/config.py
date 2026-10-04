@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     debug: bool = False
     api_prefix: str = "/api"
     log_level: str = "INFO"
+    # auto -> json in production, human-readable text elsewhere.
+    log_format: str = "auto"
 
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db_name: str = "ai_interview_coach"
@@ -76,6 +78,18 @@ class Settings(BaseSettings):
     # Markdown/JSON knowledge base ingested by scripts/ingest_knowledge_base.py.
     # Relative paths resolve against the backend package root.
     knowledge_base_dir: str = "../data/knowledge_base"
+
+    @field_validator("log_format", mode="before")
+    @classmethod
+    def _validate_log_format(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        choice = value.strip().lower()
+        if choice not in ("auto", "text", "json"):
+            raise ValueError(
+                f"LOG_FORMAT={value!r} is not supported. Valid options: auto, text, json."
+            )
+        return choice
 
     @field_validator("llm_provider", mode="before")
     @classmethod

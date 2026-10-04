@@ -7,14 +7,17 @@ deployments back it with Redis or enforce the limit at the edge.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
 from threading import Lock
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, Request, Response, status
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 CleanupHook = Callable[[], None]
 
@@ -45,7 +48,11 @@ class SlidingWindowRateLimiter:
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail="Too many requests, please try again later.",
-                    headers={"Retry-After": str(time_until_reset)},
+                    headers={
+                        "Retry-After": str(time_until_reset),
+                        "X-RateLimit-Limit": str(self.max_hits),
+                        "X-RateLimit-Remaining": "0",
+                    },
                 )
 
             # Log the new request timestamp
@@ -94,11 +101,22 @@ def client_key(request: Request) -> str:
 
 
 def rate_limit(scope: str) -> Callable[[Request], None]:
-    """Dependency factory: `Depends(rate_limit("login"))`."""
+    """Dependency factory: `Depends(rate_limit("login"))`.
 
-    def dependency(request: Request) -> None:
+    Allowed requests also carry `X-RateLimit-Limit` so clients can see the
+    budget before they exhaust it; blocked ones add `Retry-After` and
+    `X-RateLimit-Remaining: 0` (set inside `check`).
+    """
+
+    def dependency(request: Request, response: Response) -> None:
         if settings.is_test:
             return
-        _limiter.check(f"{scope}:{client_key(request)}")
+        key = f"{scope}:{client_key(request)}"
+        response.headers.setdefault("X-RateLimit-Limit", str(_limiter.max_hits))
+        try:
+            _limiter.check(key)
+        except HTTPException:
+            logger.warning("Rate limit exceeded: %s", key, extra={"scope": scope})
+            raise
 
     return dependency

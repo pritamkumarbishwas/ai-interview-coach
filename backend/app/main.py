@@ -1,4 +1,6 @@
 import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -19,6 +21,7 @@ from app.core.config import settings
 from app.core.database import close_mongo, connect_to_mongo, ensure_indexes
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
+from app.core.rate_limit import client_key
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -91,14 +94,82 @@ async def reject_oversized_bodies(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """One structured line per request: id, method, path, status, duration.
+
+    The id is minted here and echoed as `X-Request-ID` so a client report can
+    be matched to the exact log line. Headers and bodies are never logged.
+    """
+    request_id = uuid.uuid4().hex
+    method = request.method
+    path = request.url.path
+    client_ip = client_key(request)
+    started = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        duration_ms = round((time.perf_counter() - started) * 1000, 1)
+        logger.warning(
+            "%s %s failed after %sms (%s)",
+            method,
+            path,
+            duration_ms,
+            type(exc).__name__,
+            extra={
+                "request_id": request_id,
+                "method": method,
+                "path": path,
+                "status_code": 500,
+                "duration_ms": duration_ms,
+                "client_ip": client_ip,
+                "exception": type(exc).__name__,
+            },
+        )
+        raise
+
+    duration_ms = round((time.perf_counter() - started) * 1000, 1)
+    response.headers["X-Request-ID"] = request_id
+    extra = {
+        "request_id": request_id,
+        "method": method,
+        "path": path,
+        "status_code": response.status_code,
+        "duration_ms": duration_ms,
+        "client_ip": client_ip,
+    }
+    if response.status_code >= 500:
+        logger.error(
+            "%s %s -> %s (%sms)",
+            method,
+            path,
+            response.status_code,
+            duration_ms,
+            extra=extra,
+        )
+    else:
+        logger.info(
+            "%s %s -> %s (%sms)",
+            method,
+            path,
+            response.status_code,
+            duration_ms,
+            extra=extra,
+        )
+    return response
+
+
 # Added last so CORS stays the outermost middleware and every response
 # (including errors from the middleware above) carries CORS headers.
+# The SPA authenticates with a Bearer header (never cookies), so credentialed
+# CORS stays off and only the methods/headers the frontend sends are allowed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 

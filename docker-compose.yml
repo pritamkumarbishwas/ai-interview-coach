@@ -32,6 +32,22 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Inlined at build time: the browser calls the API on localhost:8000.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+    container_name: aic-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
   mongo:
     image: mongo:7
     container_name: aic-mongo
@@ -56,15 +72,9 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
-  # redis:
-  #   image: redis:7-alpine
-  #   ports:
-  #     - "6379:6379"
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "ping"]
-  #     interval: 5s
-  #     timeout: 3s
-  #     retries: 10
+  # Deliberately no Redis: rate limiting is per-process in-memory (one backend
+  # instance) and there are no background jobs — slow LLM calls stay on the
+  # request path with long timeouts. See README "Operational decisions".
 
 volumes:
   mongo_data:
