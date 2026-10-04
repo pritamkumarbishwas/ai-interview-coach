@@ -30,15 +30,15 @@ class SlidingWindowRateLimiter:
         """Record a request for an IP address. Raise 429 if they exceed the limit."""
         now = time.monotonic()
         time_window_start = now - self.window_seconds
-        
+
         with self._lock:
             # Get the list of timestamps for this IP
             request_timestamps = self._hits[ip_address]
-            
+
             # Remove old timestamps that are outside our time window
             while request_timestamps and request_timestamps[0] <= time_window_start:
                 request_timestamps.popleft()
-                
+
             # Check if the IP has made too many requests
             if len(request_timestamps) >= self.max_hits:
                 time_until_reset = max(1, int(self.window_seconds - (now - request_timestamps[0])))
@@ -47,31 +47,31 @@ class SlidingWindowRateLimiter:
                     detail="Too many requests, please try again later.",
                     headers={"Retry-After": str(time_until_reset)},
                 )
-                
+
             # Log the new request timestamp
             request_timestamps.append(now)
-            
+
             # Periodically clean up old IPs to save memory
             self._cleanup_locked(time_window_start)
 
     def _cleanup_locked(self, time_window_start: float) -> None:
         """Remove IPs that haven't made requests recently to save memory."""
-        
+
         # Don't spend CPU cycles cleaning up if memory usage is low
         if len(self._hits) < 10_000:
             return
-            
+
         # Find IPs that are no longer active
         ips_to_remove = []
         for ip, timestamps in self._hits.items():
             # If the IP has no recent requests
             if not timestamps or timestamps[-1] <= time_window_start:
                 ips_to_remove.append(ip)
-                
+
         # Remove the inactive IPs
         for ip in ips_to_remove:
             del self._hits[ip]
-            
+
         # Emergency fail-safe: If under a DDoS attack with millions of fake IPs,
         # clear everything to prevent the server from crashing due to Out of Memory.
         if len(self._hits) > 20_000:
