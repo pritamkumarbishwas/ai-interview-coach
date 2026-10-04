@@ -14,6 +14,9 @@ T = TypeVar("T", bound=BaseModel)
 
 REQUEST_TIMEOUT_SECONDS = 90.0
 RETRY_BACKOFF_SECONDS = 1.0
+# Provider rate limits (tokens-per-minute windows) need a much longer pause
+# than transient errors, or the retry just hits the same 429 again.
+RATE_LIMIT_BACKOFF_SECONDS = 12.0
 # Failures worth trying again: timeouts, rate limits, server errors and
 # unusable model output. Bad keys or bad requests fail identically every time.
 RETRYABLE_STATUS_CODES = {408, 409, 429}
@@ -154,7 +157,10 @@ class LLMService:
                     raise
 
             if attempt < max_retries:
-                await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
+                if getattr(last_error, "status_code", None) == 429:
+                    await asyncio.sleep(RATE_LIMIT_BACKOFF_SECONDS)
+                else:
+                    await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
 
         assert last_error is not None
         raise last_error

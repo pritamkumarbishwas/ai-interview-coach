@@ -3,13 +3,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.answer import Answer
+
 InterviewType = Literal["technical", "behavioral", "hr", "mixed", "system_design"]
 Difficulty = Literal["beginner", "intermediate", "advanced"]
 Level = Literal["junior", "mid", "senior"]
 InterviewStatus = Literal["created", "in_progress", "completed"]
 
-# The interview state machine: `start` may only run from `created`, and the
-# (later) completion step only from `in_progress`.
+# The interview state machine: `start` runs `created -> in_progress`, and
+# answering the final question runs `in_progress -> completed`.
 STATUS_TRANSITIONS: dict[str, set[str]] = {
     "created": {"in_progress"},
     "in_progress": {"completed"},
@@ -25,6 +27,9 @@ class Question(BaseModel):
     id: str
     sequence: int
     text: str
+    # Topic label (e.g. "database indexing") so later questions can avoid
+    # repeats; empty on documents written before topic tracking existed.
+    topic: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -38,7 +43,10 @@ class Interview(BaseModel):
     type: InterviewType = "technical"
     difficulty: Difficulty = "intermediate"
     status: InterviewStatus = "created"
+    # The interview completes automatically once this many answers are scored.
+    target_questions: int = 5
     questions: list[Question] = Field(default_factory=list)
+    answers: list[Answer] = Field(default_factory=list)
     current_question_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None

@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.auth import router as auth_router
 from app.api.interviews import router as interviews_router
 from app.api.job_descriptions import router as job_descriptions_router
+from app.api.questions import router as questions_router
 from app.api.resumes import router as resumes_router
 from app.core.config import settings
 from app.core.database import close_mongo, connect_to_mongo, ensure_indexes
@@ -162,6 +163,7 @@ app.include_router(
 app.include_router(
     interviews_router, prefix=f"{settings.api_prefix}/interviews", tags=["interviews"]
 )
+app.include_router(questions_router, prefix=f"{settings.api_prefix}/questions", tags=["questions"])
 
 
 @app.get(f"{settings.api_prefix}/health", tags=["health"])

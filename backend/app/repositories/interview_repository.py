@@ -4,6 +4,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
+from app.models.answer import Answer
 from app.models.interview import Interview, Question
 from app.repositories.base import find_owned_document, stringify_id, to_object_id
 
@@ -14,8 +15,10 @@ LIST_PROJECTION = {
     "type": 1,
     "difficulty": 1,
     "status": 1,
+    "target_questions": 1,
     "created_at": 1,
     "questions.id": 1,
+    "answers.id": 1,
 }
 
 
@@ -40,6 +43,15 @@ class InterviewRepository:
         self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str
     ) -> dict | None:
         return await find_owned_document(db, self.collection_name, interview_id, user_id)
+
+    async def find_by_question(
+        self, db: AsyncIOMotorDatabase, question_id: str, user_id: str
+    ) -> dict | None:
+        """Locate the interview that owns an embedded question."""
+        doc = await db[self.collection_name].find_one(
+            {"user_id": user_id, "questions.id": question_id}
+        )
+        return stringify_id(doc) if doc else None
 
     async def start(
         self,
@@ -87,6 +99,50 @@ class InterviewRepository:
                 "$push": {"questions": question.model_dump()},
                 "$set": {"current_question_id": question.id},
             },
+            return_document=ReturnDocument.AFTER,
+        )
+        return self._shape(doc) if doc else None
+
+    async def record_answer(
+        self,
+        db: AsyncIOMotorDatabase,
+        interview_id: str,
+        user_id: str,
+        answer: Answer,
+        next_question: Question | None,
+        completing: bool,
+    ) -> dict | None:
+        """Persist the scored answer, the next question, and/or completion.
+
+        The filter pins `current_question_id` to the answered question, so a
+        duplicate submission (or a concurrent answer) loses the race and
+        receives `None` instead of recording the answer twice.
+        """
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return None
+
+        push: dict[str, object] = {"answers": answer.model_dump()}
+        set_ops: dict[str, object] = {}
+        if next_question is not None:
+            push["questions"] = next_question.model_dump()
+            set_ops["current_question_id"] = next_question.id
+        if completing:
+            set_ops["status"] = "completed"
+            set_ops["completed_at"] = datetime.now(UTC)
+
+        update: dict[str, object] = {"$push": push}
+        if set_ops:
+            update["$set"] = set_ops
+
+        doc = await db[self.collection_name].find_one_and_update(
+            {
+                "_id": object_id,
+                "user_id": user_id,
+                "status": "in_progress",
+                "current_question_id": answer.question_id,
+            },
+            update,
             return_document=ReturnDocument.AFTER,
         )
         return self._shape(doc) if doc else None
