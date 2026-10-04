@@ -8,8 +8,10 @@ os.environ.setdefault("LOG_LEVEL", "WARNING")
 
 import asyncio
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from uuid import uuid4
 
+import fitz
 import pytest
 from fastapi.testclient import TestClient
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -18,6 +20,21 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.main import app
 from app.models.user import User
+
+RESUME_SERVICE_LLM = "app.services.resume_service.llm_service.generate_structured"
+# The interview flow shares one `llm_service` singleton with resume/JD
+# extraction, so one patched method must dispatch every schema in the flow.
+INTERVIEW_LLM = "app.services.interview_service.llm_service.generate_structured"
+
+
+def make_pdf(text: str = "Jane Doe - Python engineer with 5 years of experience.") -> bytes:
+    """Build a small but valid PDF, so the upload happy path is testable."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), text)
+    data = doc.tobytes()
+    doc.close()
+    return data
 
 
 def _with_mongo(work):
@@ -85,6 +102,110 @@ def auth_headers(client: TestClient, registered_user: dict) -> dict[str, str]:
     assert response.status_code == 200, response.text
     token = response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
+
+@dataclass
+class Env:
+    """A schema-dispatching fake LLM shared by interview-flow tests."""
+
+    setup: object  # callable(target: int) -> dict
+    prompts: list[str] = field(default_factory=list)
+    dispatcher: object = None
+
+
+@pytest.fixture()
+def env(client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch) -> Env:
+    """Shared LLM dispatcher plus a helper that creates a started interview."""
+    prompts: list[str] = []
+    question_calls = 0
+
+    async def dispatcher(prompt: str, schema, **kwargs):
+        nonlocal question_calls
+        prompts.append(prompt)
+        name = schema.__name__
+        if name == "ResumeStructuredData":
+            return schema(skills=["Python", "FastAPI"], experience=[], projects=[], education=[])
+        if name == "JobDescriptionStructuredData":
+            return schema(
+                role_title="Backend Engineer",
+                required_skills=["FastAPI"],
+                responsibilities=["Build APIs"],
+            )
+        if name == "QuestionGeneration":
+            question_calls += 1
+            return schema(
+                question=f"Question number {question_calls}?",
+                topic=f"topic-{question_calls}",
+            )
+        if name == "EvaluationGeneration":
+            return schema(
+                scores={
+                    "technical": 80,
+                    "relevance": 85,
+                    "completeness": 70,
+                    "structure": 75,
+                    "clarity": 90,
+                },
+                strengths=["clear reasoning"],
+                weaknesses=["missed edge cases"],
+                feedback="Solid answer; cover failure modes next time.",
+                improved_answer="A model answer.",
+                next_step="new_topic",
+            )
+        if name == "ReportGeneration":
+            return schema(
+                narrative="Solid fundamentals; tighten structure and cover edge cases.",
+                preparation_plan=[
+                    {
+                        "focus": "Failure modes",
+                        "actions": ["Study timeouts and retries", "Practice EXPLAIN"],
+                    },
+                ],
+            )
+        raise AssertionError(f"unexpected schema {name}")
+
+    monkeypatch.setattr(RESUME_SERVICE_LLM, dispatcher)
+
+    def setup(target: int = 3) -> dict:
+        resume = client.post(
+            "/api/resumes/upload",
+            headers=auth_headers,
+            files={"file": ("resume.pdf", make_pdf(), "application/pdf")},
+        )
+        assert resume.status_code == 201, resume.text
+        jd = client.post(
+            "/api/job-descriptions",
+            headers=auth_headers,
+            json={
+                "title": "Backend Engineer",
+                "company": "Acme",
+                "raw_text": "Own our FastAPI services and MongoDB collections.",
+            },
+        )
+        assert jd.status_code == 201, jd.text
+        created = client.post(
+            "/api/interviews",
+            headers=auth_headers,
+            json={
+                "resume_id": resume.json()["id"],
+                "jd_id": jd.json()["id"],
+                "role": "Backend Engineer",
+                "level": "mid",
+                "type": "technical",
+                "difficulty": "intermediate",
+                "target_questions": target,
+            },
+        )
+        assert created.status_code == 201, created.text
+        started = client.post(f"/api/interviews/{created.json()['id']}/start", headers=auth_headers)
+        assert started.status_code == 200, started.text
+        return {
+            "id": created.json()["id"],
+            "question_id": started.json()["question"]["id"],
+            "target": target,
+        }
+
+    return Env(setup=setup, prompts=prompts, dispatcher=dispatcher)
 
 
 def make_user(email: str, password: str = "password1234") -> dict:

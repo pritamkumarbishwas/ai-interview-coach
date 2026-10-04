@@ -6,6 +6,7 @@ from pymongo import ReturnDocument
 
 from app.models.answer import Answer
 from app.models.interview import Interview, Question
+from app.models.report import Report
 from app.repositories.base import find_owned_document, stringify_id, to_object_id
 
 # Only the fields the list endpoint returns; the per-question texts stay in
@@ -143,6 +144,31 @@ class InterviewRepository:
                 "current_question_id": answer.question_id,
             },
             update,
+            return_document=ReturnDocument.AFTER,
+        )
+        return self._shape(doc) if doc else None
+
+    async def set_report(
+        self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str, report: Report
+    ) -> dict | None:
+        """Cache the final report exactly once, on a completed interview.
+
+        `report: None` matches both a missing field and an explicit null, so
+        documents written before reports existed qualify too. A caller that
+        gets `None` back should re-read: another request stored its report
+        first (or the interview is gone / not completed).
+        """
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return None
+        doc = await db[self.collection_name].find_one_and_update(
+            {
+                "_id": object_id,
+                "user_id": user_id,
+                "status": "completed",
+                "report": None,
+            },
+            {"$set": {"report": report.model_dump()}},
             return_document=ReturnDocument.AFTER,
         )
         return self._shape(doc) if doc else None

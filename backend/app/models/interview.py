@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.answer import Answer
+from app.models.report import Report
 
 InterviewType = Literal["technical", "behavioral", "hr", "mixed", "system_design"]
 Difficulty = Literal["beginner", "intermediate", "advanced"]
@@ -47,6 +48,9 @@ class Interview(BaseModel):
     target_questions: int = 5
     questions: list[Question] = Field(default_factory=list)
     answers: list[Answer] = Field(default_factory=list)
+    # Cached final report; generated once on completion (backfilled by the
+    # report endpoint if that first generation failed).
+    report: Report | None = None
     current_question_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None

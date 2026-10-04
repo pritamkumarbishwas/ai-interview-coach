@@ -16,7 +16,7 @@ router = APIRouter()
     response_model=AnswerResultOut,
     status_code=status.HTTP_200_OK,
 )
-async def submit_answer(
+async def submit_answer( 
     question_id: str,
     payload: AnswerInput,
     current_user: User = Depends(get_current_user),

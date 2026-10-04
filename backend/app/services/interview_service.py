@@ -3,17 +3,21 @@
 import json
 import logging
 import uuid
+from dataclasses import dataclass
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
 from app.models.answer import Answer, Evaluation
 from app.models.interview import Interview, Question, can_transition
+from app.models.report import Report
 from app.prompts.templates import (
     EVALUATE_ANSWER_PROMPT,
     GENERATE_NEXT_QUESTION_PROMPT,
     GENERATE_QUESTION_PROMPT,
+    GENERATE_REPORT_PROMPT,
     MAX_CONTEXT_CHARS,
+    MAX_REPORT_CONTEXT_CHARS,
 )
 from app.repositories.interview_repository import InterviewRepository
 from app.repositories.job_description_repository import JobDescriptionRepository
@@ -28,16 +32,21 @@ from app.schemas.interview import (
     QuestionGeneration,
     QuestionOut,
 )
+from app.schemas.report import ReportGeneration, ReportOut
 from app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
+# Topic score cutoffs (per-topic scores are means of 0-100 evaluations).
+STRONG_TOPIC_MIN_SCORE = 70.0
+WEAK_TOPIC_MAX_SCORE = 50.0
 
-def _context_block(data: object) -> str:
+
+def _context_block(data: object, limit: int = MAX_CONTEXT_CHARS) -> str:
     """Compact, bounded JSON for the prompt (structured data is small)."""
     text = json.dumps(data, ensure_ascii=False, default=str)
-    if len(text) > MAX_CONTEXT_CHARS:
-        text = text[:MAX_CONTEXT_CHARS] + "..."
+    if len(text) > limit:
+        text = text[:limit] + "..."
     return text
 
 
@@ -77,6 +86,127 @@ def _covered_topics(interview: Interview) -> list[str]:
         if question.topic and question.topic not in seen:
             seen.append(question.topic)
     return seen
+
+
+def _mean(values: list[int] | list[float]) -> float:
+    if not values:
+        return 0.0
+    return round(sum(values) / len(values), 1)
+
+
+@dataclass(frozen=True)
+class ScoreAggregates:
+    """Everything in the final report that is computed in code."""
+
+    overall_score: float
+    technical_score: float
+    communication_score: float
+    strong_topics: list[str]
+    weak_topics: list[str]
+
+
+def aggregate_scores(interview: Interview) -> ScoreAggregates:
+    """Average the stored evaluations — the LLM never does this math.
+
+    - overall: mean of each answer's evaluation.overall
+    - technical: mean of the `technical` dimension across answers
+    - communication: mean of the `structure` + `clarity` dimensions
+    - topics bucket into strong (>= 70) / weak (< 50) by their mean score;
+      unanswered questions are skipped, as are unlabeled topics.
+    """
+    answers = interview.answers
+    if not answers:
+        return ScoreAggregates(0.0, 0.0, 0.0, [], [])
+
+    topic_scores: dict[str, list[int]] = {}
+    topics_by_question = {question.id: question.topic for question in interview.questions}
+    for answer in answers:
+        topic = topics_by_question.get(answer.question_id, "")
+        if topic:
+            topic_scores.setdefault(topic, []).append(answer.evaluation.overall)
+    means = {topic: _mean(values) for topic, values in topic_scores.items()}
+
+    strong = [
+        topic
+        for topic, score in sorted(means.items(), key=lambda item: -item[1])
+        if score >= STRONG_TOPIC_MIN_SCORE
+    ]
+    weak = [
+        topic
+        for topic, score in sorted(means.items(), key=lambda item: item[1])
+        if score < WEAK_TOPIC_MAX_SCORE
+    ]
+
+    return ScoreAggregates(
+        overall_score=_mean([answer.evaluation.overall for answer in answers]),
+        technical_score=_mean([answer.evaluation.scores.technical for answer in answers]),
+        communication_score=_mean(
+            [
+                score
+                for answer in answers
+                for score in (
+                    answer.evaluation.scores.structure,
+                    answer.evaluation.scores.clarity,
+                )
+            ]
+        ),
+        strong_topics=strong,
+        weak_topics=weak,
+    )
+
+
+def _report_out(interview: Interview) -> ReportOut:
+    report = interview.report
+    assert report is not None  # callers checked before converting
+    return ReportOut(
+        interview_id=interview.id or "",
+        overall_score=report.overall_score,
+        technical_score=report.technical_score,
+        communication_score=report.communication_score,
+        strong_topics=report.strong_topics,
+        weak_topics=report.weak_topics,
+        topics_to_study=report.topics_to_study,
+        narrative=report.narrative,
+        preparation_plan=report.preparation_plan,
+        generated_at=report.generated_at,
+    )
+
+
+def _performance_payload(interview: Interview) -> dict:
+    """Aggregates plus one bounded entry per answered question.
+
+    LLM-produced strings (topics, feedback, weaknesses) are unbounded, so
+    every field is truncated here: a 20-question interview must still fit
+    inside MAX_REPORT_CONTEXT_CHARS without mid-JSON cuts.
+    """
+    aggregates = aggregate_scores(interview)
+    answers_by_question = {answer.question_id: answer for answer in interview.answers}
+    return {
+        "role": interview.role,
+        "type": interview.type.replace("_", " "),
+        "level": interview.level,
+        "difficulty": interview.difficulty,
+        "overall_score": aggregates.overall_score,
+        "technical_score": aggregates.technical_score,
+        "communication_score": aggregates.communication_score,
+        "strong_topics": [topic[:100] for topic in aggregates.strong_topics],
+        "weak_topics": [topic[:100] for topic in aggregates.weak_topics],
+        "topics_to_study": [topic[:100] for topic in aggregates.weak_topics],
+        "questions": [
+            {
+                "topic": question.topic[:100],
+                "question": question.text[:160],
+                "score": answers_by_question[question.id].evaluation.overall,
+                "feedback": answers_by_question[question.id].evaluation.feedback[:200],
+                "weaknesses": [
+                    weakness[:150]
+                    for weakness in answers_by_question[question.id].evaluation.weaknesses[:3]
+                ],
+            }
+            for question in interview.questions
+            if question.id in answers_by_question
+        ],
+    }
 
 
 class InterviewService:
@@ -204,10 +334,12 @@ class InterviewService:
     ) -> AnswerResultOut:
         """Evaluate an answer, record it, and produce the next question.
 
-        Both LLM calls happen before any write: if either fails the client
-        gets a 503 and can resubmit without leaving a half-recorded answer.
-        The interview completes automatically once `target_questions`
-        answers have been scored.
+        The evaluation and next-question LLM calls happen before any write:
+        if either fails the client gets a 503 and can resubmit without
+        leaving a half-recorded answer. The interview completes automatically
+        once `target_questions` answers have been scored; the final report
+        is then generated after the write (its failure never blocks
+        completion — the report endpoint backfills it later).
         """
         doc = await self._interviews.find_by_question(db, question_id, user_id)
         if doc is None:
@@ -247,6 +379,8 @@ class InterviewService:
             raise ConflictError("This answer was already submitted.")
 
         updated = Interview(**updated_doc)
+        if updated.status == "completed":
+            await self._try_cache_report(db, updated)
         return AnswerResultOut(
             question_id=question_id,
             status=updated.status,
@@ -254,6 +388,72 @@ class InterviewService:
             next_question=_question_out(next_question) if next_question else None,
             questions_answered=len(updated.answers),
             target_questions=updated.target_questions,
+        )
+
+    async def report(self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str) -> ReportOut:
+        """The cached final report, generated on first access if missing."""
+        interview = await self._require(db, user_id, interview_id)
+        if interview.status != "completed":
+            raise ConflictError("The report is available once the interview is completed.")
+        if interview.report is not None:
+            return _report_out(interview)
+
+        report = await self._generate_report(interview)
+        doc = await self._interviews.set_report(db, interview.id or "", user_id, report)
+        if doc is None:
+            # A concurrent request cached a report first — use that one.
+            refreshed = await self._require(db, user_id, interview_id)
+            if refreshed.report is None:
+                raise ConflictError("Interview is no longer completed.")
+            return _report_out(refreshed)
+        return _report_out(Interview(**doc))
+
+    async def _try_cache_report(self, db: AsyncIOMotorDatabase, interview: Interview) -> None:
+        """Generate the final report right after completion.
+
+        A report failure must never undo a completed interview: the client
+        backfills it later through `GET /interviews/{id}/report`.
+        """
+        try:
+            report = await self._generate_report(interview)
+            await self._interviews.set_report(db, interview.id or "", interview.user_id, report)
+        except Exception as exc:
+            logger.warning(
+                "Report generation after completion failed: %s: %s", type(exc).__name__, exc
+            )
+
+    async def _generate_report(self, interview: Interview) -> Report:
+        aggregates = aggregate_scores(interview)
+        prompt = GENERATE_REPORT_PROMPT.format(
+            type=interview.type.replace("_", " "),
+            role=interview.role,
+            level=interview.level,
+            difficulty=interview.difficulty,
+            performance_data=_context_block(
+                _performance_payload(interview), MAX_REPORT_CONTEXT_CHARS
+            ),
+        )
+        try:
+            result = await llm_service.generate_structured(prompt, ReportGeneration, max_retries=2)
+        except Exception as exc:
+            logger.error("Report generation failed: %s: %s", type(exc).__name__, exc)
+            raise ServiceUnavailableError(
+                "AI report generation is unavailable right now. Please try again later."
+            ) from exc
+
+        narrative = result.narrative.strip()
+        if not narrative:
+            raise ServiceUnavailableError("AI returned an empty report. Please try again.")
+
+        return Report(
+            overall_score=aggregates.overall_score,
+            technical_score=aggregates.technical_score,
+            communication_score=aggregates.communication_score,
+            strong_topics=aggregates.strong_topics,
+            weak_topics=aggregates.weak_topics,
+            topics_to_study=list(aggregates.weak_topics),
+            narrative=narrative,
+            preparation_plan=result.preparation_plan,
         )
 
     async def _evaluate(

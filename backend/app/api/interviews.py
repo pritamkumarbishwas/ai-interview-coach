@@ -11,6 +11,7 @@ from app.schemas.interview import (
     InterviewOut,
     InterviewSummary,
 )
+from app.schemas.report import ReportOut
 from app.services.interview_service import InterviewService
 
 router = APIRouter()
@@ -67,3 +68,15 @@ async def get_current_question(
     _: None = Depends(rate_limit("interview_question")),
 ) -> CurrentQuestionOut:
     return await service.current_question(db, current_user.id, interview_id)
+
+
+@router.get("/{interview_id}/report", response_model=ReportOut)
+async def get_interview_report(
+    interview_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: InterviewService = Depends(get_interview_service),
+    _: None = Depends(rate_limit("interview_report")),
+) -> ReportOut:
+    """The final report; generated once and cached on the interview document."""
+    return await service.report(db, current_user.id, interview_id)

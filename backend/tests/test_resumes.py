@@ -1,23 +1,11 @@
 from datetime import UTC, datetime
 
-import fitz
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import insert_job_description
+from tests.conftest import RESUME_SERVICE_LLM, insert_job_description, make_pdf
 
-RESUME_SERVICE_LLM = "app.services.resume_service.llm_service.generate_structured"
 JD_SERVICE_LLM = "app.services.job_description_service.llm_service.generate_structured"
-
-
-def make_pdf(text: str = "Jane Doe - Python engineer with 5 years of experience.") -> bytes:
-    """Build a small but valid PDF, so the upload happy path is testable."""
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((72, 72), text)
-    data = doc.tobytes()
-    doc.close()
-    return data
 
 
 async def fake_resume_extraction(prompt: str, schema, **kwargs):
