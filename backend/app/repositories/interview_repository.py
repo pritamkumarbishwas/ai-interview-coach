@@ -91,12 +91,6 @@ class InterviewRepository:
         )
         return self._shape(doc) if doc else None
 
-    async def delete(self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str) -> None:
-        object_id = to_object_id(interview_id)
-        if object_id is None:
-            return
-        await db[self.collection_name].delete_one({"_id": object_id, "user_id": user_id})
-
     @staticmethod
     def _shape(doc: dict[str, Any]) -> dict:
         """Expose `_id` as a string for the Pydantic model."""

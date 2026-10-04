@@ -34,7 +34,6 @@ class Interview(BaseModel):
     resume_id: str
     jd_id: str
     role: str
-    company: str = ""
     level: Level = "mid"
     type: InterviewType = "technical"
     difficulty: Difficulty = "intermediate"
