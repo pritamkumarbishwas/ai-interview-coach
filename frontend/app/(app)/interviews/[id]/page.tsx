@@ -269,7 +269,7 @@ export default function InterviewWorkspacePage() {
         setCompleted(true);
       }
       setAiStatus("speaking");
-      schedule(() => setAiStatus("listening"), 1400);
+      // The status will reset to listening via onSpeechEnd callback from AIInterviewer
     } catch (err) {
       const apiError = toApiError(err);
       // Roll back the optimistic message; the text stays in the input.
@@ -302,7 +302,7 @@ export default function InterviewWorkspacePage() {
       },
     ]);
     setAiStatus("speaking");
-    schedule(() => setAiStatus("listening"), 1600);
+    // The status will reset to listening via onSpeechEnd callback from AIInterviewer
   };
 
   const leaveInterview = () => {
@@ -390,6 +390,11 @@ export default function InterviewWorkspacePage() {
           totalQuestions={targetQuestions}
           muted={muted}
           onToggleMute={() => setMuted((value) => !value)}
+          onSpeechEnd={() => setAiStatus("listening")}
+          onReplay={() => {
+            setAiStatus("listening");
+            setTimeout(() => setAiStatus("speaking"), 10);
+          }}
         />
         <LiveScore
           overall={runningOverall}

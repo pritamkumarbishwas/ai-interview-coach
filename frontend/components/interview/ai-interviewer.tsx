@@ -1,8 +1,10 @@
+import { useEffect } from "react";
 import { Bot, RotateCcw, Settings, Volume2, VolumeX } from "lucide-react";
 
 import { AudioWaveform } from "@/components/interview/audio-waveform";
 import { QuestionCard } from "@/components/interview/question-card";
 import { cx } from "@/lib/utils";
+import { useTTS } from "@/hooks/use-speech";
 
 export type AIStatus = "listening" | "speaking" | "thinking";
 
@@ -20,6 +22,7 @@ interface AIInterviewerProps {
   muted?: boolean;
   onToggleMute?: () => void;
   onReplay?: () => void;
+  onSpeechEnd?: () => void;
 }
 
 export function AIInterviewer({
@@ -30,8 +33,21 @@ export function AIInterviewer({
   muted = false,
   onToggleMute,
   onReplay,
+  onSpeechEnd,
 }: AIInterviewerProps) {
   const meta = STATUS_META[status];
+  const { speak, stop, speaking } = useTTS(muted);
+
+  useEffect(() => {
+    if (status === "speaking" && question) {
+      speak(question, onSpeechEnd);
+    } else {
+      stop();
+    }
+  }, [status, question, speak, stop, onSpeechEnd]);
+
+  // Use the actual speaking status from the TTS engine for the waveform animation
+  const isSpeaking = status === "speaking" && speaking;
 
   return (
     <section
@@ -63,7 +79,7 @@ export function AIInterviewer({
             />
           </span>
         </div>
-        <AudioWaveform active={status !== "thinking"} className="mt-1" />
+        <AudioWaveform active={isSpeaking} className="mt-1" />
         <p className="text-[11px] font-medium uppercase tracking-wide text-ink-3">
           AI Coach · {meta.label}
         </p>
