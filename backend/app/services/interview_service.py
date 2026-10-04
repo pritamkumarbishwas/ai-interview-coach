@@ -561,12 +561,15 @@ class InterviewService:
     async def _load_context(
         self, db: AsyncIOMotorDatabase, interview: Interview
     ) -> tuple[str, str]:
-        resume = await self._resumes.find_owned(db, interview.resume_id, interview.user_id)
+        # The resume is optional (and may have been deleted) — the JD is not.
+        resume = None
+        if interview.resume_id:
+            resume = await self._resumes.find_owned(db, interview.resume_id, interview.user_id)
         jd = await self._job_descriptions.find_owned(db, interview.jd_id, interview.user_id)
-        if resume is None or jd is None:
-            raise NotFoundError("Resume or job description no longer exists")
+        if jd is None:
+            raise NotFoundError("Job description no longer exists")
 
-        resume_context = _context_block(resume.get("structured_data") or {})
+        resume_context = _context_block(resume.get("structured_data") or {}) if resume else "{}"
         jd_context = _context_block(
             {
                 "title": jd.get("title", ""),

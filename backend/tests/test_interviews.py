@@ -217,6 +217,24 @@ def test_start_twice_is_a_conflict(
     assert second.json()["code"] == "conflict"
 
 
+def test_start_interview_without_resume(
+    client: TestClient,
+    auth_headers: dict,
+    interview_context: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resume-less interview must still generate its first question."""
+    monkeypatch.setattr(INTERVIEW_LLM, fake_question_generation)
+    payload = interview_payload(interview_context)
+    payload.pop("resume_id")
+    created = client.post("/api/interviews", headers=auth_headers, json=payload)
+    assert created.status_code == 201, created.text
+
+    started = client.post(f"/api/interviews/{created.json()['id']}/start", headers=auth_headers)
+    assert started.status_code == 200, started.text
+    assert started.json()["question"]["text"]
+
+
 def test_current_question_before_start_is_a_conflict(
     client: TestClient, auth_headers: dict, interview_context: dict
 ) -> None:
