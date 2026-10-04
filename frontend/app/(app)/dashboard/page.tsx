@@ -5,43 +5,42 @@ import Link from "next/link";
 import {
   ArrowRight,
   ChevronRight,
-  Clock,
+  CircleCheck,
   Mic,
   Sparkles,
   Target,
   TrendingUp,
+  TriangleAlert,
 } from "lucide-react";
 
-import { Badge, type BadgeTone } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button";
+import { useAsync } from "@/hooks/use-async";
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SkeletonCard } from "@/components/ui/loading";
 import { StatCard } from "@/components/ui/stat-card";
-import {
-  MOCK_INTERVIEWS,
-  MOCK_STATS,
-  type InterviewTypeLabel,
-} from "@/data/mock";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { useAuth } from "@/hooks/use-auth";
-import { cx, greeting } from "@/lib/utils";
-
-const TYPE_TONES: Record<InterviewTypeLabel, BadgeTone> = {
-  Technical: "ai",
-  Behavioral: "success",
-  HR: "neutral",
-  Mixed: "warning",
-  "System Design": "brand",
-};
+import {
+  STATUS_LABELS,
+  TYPE_LABELS,
+  TYPE_TONES,
+} from "@/lib/interview";
+import { formatDate, greeting } from "@/lib/utils";
+import { getDashboardStats } from "@/services/dashboard";
 
 const ONBOARDING_STEPS = [
   {
     title: "Upload your resume",
     text: "PDF or DOCX — we extract your skills and experience.",
-    href: "/practice",
+    href: "/resumes",
   },
   {
     title: "Add a job description",
     text: "Paste the role you are targeting so questions match it.",
-    href: "/practice",
+    href: "/job-descriptions",
   },
   {
     title: "Start a mock interview",
@@ -53,7 +52,43 @@ const ONBOARDING_STEPS = [
 export default function DashboardPage() {
   const { user } = useAuth();
   const name = (user?.name ?? "").split(" ")[0];
-  const recent = MOCK_INTERVIEWS.slice(0, 4);
+
+  const { data: stats, loading, error, reload } = useAsync(
+    getDashboardStats,
+    [],
+  );
+
+  if (loading && !stats) {
+    return (
+      <div className="space-y-6">
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[0, 1, 2, 3].map((index) => (
+            <SkeletonCard key={index} />
+          ))}
+        </section>
+        <SkeletonCard />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mx-auto max-w-xl py-16">
+        <Alert tone="error">
+          {error.message || "Could not load your dashboard."}
+        </Alert>
+        <div className="mt-4 flex justify-center">
+          <Button variant="outline" onClick={reload}>
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const recent = stats?.recent ?? [];
+  const strongTopics = stats?.strong_topics ?? [];
+  const weakTopics = stats?.weak_topics ?? [];
 
   return (
     <div className="space-y-6">
@@ -75,34 +110,42 @@ export default function DashboardPage() {
           <ButtonLink href="/practice" variant="primary" icon={<Mic className="h-4 w-4" />}>
             Start Interview
           </ButtonLink>
-          <ButtonLink href="/results" variant="outline">
-            View Reports
+          <ButtonLink href="/interviews" variant="outline">
+            My Interviews
           </ButtonLink>
         </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Overview statistics">
+      <section
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+        aria-label="Overview statistics"
+      >
         <StatCard
           label="Total Interviews"
-          value={MOCK_STATS.totalInterviews}
+          value={stats?.interviews_total ?? 0}
           icon={<Target className="h-4 w-4" />}
-          trend={{ value: "+3 this week", direction: "up" }}
+          hint={`${stats?.interviews_completed ?? 0} completed`}
         />
         <StatCard
           label="Average Score"
-          value={`${MOCK_STATS.averageScore}%`}
+          value={
+            stats?.average_score !== null && stats?.average_score !== undefined
+              ? `${stats.average_score}%`
+              : "—"
+          }
           icon={<TrendingUp className="h-4 w-4" />}
-          trend={{ value: "+4% vs last week", direction: "up" }}
+          hint="across completed reports"
         />
         <StatCard
           label="Questions Answered"
-          value={MOCK_STATS.questionsAnswered}
+          value={stats?.questions_answered ?? 0}
           icon={<Sparkles className="h-4 w-4" />}
         />
         <StatCard
-          label="Practice Time"
-          value={MOCK_STATS.practiceTime}
-          icon={<Clock className="h-4 w-4" />}
+          label="In Progress"
+          value={stats?.interviews_in_progress ?? 0}
+          icon={<ArrowRight className="h-4 w-4" />}
+          hint="resumable anytime"
         />
       </section>
 
@@ -110,7 +153,7 @@ export default function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader
             title="Recent Interviews"
-              actions={
+            actions={
               <Link
                 href="/interviews"
                 className="inline-flex items-center gap-1 text-sm font-medium text-brand transition-colors hover:text-brand-hover"
@@ -121,75 +164,146 @@ export default function DashboardPage() {
             }
           />
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
-                    <th scope="col" className="px-6 py-3 font-medium">
-                      Role
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      Type
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      Score
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      Date
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      Status
-                    </th>
-                    <th scope="col" className="px-4 py-3">
-                      <span className="sr-only">Open</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recent.map((item) => (
-                    <tr
-                      key={item.id}
-                      className="border-b border-line last:border-0 transition-colors hover:bg-surface"
-                    >
-                      <td className="px-6 py-3.5">
-                        <span className="font-medium text-ink">{item.role}</span>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        <Badge tone={TYPE_TONES[item.type]}>{item.type}</Badge>
-                      </td>
-                      <td className="px-4 py-3.5">
-                        {item.score !== null ? (
-                          <span className="font-semibold tabular-nums text-ink">
-                            {item.score}%
-                          </span>
-                        ) : (
-                          <span className="text-ink-3">—</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3.5 text-ink-2">{item.date}</td>
-                      <td className="px-4 py-3.5">
-                        <Badge tone={item.status === "completed" ? "success" : "brand"}>
-                          {item.status === "completed" ? "Completed" : "In progress"}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3.5 text-right">
-                        <Link
-                          href={`/interviews/${item.id}`}
-                          className="inline-flex items-center gap-1 rounded-btn px-2 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand-50"
-                        >
-                          {item.status === "completed" ? "Report" : "Resume"}
-                          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-                        </Link>
-                      </td>
+            {recent.length === 0 ? (
+              <div className="px-6 py-10">
+                <EmptyState
+                  title="No interviews yet"
+                  description="Start your first practice interview and it will show up here."
+                  action={
+                    <ButtonLink href="/practice" variant="primary">
+                      Start Interview
+                    </ButtonLink>
+                  }
+                />
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
+                      <th scope="col" className="px-6 py-3 font-medium">
+                        Role
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        Type
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        Score
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        Date
+                      </th>
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        Status
+                      </th>
+                      <th scope="col" className="px-4 py-3">
+                        <span className="sr-only">Open</span>
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {recent.map((item) => (
+                      <tr
+                        key={item.id}
+                        className="border-b border-line last:border-0 transition-colors hover:bg-surface"
+                      >
+                        <td className="px-6 py-3.5">
+                          <span className="font-medium text-ink">
+                            {item.role}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <Badge tone={TYPE_TONES[item.type]}>
+                            {TYPE_LABELS[item.type]}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3.5">
+                          {item.score !== null ? (
+                            <span className="font-semibold tabular-nums text-ink">
+                              {item.score}%
+                            </span>
+                          ) : (
+                            <span className="text-ink-3">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3.5 text-ink-2">
+                          {formatDate(item.created_at)}
+                        </td>
+                        <td className="px-4 py-3.5">
+                          <StatusBadge status={item.status} />
+                          <span className="sr-only">
+                            {STATUS_LABELS[item.status]}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 text-right">
+                          <Link
+                            href={
+                              item.status === "completed"
+                                ? `/interviews/${item.id}/result`
+                                : `/interviews/${item.id}`
+                            }
+                            className="inline-flex items-center gap-1 rounded-btn px-2 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand-50"
+                          >
+                            {item.status === "completed" ? "Report" : "Open"}
+                            <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </CardContent>
         </Card>
 
         <div className="space-y-6">
+          <Card>
+            <CardHeader title="Strong topics" />
+            <CardContent>
+              {strongTopics.length === 0 ? (
+                <p className="text-sm text-ink-2">
+                  Complete an interview to see where you shine.
+                </p>
+              ) : (
+                <ul className="flex flex-wrap gap-2">
+                  {strongTopics.map((topic) => (
+                    <li
+                      key={topic}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[#e7f6ef] px-3 py-1 text-xs font-medium text-success ring-1 ring-inset ring-[#c4ebdc]"
+                    >
+                      <CircleCheck className="h-3.5 w-3.5" aria-hidden />
+                      {topic}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader title="Needs work" />
+            <CardContent>
+              {weakTopics.length === 0 ? (
+                <p className="text-sm text-ink-2">
+                  No weak topics yet — keep practicing.
+                </p>
+              ) : (
+                <ul className="flex flex-wrap gap-2">
+                  {weakTopics.map((topic) => (
+                    <li
+                      key={topic}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[#fdf3e2] px-3 py-1 text-xs font-medium text-[#b57a09] ring-1 ring-inset ring-[#f5dfb4]"
+                    >
+                      <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
+                      {topic}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader title="Get set up" />
             <CardContent className="space-y-3">
@@ -212,28 +326,6 @@ export default function DashboardPage() {
                   </span>
                 </Link>
               ))}
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden">
-            <div className="border-b border-line bg-gradient-to-r from-brand-50 to-brand-100 px-5 py-4">
-              <p className="text-sm font-semibold text-brand-hover">
-                Weekly goal
-              </p>
-              <p className={cx("mt-0.5 text-2xl font-bold text-ink")}>
-                3 <span className="text-sm font-medium text-ink-2">of 5 interviews</span>
-              </p>
-            </div>
-            <CardContent className="px-5 py-4">
-              <div className="h-2 overflow-hidden rounded-full bg-mist">
-                <div
-                  className="h-full rounded-full bg-brand transition-[width] duration-700"
-                  style={{ width: "60%" }}
-                />
-              </div>
-              <p className="mt-2.5 text-[13px] text-ink-2">
-                Two more interviews to hit your goal this week.
-              </p>
             </CardContent>
           </Card>
         </div>

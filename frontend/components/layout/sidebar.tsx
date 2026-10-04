@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import {
+  Briefcase,
   ChartColumn,
   ClipboardList,
+  FileText,
   LayoutDashboard,
   Mic,
   User,
@@ -19,6 +21,8 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/interviews", label: "My Interviews", icon: ClipboardList },
   { href: "/practice", label: "Practice", icon: Mic },
+  { href: "/resumes", label: "Resumes", icon: FileText },
+  { href: "/job-descriptions", label: "Job Descriptions", icon: Briefcase },
   { href: "/results", label: "Results", icon: ChartColumn },
   { href: "/profile", label: "Profile", icon: User },
 ];

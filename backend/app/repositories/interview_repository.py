@@ -22,6 +22,21 @@ LIST_PROJECTION = {
     "answers.id": 1,
 }
 
+# Dashboard stats need counts plus the cached report's scores/topics — never
+# the question or answer bodies themselves.
+DASHBOARD_PROJECTION = {
+    "role": 1,
+    "type": 1,
+    "difficulty": 1,
+    "status": 1,
+    "target_questions": 1,
+    "created_at": 1,
+    "answers.id": 1,
+    "report.overall_score": 1,
+    "report.strong_topics": 1,
+    "report.weak_topics": 1,
+}
+
 
 class InterviewRepository:
     collection_name = "interviews"
@@ -37,6 +52,15 @@ class InterviewRepository:
             .find({"user_id": user_id}, LIST_PROJECTION)
             .sort("created_at", -1)
             .limit(limit)
+        )
+        return [self._shape(doc) async for doc in cursor]
+
+    async def all_for_user(self, db: AsyncIOMotorDatabase, user_id: str) -> list[dict]:
+        """Every interview for the dashboard, newest first, without bodies."""
+        cursor = (
+            db[self.collection_name]
+            .find({"user_id": user_id}, DASHBOARD_PROJECTION)
+            .sort("created_at", -1)
         )
         return [self._shape(doc) async for doc in cursor]
 

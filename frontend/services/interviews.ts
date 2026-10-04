@@ -1,24 +1,29 @@
 import { api, toApiError } from "@/lib/api";
 import type {
-  AnswerResponse,
+  AnswerResult,
   CreateInterviewInput,
-  Interview,
+  CurrentQuestion,
+  InterviewDetail,
+  InterviewSummary,
   Question,
   Report,
 } from "@/types";
 
-export async function listInterviews(): Promise<Interview[]> {
+/** LLM-backed endpoints need far more headroom than the default 30s. */
+const LLM_TIMEOUT_MS = 120_000;
+
+export async function listInterviews(): Promise<InterviewSummary[]> {
   try {
-    const { data } = await api.get<Interview[]>("/interviews");
+    const { data } = await api.get<InterviewSummary[]>("/interviews");
     return data;
   } catch (error) {
     throw toApiError(error);
   }
 }
 
-export async function getInterview(id: string | number): Promise<Interview> {
+export async function getInterview(id: string): Promise<InterviewDetail> {
   try {
-    const { data } = await api.get<Interview>(`/interviews/${id}`);
+    const { data } = await api.get<InterviewDetail>(`/interviews/${id}`);
     return data;
   } catch (error) {
     throw toApiError(error);
@@ -27,18 +32,23 @@ export async function getInterview(id: string | number): Promise<Interview> {
 
 export async function createInterview(
   input: CreateInterviewInput,
-): Promise<Interview> {
+): Promise<InterviewDetail> {
   try {
-    const { data } = await api.post<Interview>("/interviews", input);
+    const { data } = await api.post<InterviewDetail>("/interviews", input);
     return data;
   } catch (error) {
     throw toApiError(error);
   }
 }
 
-export async function startInterview(id: string | number): Promise<Interview> {
+/** Generates the first question (LLM) and marks the interview in_progress. */
+export async function startInterview(id: string): Promise<CurrentQuestion> {
   try {
-    const { data } = await api.post<Interview>(`/interviews/${id}/start`);
+    const { data } = await api.post<CurrentQuestion>(
+      `/interviews/${id}/start`,
+      undefined,
+      { timeout: LLM_TIMEOUT_MS },
+    );
     return data;
   } catch (error) {
     throw toApiError(error);
@@ -46,10 +56,10 @@ export async function startInterview(id: string | number): Promise<Interview> {
 }
 
 export async function getCurrentQuestion(
-  id: string | number,
-): Promise<Question | null> {
+  id: string,
+): Promise<CurrentQuestion> {
   try {
-    const { data } = await api.get<Question | null>(
+    const { data } = await api.get<CurrentQuestion>(
       `/interviews/${id}/current-question`,
     );
     return data;
@@ -59,13 +69,14 @@ export async function getCurrentQuestion(
 }
 
 export async function submitAnswer(
-  questionId: string | number,
-  answerText: string,
-): Promise<AnswerResponse> {
+  questionId: string,
+  answer: string,
+): Promise<AnswerResult> {
   try {
-    const { data } = await api.post<AnswerResponse>(
+    const { data } = await api.post<AnswerResult>(
       `/questions/${questionId}/answer`,
-      { answer_text: answerText },
+      { answer },
+      { timeout: LLM_TIMEOUT_MS },
     );
     return data;
   } catch (error) {
@@ -73,13 +84,25 @@ export async function submitAnswer(
   }
 }
 
-export async function getReport(
-  interviewId: string | number,
-): Promise<Report> {
+export async function getReport(interviewId: string): Promise<Report> {
   try {
-    const { data } = await api.get<Report>(`/interviews/${interviewId}/report`);
+    const { data } = await api.get<Report>(
+      `/interviews/${interviewId}/report`,
+      { timeout: LLM_TIMEOUT_MS },
+    );
     return data;
   } catch (error) {
     throw toApiError(error);
   }
+}
+
+/** Find the question currently awaiting an answer (by id). */
+export function findCurrentQuestion(
+  interview: InterviewDetail,
+): Question | null {
+  if (!interview.current_question_id) return null;
+  return (
+    interview.questions.find((q) => q.id === interview.current_question_id) ??
+    null
+  );
 }

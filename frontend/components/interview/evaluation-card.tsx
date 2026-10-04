@@ -1,10 +1,16 @@
-import { ArrowRight, CircleCheck, Lightbulb, MessageSquare, TriangleAlert } from "lucide-react";
+import {
+  ArrowRight,
+  CircleCheck,
+  Lightbulb,
+  MessageSquare,
+  TriangleAlert,
+} from "lucide-react";
 
 import { ScoreBar } from "@/components/ui/score-bar";
-import type { MockEvaluation } from "@/data/mock";
+import type { Evaluation } from "@/types";
 
 interface EvaluationCardProps {
-  evaluation: MockEvaluation | null;
+  evaluation: Evaluation | null;
   state: "idle" | "pending" | "done";
   isLastQuestion: boolean;
   onNext: () => void;
@@ -75,6 +81,8 @@ export function EvaluationCard({
     );
   }
 
+  const scores = evaluation.scores;
+
   return (
     <section
       className="rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
@@ -85,52 +93,69 @@ export function EvaluationCard({
           Answer Evaluation
         </h2>
         <span className="rounded-full bg-brand-100 px-2.5 py-0.5 text-[11px] font-semibold text-brand-hover">
-          {evaluation.overall.toFixed(1)} / 10
+          {evaluation.overall.toFixed(0)} / 100
         </span>
       </header>
 
       <div className="space-y-5 px-4 py-4">
         <div className="space-y-3">
-          <ScoreBar label="Technical Accuracy" score={evaluation.technical} />
-          <ScoreBar label="Relevance" score={evaluation.relevance} />
-          <ScoreBar label="Completeness" score={evaluation.completeness} />
-          <ScoreBar label="Clarity" score={evaluation.clarity} />
+          <ScoreBar label="Technical" score={scores.technical} max={100} />
+          <ScoreBar label="Relevance" score={scores.relevance} max={100} />
+          <ScoreBar
+            label="Completeness"
+            score={scores.completeness}
+            max={100}
+          />
+          <ScoreBar label="Structure" score={scores.structure} max={100} />
+          <ScoreBar label="Clarity" score={scores.clarity} max={100} />
         </div>
 
         <div>
           <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-success">
             <CircleCheck className="h-3.5 w-3.5" aria-hidden />
-            Key Points
+            Strengths
           </h3>
-          <ul className="mt-1.5 space-y-1">
-            {evaluation.keyPoints.map((point) => (
-              <li
-                key={point}
-                className="flex gap-2 text-[13px] leading-relaxed text-ink-2"
-              >
-                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-success" />
-                {point}
-              </li>
-            ))}
-          </ul>
+          {evaluation.strengths.length === 0 ? (
+            <p className="mt-1.5 text-[13px] text-ink-3">
+              No clear strengths flagged.
+            </p>
+          ) : (
+            <ul className="mt-1.5 space-y-1">
+              {evaluation.strengths.map((point) => (
+                <li
+                  key={point}
+                  className="flex gap-2 text-[13px] leading-relaxed text-ink-2"
+                >
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-success" />
+                  {point}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div>
           <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-warning">
             <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
-            Missing
+            To improve
           </h3>
-          <ul className="mt-1.5 space-y-1">
-            {evaluation.missing.map((point) => (
-              <li
-                key={point}
-                className="flex gap-2 text-[13px] leading-relaxed text-ink-2"
-              >
-                <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-warning" />
-                {point}
-              </li>
-            ))}
-          </ul>
+          {evaluation.weaknesses.length === 0 ? (
+            <p className="mt-1.5 text-[13px] text-ink-3">
+              Nothing flagged — keep it up.
+            </p>
+          ) : (
+            <ul className="mt-1.5 space-y-1">
+              {evaluation.weaknesses.map((point) => (
+                <li
+                  key={point}
+                  className="flex gap-2 text-[13px] leading-relaxed text-ink-2"
+                >
+                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-warning" />
+                  {point}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <div className="flex gap-2.5 rounded-xl border border-[#f8dcb8] bg-ai px-4 py-3">
@@ -140,11 +165,21 @@ export function EvaluationCard({
           />
           <div>
             <p className="text-[13px] font-semibold text-[#b3620a]">
-              Suggested Improvement
+              Coach feedback
             </p>
             <p className="mt-0.5 text-[13px] leading-relaxed text-ink-2">
-              {evaluation.suggestion}
+              {evaluation.feedback}
             </p>
+            {evaluation.improved_answer ? (
+              <>
+                <p className="mt-3 text-[13px] font-semibold text-[#b3620a]">
+                  Stronger answer
+                </p>
+                <p className="mt-0.5 text-[13px] leading-relaxed text-ink-2">
+                  {evaluation.improved_answer}
+                </p>
+              </>
+            ) : null}
           </div>
         </div>
 

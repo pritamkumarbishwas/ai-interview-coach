@@ -7,7 +7,7 @@ import { Mic, MicOff, Send } from "lucide-react";
 import { cx } from "@/lib/utils";
 
 interface AnswerInputProps {
-  onSubmit: (answer: string) => void;
+  onSubmit: (answer: string) => void | Promise<void>;
   disabled?: boolean;
 }
 
@@ -15,12 +15,16 @@ export function AnswerInput({ onSubmit, disabled }: AnswerInputProps) {
   const [value, setValue] = useState("");
   const [recording, setRecording] = useState(false);
 
-  const submit = (event?: FormEvent) => {
+  const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
-    onSubmit(trimmed);
-    setValue("");
+    try {
+      await Promise.resolve(onSubmit(trimmed));
+      setValue("");
+    } catch {
+      // Keep the text so the user can retry after an error.
+    }
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {

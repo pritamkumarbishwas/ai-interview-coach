@@ -16,19 +16,39 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field, Input, Textarea } from "@/components/ui/input";
+import { toApiError } from "@/lib/api";
 import { cx } from "@/lib/utils";
+import { createJobDescription } from "@/services/job-descriptions";
+import { uploadResume } from "@/services/resumes";
+import {
+  createInterview,
+  startInterview,
+} from "@/services/interviews";
+import type {
+  Difficulty,
+  ExperienceLevel,
+  InterviewType,
+} from "@/types";
 
-const INTERVIEW_TYPES = [
-  "Technical",
-  "Behavioral",
-  "HR",
-  "Mixed",
-  "System Design",
-] as const;
+const INTERVIEW_TYPES: { value: InterviewType; label: string }[] = [
+  { value: "technical", label: "Technical" },
+  { value: "behavioral", label: "Behavioral" },
+  { value: "hr", label: "HR" },
+  { value: "mixed", label: "Mixed" },
+  { value: "system_design", label: "System Design" },
+];
 
-const DIFFICULTIES = ["Beginner", "Intermediate", "Advanced"] as const;
+const DIFFICULTIES: { value: Difficulty; label: string }[] = [
+  { value: "beginner", label: "Beginner" },
+  { value: "intermediate", label: "Intermediate" },
+  { value: "advanced", label: "Advanced" },
+];
 
-const EXPERIENCE_LEVELS = ["Entry", "Mid", "Senior"] as const;
+const EXPERIENCE_LEVELS: { value: ExperienceLevel; label: string }[] = [
+  { value: "junior", label: "Entry" },
+  { value: "mid", label: "Mid" },
+  { value: "senior", label: "Senior" },
+];
 
 const ACCEPTED_EXTENSIONS = [".pdf", ".docx"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -41,39 +61,37 @@ function clampQuestionCount(value: number): number {
 export default function PracticePage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
-  const [resumeName, setResumeName] = useState<string | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [jobDescription, setJobDescription] = useState("");
   const [role, setRole] = useState("Full Stack Developer");
-  const [experience, setExperience] = useState<(typeof EXPERIENCE_LEVELS)[number]>(
-    "Mid",
-  );
-  const [type, setType] = useState<(typeof INTERVIEW_TYPES)[number]>("Technical");
-  const [difficulty, setDifficulty] = useState<(typeof DIFFICULTIES)[number]>(
-    "Intermediate",
-  );
+  const [experience, setExperience] = useState<ExperienceLevel>("mid");
+  const [type, setType] = useState<InterviewType>("technical");
+  const [difficulty, setDifficulty] = useState<Difficulty>("intermediate");
   const [questionCount, setQuestionCount] = useState(10);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
-  const acceptFile = (file?: File) => {
-    if (!file) return;
-    const lower = file.name.toLowerCase();
+  const acceptFile = (next?: File) => {
+    if (!next) return;
+    const lower = next.name.toLowerCase();
     if (!ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
-      setResumeName(null);
+      setFile(null);
       setFileError("Only PDF and DOCX files are supported.");
       return;
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setResumeName(null);
+    if (next.size > MAX_UPLOAD_BYTES) {
+      setFile(null);
       setFileError("That file is larger than 5 MB.");
       return;
     }
     setFileError(null);
-    setResumeName(file.name);
+    setFile(next);
   };
 
   const removeFile = () => {
-    setResumeName(null);
+    setFile(null);
     setFileError(null);
   };
 
@@ -85,6 +103,46 @@ export default function PracticePage() {
 
   const canContinue = step === 1 || (step === 2 && jobDescription.trim().length > 0);
   const canStart = role.trim().length > 0;
+
+  const handleStart = async () => {
+    if (starting) return;
+    const target = clampQuestionCount(questionCount);
+    setQuestionCount(target);
+    setStarting(true);
+    setStartError(null);
+    try {
+      let resumeId: string | undefined;
+      if (file) {
+        const uploaded = await uploadResume(file);
+        resumeId = uploaded.id;
+      }
+      const jd = await createJobDescription({
+        title: role.trim(),
+        company: "Not specified",
+        raw_text: jobDescription.trim(),
+      });
+      const interview = await createInterview({
+        resume_id: resumeId,
+        jd_id: jd.id,
+        role: role.trim(),
+        level: experience,
+        type,
+        difficulty,
+        target_questions: target,
+      });
+      // Best effort: pre-generate question 1. On failure the workspace page
+      // offers a Start button, so the session is never lost.
+      try {
+        await startInterview(interview.id);
+      } catch {
+        // handled by the workspace
+      }
+      router.push(`/interviews/${interview.id}`);
+    } catch (error) {
+      setStartError(toApiError(error).message);
+      setStarting(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -164,11 +222,11 @@ export default function PracticePage() {
               <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand">
                 <FileUp className="h-6 w-6" aria-hidden />
               </span>
-              {resumeName ? (
+              {file ? (
                 <>
                   <p className="mt-4 flex items-center gap-2 text-sm font-semibold text-ink">
                     <FileText className="h-4 w-4 text-success" aria-hidden />
-                    {resumeName}
+                    {file.name}
                   </p>
                   <button
                     type="button"
@@ -255,15 +313,13 @@ export default function PracticePage() {
                   id="experience"
                   value={experience}
                   onChange={(event) =>
-                    setExperience(
-                      event.target.value as (typeof EXPERIENCE_LEVELS)[number],
-                    )
+                    setExperience(event.target.value as ExperienceLevel)
                   }
                   className="block w-full rounded-btn border border-line bg-card px-3.5 py-2.5 text-sm text-ink shadow-sm transition-colors focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand-100"
                 >
                   {EXPERIENCE_LEVELS.map((level) => (
-                    <option key={level} value={level}>
-                      {level}
+                    <option key={level.value} value={level.value}>
+                      {level.label}
                     </option>
                   ))}
                 </select>
@@ -277,18 +333,18 @@ export default function PracticePage() {
               <div className="flex flex-wrap gap-2">
                 {INTERVIEW_TYPES.map((item) => (
                   <button
-                    key={item}
+                    key={item.value}
                     type="button"
-                    onClick={() => setType(item)}
-                    aria-pressed={type === item}
+                    onClick={() => setType(item.value)}
+                    aria-pressed={type === item.value}
                     className={cx(
                       "rounded-full border px-3.5 py-1.5 text-[13px] font-medium transition-colors",
-                      type === item
+                      type === item.value
                         ? "border-brand bg-brand-100 text-brand-hover"
                         : "border-line bg-card text-ink-2 hover:bg-mist",
                     )}
                   >
-                    {item}
+                    {item.label}
                   </button>
                 ))}
               </div>
@@ -301,24 +357,24 @@ export default function PracticePage() {
               <div className="grid grid-cols-3 gap-3">
                 {DIFFICULTIES.map((item) => (
                   <button
-                    key={item}
+                    key={item.value}
                     type="button"
-                    onClick={() => setDifficulty(item)}
-                    aria-pressed={difficulty === item}
+                    onClick={() => setDifficulty(item.value)}
+                    aria-pressed={difficulty === item.value}
                     className={cx(
                       "rounded-xl border px-3 py-3 text-left transition-colors",
-                      difficulty === item
+                      difficulty === item.value
                         ? "border-brand bg-brand-50"
                         : "border-line bg-card hover:bg-mist",
                     )}
                   >
                     <span className="block text-sm font-semibold text-ink">
-                      {item}
+                      {item.label}
                     </span>
                     <span className="mt-0.5 block text-xs text-ink-2">
-                      {item === "Beginner"
+                      {item.value === "beginner"
                         ? "Warm-up basics"
-                        : item === "Intermediate"
+                        : item.value === "intermediate"
                           ? "Realistic screen"
                           : "Hard, senior-level"}
                     </span>
@@ -342,11 +398,15 @@ export default function PracticePage() {
         </Card>
       ) : null}
 
+      {startError ? (
+        <Alert tone="error">{startError}</Alert>
+      ) : null}
+
       <div className="flex items-center justify-between gap-3">
         <Button
           variant="ghost"
           onClick={() => setStep((value) => Math.max(1, value - 1))}
-          disabled={step === 1}
+          disabled={step === 1 || starting}
           icon={<ArrowLeft className="h-4 w-4" />}
         >
           Back
@@ -362,14 +422,12 @@ export default function PracticePage() {
           </Button>
         ) : (
           <Button
-            onClick={() => {
-              setQuestionCount(clampQuestionCount(questionCount));
-              router.push("/interviews/fsd-01");
-            }}
-            disabled={!canStart}
+            onClick={handleStart}
+            disabled={!canStart || starting}
+            loading={starting}
             icon={<Mic className="h-4 w-4" />}
           >
-            Start AI Interview
+            {starting ? "Creating…" : "Start AI Interview"}
           </Button>
         )}
       </div>

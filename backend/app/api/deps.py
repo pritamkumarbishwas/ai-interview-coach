@@ -11,6 +11,7 @@ from app.repositories.job_description_repository import job_description_reposito
 from app.repositories.resume_repository import resume_repository
 from app.repositories.user_repository import UserRepository, user_repository
 from app.services.auth_service import AuthService
+from app.services.dashboard_service import DashboardService
 from app.services.interview_service import InterviewService
 from app.services.job_description_service import JobDescriptionService
 from app.services.resume_service import ResumeService
@@ -39,6 +40,10 @@ def get_job_description_service() -> JobDescriptionService:
 
 def get_interview_service() -> InterviewService:
     return InterviewService(interview_repository, resume_repository, job_description_repository)
+
+
+def get_dashboard_service() -> DashboardService:
+    return DashboardService(interview_repository)
 
 
 async def get_current_user(

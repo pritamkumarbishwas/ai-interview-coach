@@ -1,7 +1,13 @@
-export type InterviewType = "technical" | "behavioral" | "hr" | "mixed";
-export type ExperienceLevel = "entry" | "mid" | "senior" | "lead";
-export type Difficulty = "easy" | "medium" | "hard";
+export type InterviewType =
+  | "technical"
+  | "behavioral"
+  | "hr"
+  | "mixed"
+  | "system_design";
+export type ExperienceLevel = "junior" | "mid" | "senior";
+export type Difficulty = "beginner" | "intermediate" | "advanced";
 export type InterviewStatus = "created" | "in_progress" | "completed";
+export type NextStep = "follow_up" | "harder" | "easier" | "new_topic";
 
 export interface User {
   id: string;
@@ -75,74 +81,140 @@ export interface CreateJobDescriptionInput {
   raw_text: string;
 }
 
-export interface Interview {
-  id: string | number;
+/** Row returned by `GET /api/interviews` (list). */
+export interface InterviewSummary {
+  id: string;
   role: string;
-  interview_type: InterviewType;
+  type: InterviewType;
   difficulty: Difficulty;
   status: InterviewStatus;
-  total_questions: number;
-  current_question: number;
+  question_count: number;
+  answered_count: number;
+  target_questions: number;
   created_at: string;
-  completed_at?: string | null;
 }
 
 export interface CreateInterviewInput {
-  resume_id?: string | number | null;
-  job_description_id?: string | number | null;
+  resume_id?: string;
+  jd_id?: string;
   role: string;
-  experience_level: ExperienceLevel;
-  interview_type: InterviewType;
+  level: ExperienceLevel;
+  type: InterviewType;
   difficulty: Difficulty;
-  total_questions: number;
+  target_questions: number;
 }
 
 export interface Question {
-  id: string | number;
-  interview_id: string | number;
-  question_text: string;
-  category: string;
-  difficulty: Difficulty;
+  id: string;
+  sequence: number;
+  text: string;
   topic: string;
-  order_number: number;
 }
 
-export interface AnswerSubmission {
-  answer_text: string;
+/** Full document returned by `GET /api/interviews/{id}` (detail). */
+export interface InterviewDetail {
+  id: string;
+  resume_id: string;
+  jd_id: string;
+  role: string;
+  level: ExperienceLevel;
+  type: InterviewType;
+  difficulty: Difficulty;
+  status: InterviewStatus;
+  target_questions: number;
+  questions: Question[];
+  answers: AnswerRecord[];
+  current_question_id: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
 }
 
-export interface AnswerEvaluation {
-  id?: number;
-  overall_score: number;
-  relevance_score: number;
-  technical_score: number;
-  completeness_score: number;
-  clarity_score: number;
+export interface ScoreBreakdown {
+  technical: number;
+  relevance: number;
+  completeness: number;
+  structure: number;
+  clarity: number;
+}
+
+export interface Evaluation {
+  scores: ScoreBreakdown;
+  overall: number;
   strengths: string[];
   weaknesses: string[];
   feedback: string;
   improved_answer: string;
-  follow_up?: string | null;
-  next_question?: Question | null;
+  next_step: NextStep;
+  created_at: string;
 }
 
-export interface AnswerResponse {
-  evaluation: AnswerEvaluation;
-  next_question?: Question | null;
-  interview_completed?: boolean;
+export interface AnswerRecord {
+  id: string;
+  question_id: string;
+  text: string;
+  evaluation: Evaluation;
+  created_at: string;
 }
 
+/** Response of `POST /api/questions/{id}/answer`. */
+export interface AnswerResult {
+  question_id: string;
+  status: InterviewStatus;
+  evaluation: Evaluation;
+  next_question: Question | null;
+  questions_answered: number;
+  target_questions: number;
+}
+
+/** Response of `POST /interviews/{id}/start` and `GET .../current-question`. */
+export interface CurrentQuestion {
+  interview_id: string;
+  status: InterviewStatus;
+  question: Question;
+  question_number: number;
+  total_asked: number;
+}
+
+export interface PreparationStep {
+  focus: string;
+  actions: string[];
+}
+
+/** Response of `GET /api/interviews/{id}/report`. */
 export interface Report {
-  id: string | number;
-  interview_id: string | number;
+  interview_id: string;
   overall_score: number;
-  technical_score?: number;
-  communication_score?: number;
-  strengths: string[];
-  weaknesses: string[];
+  technical_score: number;
+  communication_score: number;
   strong_topics: string[];
   weak_topics: string[];
-  recommended_topics: string[];
-  preparation_plan: string[] | string;
+  topics_to_study: string[];
+  narrative: string;
+  preparation_plan: PreparationStep[];
+  generated_at: string;
+}
+
+export interface DashboardInterview {
+  id: string;
+  role: string;
+  type: InterviewType;
+  difficulty: Difficulty;
+  status: InterviewStatus;
+  target_questions: number;
+  answered_count: number;
+  score: number | null;
   created_at: string;
+}
+
+/** Response of `GET /api/dashboard/stats`. */
+export interface DashboardStats {
+  interviews_total: number;
+  interviews_completed: number;
+  interviews_in_progress: number;
+  questions_answered: number;
+  average_score: number | null;
+  strong_topics: string[];
+  weak_topics: string[];
+  recent: DashboardInterview[];
 }

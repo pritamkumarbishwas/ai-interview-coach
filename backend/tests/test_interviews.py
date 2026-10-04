@@ -109,6 +109,18 @@ def test_create_interview_rejects_unknown_resume(client: TestClient, auth_header
     assert response.json()["detail"] == "Resume not found"
 
 
+def test_create_interview_allows_missing_resume(
+    client: TestClient, auth_headers: dict, interview_context: dict
+) -> None:
+    payload = interview_payload(interview_context)
+    payload.pop("resume_id")
+    response = client.post("/api/interviews", headers=auth_headers, json=payload)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["resume_id"] == ""
+    assert body["status"] == "created"
+
+
 def test_create_interview_rejects_invalid_type(
     client: TestClient, auth_headers: dict, interview_context: dict
 ) -> None:

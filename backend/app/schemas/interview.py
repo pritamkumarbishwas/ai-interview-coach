@@ -9,7 +9,7 @@ DEFAULT_TARGET_QUESTIONS = 5
 
 
 class InterviewCreate(BaseModel):
-    resume_id: str
+    resume_id: str | None = None
     jd_id: str
     role: str = Field(min_length=1, max_length=200)
     level: Level = "mid"

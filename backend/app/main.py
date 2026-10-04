@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.auth import router as auth_router
+from app.api.dashboard import router as dashboard_router
 from app.api.interviews import router as interviews_router
 from app.api.job_descriptions import router as job_descriptions_router
 from app.api.questions import router as questions_router
@@ -164,6 +165,7 @@ app.include_router(
     interviews_router, prefix=f"{settings.api_prefix}/interviews", tags=["interviews"]
 )
 app.include_router(questions_router, prefix=f"{settings.api_prefix}/questions", tags=["questions"])
+app.include_router(dashboard_router, prefix=f"{settings.api_prefix}/dashboard", tags=["dashboard"])
 
 
 @app.get(f"{settings.api_prefix}/health", tags=["health"])

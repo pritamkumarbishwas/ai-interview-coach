@@ -224,16 +224,18 @@ class InterviewService:
     async def create(
         self, db: AsyncIOMotorDatabase, user_id: str, payload: InterviewCreate
     ) -> InterviewOut:
-        resume = await self._resumes.find_owned(db, payload.resume_id, user_id)
-        if resume is None:
-            raise NotFoundError("Resume not found")
+        resume_id = payload.resume_id or ""
+        if resume_id:
+            resume = await self._resumes.find_owned(db, resume_id, user_id)
+            if resume is None:
+                raise NotFoundError("Resume not found")
         jd = await self._job_descriptions.find_owned(db, payload.jd_id, user_id)
         if jd is None:
             raise NotFoundError("Job description not found")
 
         interview = Interview(
             user_id=user_id,
-            resume_id=payload.resume_id,
+            resume_id=resume_id,
             jd_id=payload.jd_id,
             role=payload.role,
             level=payload.level,
