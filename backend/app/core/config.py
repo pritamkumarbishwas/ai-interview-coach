@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     rate_limit_attempts: int = 20
     rate_limit_window_seconds: int = 60
     trust_proxy_headers: bool = False
-    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000", "https://resume-builder-rho-woad.vercel.app"]
+    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "https://resume-builder-rho-woad.vercel.app"]
 
     llm_provider: str = "openai"
     openai_api_key: str | None = None
