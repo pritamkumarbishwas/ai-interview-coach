@@ -417,6 +417,30 @@ function InterviewWorkspace() {
   );
 
   if (interview.status === "created") {
+    if (step === "check") {
+      return (
+        <div className="space-y-5">
+          {header}
+          <DeviceCheck
+            candidateName={user?.name ?? "Candidate"}
+            onNext={handleStart}
+            nexting={starting}
+          />
+          {startError ? <Alert tone="error">{startError}</Alert> : null}
+          <div className="flex justify-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setStep("ready")}
+              disabled={starting}
+            >
+              ← Back to details
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-5">
         {header}
@@ -499,15 +523,12 @@ function InterviewWorkspace() {
                   <Button
                     variant="primary"
                     size="lg"
-                    onClick={handleStart}
-                    disabled={starting || !canStart}
-                    loading={starting}
+                    onClick={() => setStep("check")}
+                    disabled={!canStart}
                     icon={<Play className="h-4 w-4" />}
                     className="w-full"
                   >
-                    {starting
-                      ? "Generating first question…"
-                      : "Start Interview"}
+                    Start Interview
                   </Button>
                   {!canStart ? (
                     <p className="mt-3 text-xs text-warning">
@@ -515,8 +536,8 @@ function InterviewWorkspace() {
                     </p>
                   ) : (
                     <p className="mt-3 text-xs text-ink-3">
-                      Your progress is saved — you can leave and resume anytime
-                      before the last question.
+                      Next you&apos;ll run a quick camera &amp; screen check,
+                      then the interview begins.
                     </p>
                   )}
                 </div>

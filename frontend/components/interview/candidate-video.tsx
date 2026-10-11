@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import {
   Mic,
   MicOff,
@@ -33,11 +35,19 @@ export function CandidateVideo({
     screenStatus,
     micOn,
     camOn,
+    startCamera,
     toggleMic,
     toggleCam,
     startScreen,
     stopScreen,
   } = useMedia();
+
+  // Resumed interviews skip the device-check step — open the camera anyway.
+  useEffect(() => {
+    if (cameraStatus === "idle") {
+      void startCamera();
+    }
+  }, [cameraStatus, startCamera]);
 
   const sharing = screenStatus === "active" && !!screenStream;
   const cameraLive = cameraStatus === "active" && camOn && !!cameraStream;
