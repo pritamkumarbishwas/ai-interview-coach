@@ -112,7 +112,7 @@ export function AnswerInput({ onSubmit, disabled, busy }: AnswerInputProps) {
             ) : busy ? (
               <span className="flex items-center gap-1.5 text-xs font-medium text-brand">
                 <span className="h-1.5 w-1.5 rounded-full bg-brand animate-pulse-dot" />
-                AI is evaluating your answer…
+                AI is preparing the next question…
               </span>
             ) : (
               <span className="text-xs text-ink-3">

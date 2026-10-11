@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   ArrowLeft,
   Award,
   CircleCheck,
-  ClipboardList,
   Lightbulb,
+  Loader2,
   Mic,
   Sparkles,
   Target,
@@ -18,13 +19,23 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/loading";
 import { StatCard } from "@/components/ui/stat-card";
+import { AnswerReview } from "@/components/interview/answer-review";
+import { RecordingPlayer } from "@/components/interview/recording-player";
 import { useAsync } from "@/hooks/use-async";
+import { ApiError, toApiError } from "@/lib/api";
 import { TYPE_LABELS } from "@/lib/interview";
 import { formatDateTime, scoreLabel } from "@/lib/utils";
-import { getInterview, getReport } from "@/services/interviews";
+import {
+  getInterview,
+  getReport,
+  recordingKinds,
+} from "@/services/interviews";
+import type { Report } from "@/types";
+
+const POLL_INTERVAL_MS = 3_000;
+const POLL_MAX_ATTEMPTS = 60; // ~3 minutes
 
 function durationLabel(startedAt: string | null, completedAt: string | null) {
   if (!startedAt || !completedAt) return null;
@@ -34,19 +45,91 @@ function durationLabel(startedAt: string | null, completedAt: string | null) {
   return `${Math.max(1, minutes)} min`;
 }
 
+/**
+ * Loads the report, polling every 3s while it is still being generated
+ * (409 = interview not finished, 404 = report not cached yet). Gives up after
+ * ~3 minutes and shows a manual retry.
+ */
+function useReportPolling(interviewId: string) {
+  const [report, setReport] = useState<Report | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [pollAttempt, setPollAttempt] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let count = 0;
+
+    const load = async () => {
+      setLoading(true);
+      try {
+        const data = await getReport(interviewId);
+        if (cancelled) return;
+        setReport(data);
+        setError(null);
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) return;
+        const apiErr = toApiError(err);
+        // 409 (not finished) and 404 (not cached yet) are transient while the
+        // background evaluation pipeline is still running — keep polling.
+        if (
+          (apiErr.status === 409 || apiErr.status === 404) &&
+          count < POLL_MAX_ATTEMPTS
+        ) {
+          count += 1;
+          setPollAttempt(count);
+          timer = setTimeout(load, POLL_INTERVAL_MS);
+        } else {
+          setError(apiErr);
+          setLoading(false);
+        }
+      }
+    };
+
+    void load();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [interviewId, reloadKey]);
+
+  const retry = useCallback(() => {
+    setReport(null);
+    setError(null);
+    setLoading(true);
+    setPollAttempt(0);
+    setReloadKey((k) => k + 1);
+  }, []);
+
+  return {
+    report,
+    loading,
+    error,
+    retry,
+    polling: pollAttempt > 0 && !report,
+  };
+}
+
 export default function ResultPage() {
   const params = useParams<{ id: string }>();
 
   const interviewState = useAsync(() => getInterview(params.id), [params.id]);
-  const reportState = useAsync(() => getReport(params.id), [params.id]);
+  const {
+    report,
+    loading: reportLoading,
+    error: reportError,
+    retry: retryReport,
+    polling,
+  } = useReportPolling(params.id);
 
   const interview = interviewState.data;
-  const report = reportState.data;
-  const reportError = reportState.error;
 
   const notFound =
     reportError?.status === 404 || interviewState.error?.status === 404;
-  const notFinished = reportError?.status === 409;
 
   if (interviewState.loading && !interview && !interviewState.error) {
     return (
@@ -76,40 +159,49 @@ export default function ResultPage() {
     );
   }
 
-  if (notFinished) {
+  // Show a "generating" state while the report is still being computed.
+  if (reportLoading && !report) {
     return (
-      <div className="mx-auto max-w-2xl py-10">
-        <EmptyState
-          icon={<ClipboardList className="h-6 w-6" />}
-          title="Interview not finished yet"
-          description="The report is generated once every question has been answered. Your progress is saved — resume where you left off."
-          action={
-            <div className="flex justify-center gap-3">
-              <ButtonLink
-                href={`/interviews/${params.id}`}
-                variant="primary"
-                icon={<Mic className="h-4 w-4" />}
-              >
-                Resume interview
-              </ButtonLink>
-              <ButtonLink href="/interviews" variant="outline">
-                Back to interviews
-              </ButtonLink>
+      <div className="mx-auto max-w-4xl space-y-6">
+        <Link
+          href="/interviews"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 transition-colors hover:text-ink"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+          Back to interviews
+        </Link>
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-brand" aria-hidden />
+            <div>
+              <p className="text-[15px] font-semibold text-ink">
+                Generating your report…
+              </p>
+              <p className="mt-1 text-sm text-ink-2">
+                Your answers are being evaluated. This usually takes a few
+                minutes.
+              </p>
             </div>
-          }
-        />
+          </CardContent>
+        </Card>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <SkeletonCard />
+          <SkeletonCard />
+          <SkeletonCard />
+        </div>
       </div>
     );
   }
 
-  if (reportError) {
+  if (reportError && !report) {
+    // Interview finished but report failed to load after polling cap.
     return (
       <div className="mx-auto max-w-xl py-16">
         <Alert tone="error">
           {reportError.message || "Could not load the report."}
         </Alert>
         <div className="mt-4 flex justify-center gap-3">
-          <Button variant="outline" onClick={reportState.reload}>
+          <Button variant="outline" onClick={retryReport}>
             Try again
           </Button>
           <ButtonLink href="/interviews" variant="outline">
@@ -138,6 +230,8 @@ export default function ResultPage() {
   ]
     .filter(Boolean)
     .join(" · ");
+
+  const kinds = recordingKinds(interview);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -169,6 +263,8 @@ export default function ResultPage() {
           <Badge tone="brand">{scoreLabel(report.overall_score)}</Badge>
         </div>
       </section>
+
+      <RecordingPlayer interviewId={interview.id} kinds={kinds} />
 
       <section
         className="grid grid-cols-1 gap-4 sm:grid-cols-3"
@@ -302,6 +398,11 @@ export default function ResultPage() {
         </Card>
       ) : null}
 
+      <AnswerReview
+        questions={interview.questions}
+        answers={interview.answers}
+      />
+
       <section className="flex flex-wrap items-center justify-center gap-3 pb-4">
         <ButtonLink
           href="/practice"
@@ -314,6 +415,13 @@ export default function ResultPage() {
           My Interviews
         </ButtonLink>
       </section>
+
+      {polling ? (
+        <p className="pb-2 text-center text-xs text-ink-3">
+          Some answers are still being evaluated — refresh shortly for updated
+          scores.
+        </p>
+      ) : null}
     </div>
   );
 }

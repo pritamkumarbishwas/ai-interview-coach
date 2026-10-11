@@ -1,5 +1,6 @@
 """Interview use-cases: creation, state machine and one-at-a-time questions."""
 
+import asyncio
 import json
 import logging
 import uuid
@@ -10,11 +11,17 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
 from app.models.answer import Answer, Evaluation
-from app.models.interview import Interview, ProctoringSession, Question, can_transition
+from app.models.interview import (
+    Interview,
+    ProctoringEvent,
+    ProctoringSession,
+    Question,
+    can_transition,
+)
 from app.models.report import Report
 from app.prompts.templates import (
     EVALUATE_ANSWER_PROMPT,
-    GENERATE_NEXT_QUESTION_PROMPT,
+    GENERATE_NEXT_QUESTION_EVALFREE_PROMPT,
     GENERATE_QUESTION_PROMPT,
     GENERATE_REPORT_PROMPT,
     MAX_CONTEXT_CHARS,
@@ -42,6 +49,24 @@ logger = logging.getLogger(__name__)
 # Topic score cutoffs (per-topic scores are means of 0-100 evaluations).
 STRONG_TOPIC_MIN_SCORE = 70.0
 WEAK_TOPIC_MAX_SCORE = 50.0
+
+# Deferred-evaluation pipeline: bounded concurrency for the end-of-exam
+# parallel evaluation calls, plus strong references so fire-and-forget
+# background tasks are not garbage-collected mid-run.
+_EVAL_CONCURRENCY = 4
+_eval_semaphore = asyncio.Semaphore(_EVAL_CONCURRENCY)
+_background_tasks: set[asyncio.Task] = set()
+# Per-interview locks: the report backfill must not run the same interview's
+# evaluation twice under concurrent requests.
+_report_locks: dict[str, asyncio.Lock] = {}
+
+
+def _report_lock(interview_id: str) -> asyncio.Lock:
+    lock = _report_locks.get(interview_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _report_locks[interview_id] = lock
+    return lock
 
 
 def _context_block(data: object, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -76,6 +101,7 @@ def _interview_out(interview: Interview) -> InterviewOut:
         target_questions=interview.target_questions,
         questions=[_question_out(q) for q in interview.questions],
         answers=interview.answers,
+        recordings=interview.recordings,
         current_question_id=interview.current_question_id,
         created_at=interview.created_at,
         started_at=interview.started_at,
@@ -117,8 +143,10 @@ def aggregate_scores(interview: Interview) -> ScoreAggregates:
     - communication: mean of the `structure` + `clarity` dimensions
     - topics bucket into strong (>= 70) / weak (< 50) by their mean score;
       unanswered questions are skipped, as are unlabeled topics.
+    - answers whose evaluation is still `None` (deferred, not yet run) are
+      skipped entirely so a partially-evaluated interview never crashes.
     """
-    answers = interview.answers
+    answers = [a for a in interview.answers if a.evaluation is not None]
     if not answers:
         return ScoreAggregates(0.0, 0.0, 0.0, [], [])
 
@@ -182,9 +210,16 @@ def _performance_payload(interview: Interview) -> dict:
     LLM-produced strings (topics, feedback, weaknesses) are unbounded, so
     every field is truncated here: a 20-question interview must still fit
     inside MAX_REPORT_CONTEXT_CHARS without mid-JSON cuts.
+
+    Answers whose evaluation is still `None` are skipped (deferred scoring
+    has not finished for them yet).
     """
     aggregates = aggregate_scores(interview)
-    answers_by_question = {answer.question_id: answer for answer in interview.answers}
+    answers_by_question = {
+        answer.question_id: answer
+        for answer in interview.answers
+        if answer.evaluation is not None
+    }
     return {
         "role": interview.role,
         "type": interview.type.replace("_", " "),
@@ -344,14 +379,15 @@ class InterviewService:
         question_id: str,
         payload: AnswerInput,
     ) -> AnswerResultOut:
-        """Evaluate an answer, record it, and produce the next question.
+        """Record an answer and produce the next question (no scoring yet).
 
-        The evaluation and next-question LLM calls happen before any write:
-        if either fails the client gets a 503 and can resubmit without
-        leaving a half-recorded answer. The interview completes automatically
-        once `target_questions` answers have been scored; the final report
-        is then generated after the write (its failure never blocks
-        completion — the report endpoint backfills it later).
+        Evaluation is deferred to the end of the exam. The request path makes
+        at most one LLM call (next-question generation) — zero on the final
+        answer. If the next-question call fails the client gets a 503 and can
+        resubmit without leaving a half-recorded answer. The interview
+        completes automatically once `target_questions` answers are stored;
+        a background task then evaluates all answers in parallel and caches
+        the report (the report endpoint backfills if that task fails).
         """
         doc = await self._interviews.find_by_question(db, question_id, user_id)
         if doc is None:
@@ -368,21 +404,19 @@ class InterviewService:
         question = interview.current_question
         assert question is not None  # current_question_id matched above
 
-        evaluation = await self._evaluate(interview, question, payload.answer)
-
         answered = len(interview.answers) + 1
         completing = answered >= interview.target_questions
         next_question = None
         if not completing:
             next_question = await self._generate_next_question(
-                db, interview, question, payload.answer, evaluation
+                db, interview, question, payload.answer
             )
 
         answer = Answer(
             id=uuid.uuid4().hex,
             question_id=question_id,
             text=payload.answer,
-            evaluation=evaluation,
+            evaluation=None,  # deferred: scored at exam end
         )
         updated_doc = await self._interviews.record_answer(
             db, interview.id or "", user_id, answer, next_question, completing
@@ -392,47 +426,124 @@ class InterviewService:
 
         updated = Interview(**updated_doc)
         if updated.status == "completed":
-            await self._try_cache_report(db, updated)
+            self._spawn_evaluation_task(db, updated)
         return AnswerResultOut(
             question_id=question_id,
             status=updated.status,
-            evaluation=evaluation,
+            evaluation=None,
             next_question=_question_out(next_question) if next_question else None,
             questions_answered=len(updated.answers),
             target_questions=updated.target_questions,
         )
 
     async def report(self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str) -> ReportOut:
-        """The cached final report, generated on first access if missing."""
+        """The cached final report, generated on first access if missing.
+
+        Acts as the safety net for the deferred-evaluation pipeline: if any
+        answer is still unevaluated (background task failed or still running),
+        backfill the missing evaluations behind a per-interview lock, then
+        generate and cache the report.
+        """
         interview = await self._require(db, user_id, interview_id)
         if interview.status != "completed":
             raise ConflictError("The report is available once the interview is completed.")
         if interview.report is not None:
             return _report_out(interview)
 
-        report = await self._generate_report(interview)
-        doc = await self._interviews.set_report(db, interview.id or "", user_id, report)
-        if doc is None:
-            # A concurrent request cached a report first — use that one.
+        async with _report_lock(interview_id):
+            # Re-read inside the lock: a concurrent request (or the background
+            # task) may have finished the work while we waited.
+            interview = await self._require(db, user_id, interview_id)
+            if interview.report is not None:
+                return _report_out(interview)
+
+            await self._ensure_evaluations(db, interview)
             refreshed = await self._require(db, user_id, interview_id)
-            if refreshed.report is None:
-                raise ConflictError("Interview is no longer completed.")
-            return _report_out(refreshed)
-        return _report_out(Interview(**doc))
+            report = await self._generate_report(refreshed)
+            doc = await self._interviews.set_report(db, interview.id or "", user_id, report)
+            if doc is None:
+                # A concurrent request cached a report first — use that one.
+                latest = await self._require(db, user_id, interview_id)
+                if latest.report is None:
+                    raise ConflictError("Interview is no longer completed.")
+                return _report_out(latest)
+            return _report_out(Interview(**doc))
 
-    async def _try_cache_report(self, db: AsyncIOMotorDatabase, interview: Interview) -> None:
-        """Generate the final report right after completion.
+    def _spawn_evaluation_task(
+        self, db: AsyncIOMotorDatabase, interview: Interview
+    ) -> None:
+        """Fire-and-forget: evaluate all answers, then cache the report.
 
-        A report failure must never undo a completed interview: the client
-        backfills it later through `GET /interviews/{id}/report`.
+        Runs after the completion response is sent so the request path stays
+        fast. A failure here is logged only — `GET /report` backfills later.
         """
+        task = asyncio.create_task(
+            self._finalize_interview(db, interview.id or "", interview.user_id)
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
+    async def _finalize_interview(self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str) -> None:
+        """Background pipeline: evaluate all answers, then cache the report."""
         try:
-            report = await self._generate_report(interview)
-            await self._interviews.set_report(db, interview.id or "", interview.user_id, report)
+            async with _report_lock(interview_id):
+                doc = await self._interviews.find_owned(db, interview_id, user_id)
+                if doc is None:
+                    return
+                interview = Interview(**doc)
+                if interview.report is not None:
+                    return
+                await self._ensure_evaluations(db, interview)
+                refreshed_doc = await self._interviews.find_owned(db, interview_id, user_id)
+                if refreshed_doc is None:
+                    return
+                refreshed = Interview(**refreshed_doc)
+                report = await self._generate_report(refreshed)
+                await self._interviews.set_report(db, interview_id, user_id, report)
         except Exception as exc:
             logger.warning(
-                "Report generation after completion failed: %s: %s", type(exc).__name__, exc
+                "Background evaluation/report for interview %s failed: %s: %s",
+                interview_id,
+                type(exc).__name__,
+                exc,
             )
+
+    async def _ensure_evaluations(
+        self, db: AsyncIOMotorDatabase, interview: Interview
+    ) -> None:
+        """Evaluate every answer that is still unevaluated.
+
+        Runs in parallel under a bounded semaphore and persists each
+        evaluation incrementally the moment it finishes — a crash mid-run
+        keeps the completed work. Answers already evaluated are skipped, so
+        this is safe to call multiple times.
+        """
+        question_map = {question.id: question for question in interview.questions}
+        pending = [a for a in interview.answers if a.evaluation is None]
+        if not pending:
+            return
+
+        async def _eval_one(answer: Answer) -> None:
+            question = question_map.get(answer.question_id)
+            if question is None:
+                return
+            async with _eval_semaphore:
+                evaluation = await self._evaluate(interview, question, answer.text)
+            await self._interviews.set_answer_evaluation(
+                db, interview.id or "", interview.user_id, answer.id, evaluation
+            )
+
+        results = await asyncio.gather(
+            *(_eval_one(answer) for answer in pending), return_exceptions=True
+        )
+        for answer, result in zip(pending, results):
+            if isinstance(result, Exception):
+                logger.error(
+                    "Evaluation failed for answer %s: %s: %s",
+                    answer.id,
+                    type(result).__name__,
+                    result,
+                )
 
     async def _generate_report(self, interview: Interview) -> Report:
         aggregates = aggregate_scores(interview)
@@ -504,10 +615,9 @@ class InterviewService:
         interview: Interview,
         previous: Question,
         answer_text: str,
-        evaluation: Evaluation,
     ) -> Question:
         resume_context, jd_context = await self._load_context(db, interview)
-        prompt = GENERATE_NEXT_QUESTION_PROMPT.format(
+        prompt = GENERATE_NEXT_QUESTION_EVALFREE_PROMPT.format(
             type=interview.type.replace("_", " "),
             role=interview.role,
             level=interview.level,
@@ -517,8 +627,6 @@ class InterviewService:
             knowledge=await self._knowledge_block(interview, previous.topic),
             previous_question=previous.text,
             candidate_answer=answer_text,
-            feedback=evaluation.feedback,
-            decision=evaluation.next_step,
             covered_topics=", ".join(_covered_topics(interview)) or "(none yet)",
         )
         return await self._ask_for_question(interview, prompt)
@@ -634,3 +742,23 @@ class InterviewService:
             interview.proctoring_session.consent_given_at = now
             
         await self._interviews.update_proctoring_session(db, interview_id, user_id, interview.proctoring_session.model_dump())
+
+    async def record_proctoring_event(
+        self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str,
+        event_type: str, details: dict,
+    ) -> None:
+        """Append one proctoring event (e.g. camera_off, tab_blur).
+
+        Events are only meaningful once the interview is in progress; they are
+        appended race-safely via `$push` so concurrent track toggles cannot
+        clobber each other.
+        """
+        interview = await self._require(db, user_id, interview_id)
+        if interview.status not in ("in_progress", "completed"):
+            raise ConflictError("Proctoring events are only recorded during the interview.")
+        event = ProctoringEvent(type=event_type, details=details)
+        pushed = await self._interviews.push_proctoring_event(
+            db, interview_id, user_id, event.model_dump()
+        )
+        if not pushed:
+            raise NotFoundError("Interview not found")

@@ -14,6 +14,7 @@ from app.services.auth_service import AuthService
 from app.services.dashboard_service import DashboardService
 from app.services.interview_service import InterviewService
 from app.services.job_description_service import JobDescriptionService
+from app.services.recording_service import RecordingService, recording_service
 from app.services.resume_service import ResumeService
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -40,6 +41,10 @@ def get_job_description_service() -> JobDescriptionService:
 
 def get_interview_service() -> InterviewService:
     return InterviewService(interview_repository, resume_repository, job_description_repository)
+
+
+def get_recording_service() -> RecordingService:
+    return recording_service
 
 
 def get_dashboard_service() -> DashboardService:

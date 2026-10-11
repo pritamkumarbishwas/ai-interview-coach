@@ -43,5 +43,7 @@ class Answer(BaseModel):
     id: str
     question_id: str
     text: str
-    evaluation: Evaluation
+    # Deferred evaluation: written as `None` when the answer is recorded, then
+    # filled in by the end-of-exam background task (or the report backfill).
+    evaluation: Evaluation | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

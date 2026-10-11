@@ -20,14 +20,11 @@ import {
   AIInterviewer,
   type AIStatus,
 } from "@/components/interview/ai-interviewer";
-import { AIFeedback } from "@/components/interview/ai-feedback";
 import { AnswerInput } from "@/components/interview/answer-input";
-import { CandidateVideo } from "@/components/interview/candidate-video";
+import { CandidatePanel } from "@/components/interview/candidate-panel";
 import { DeviceCheck } from "@/components/interview/device-check";
-import { EvaluationCard } from "@/components/interview/evaluation-card";
 import { InterviewFeed } from "@/components/interview/interview-feed";
 import { InterviewProgress } from "@/components/interview/interview-progress";
-import { LiveScore } from "@/components/interview/live-score";
 import { Alert } from "@/components/ui/alert";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +33,8 @@ import { FullScreenLoader } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
 import { useAuth } from "@/hooks/use-auth";
-import { MediaProvider } from "@/hooks/use-media";
+import { useInterviewRecorder } from "@/hooks/use-interview-recorder";
+import { MediaProvider, useMedia } from "@/hooks/use-media";
 import { toApiError } from "@/lib/api";
 import {
   DIFFICULTY_LABELS,
@@ -44,20 +42,16 @@ import {
   TYPE_LABELS,
   TYPE_TONES,
 } from "@/lib/interview";
-import { scoreLabel } from "@/lib/utils";
 import {
   findCurrentQuestion,
   getInterview,
   recordProctoringConsent,
+  recordProctoringEvent,
   startInterview,
   submitAnswer as submitAnswerApi,
 } from "@/services/interviews";
-import type { Difficulty, Evaluation, InterviewDetail, Question } from "@/types";
-import type {
-  ChatMessage,
-  FeedbackItem,
-  MockScoreMetric,
-} from "@/data/mock";
+import type { Difficulty, InterviewDetail, Question } from "@/types";
+import type { ChatMessage } from "@/data/mock";
 
 const DIFFICULTY_TONES: Record<Difficulty, BadgeTone> = {
   beginner: "success",
@@ -106,43 +100,6 @@ function seedMessages(interview: InterviewDetail): ChatMessage[] {
   return out;
 }
 
-function feedbackFrom(evaluation: Evaluation): FeedbackItem[] {
-  const items: FeedbackItem[] = [];
-  if (evaluation.strengths.length > 0) {
-    items.push({
-      id: "fb-strengths",
-      tone: "good",
-      title: "Strengths",
-      detail: evaluation.strengths.join(" · "),
-    });
-  }
-  if (evaluation.weaknesses.length > 0) {
-    items.push({
-      id: "fb-weaknesses",
-      tone: "improve",
-      title: "To improve",
-      detail: evaluation.weaknesses.join(" · "),
-    });
-  }
-  items.push({
-    id: "fb-feedback",
-    tone: "good",
-    title: "Coach feedback",
-    detail: evaluation.feedback,
-  });
-  return items;
-}
-
-function metricsFrom(evaluation: Evaluation): MockScoreMetric[] {
-  return [
-    { label: "Technical", value: evaluation.scores.technical },
-    { label: "Relevance", value: evaluation.scores.relevance },
-    { label: "Completeness", value: evaluation.scores.completeness },
-    { label: "Structure", value: evaluation.scores.structure },
-    { label: "Clarity", value: evaluation.scores.clarity },
-  ];
-}
-
 export default function InterviewWorkspacePage() {
   return (
     <MediaProvider>
@@ -155,6 +112,7 @@ function InterviewWorkspace() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const { user } = useAuth();
+  const media = useMedia();
 
   const {
     data: interview,
@@ -165,13 +123,6 @@ function InterviewWorkspace() {
 
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
-  const [evalState, setEvalState] = useState<"idle" | "pending" | "done">(
-    "idle",
-  );
-  const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
-  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
-  const [pendingNext, setPendingNext] = useState<Question | null>(null);
   const [answerError, setAnswerError] = useState<string | null>(null);
   const [aiStatus, setAiStatus] = useState<AIStatus>("listening");
   const [muted, setMuted] = useState(false);
@@ -183,9 +134,22 @@ function InterviewWorkspace() {
   const [consentChecked, setConsentChecked] = useState(false);
   // "ready" = waiting room · "check" = camera/screen verification step
   const [step, setStep] = useState<"ready" | "check">("ready");
+  // Set true right before navigating to result so the panel can show a hint.
+  const [saving, setSaving] = useState(false);
 
   const seededRef = useRef("");
   const timers = useRef<number[]>([]);
+
+  const inProgress = interview?.status === "in_progress";
+
+  // Recording pipeline (silent capture + chunked upload).
+  const recorder = useInterviewRecorder({
+    interviewId: params.id,
+    targetQuestions: interview?.target_questions ?? 5,
+    active: inProgress,
+    cameraStream: media.cameraStream,
+    screenStream: media.screenStream,
+  });
 
   // Seed session state from the loaded interview (first load or after start).
   useEffect(() => {
@@ -195,7 +159,6 @@ function InterviewWorkspace() {
     seededRef.current = signature;
 
     setMessages(seedMessages(interview));
-    setEvaluations(interview.answers.map((answer) => answer.evaluation));
     setCurrentQuestion(findCurrentQuestion(interview));
     setCompleted(interview.status === "completed");
     if (interview.status === "completed") {
@@ -249,20 +212,10 @@ function InterviewWorkspace() {
   }
 
   const targetQuestions = interview.target_questions;
-  const answeredCount = evaluations.length;
-  const isLastQuestion = answeredCount >= targetQuestions;
+  const answeredCount = interview.answers.length;
   const questionNumber = currentQuestion
     ? currentQuestion.sequence
     : Math.max(answeredCount, 1);
-
-  const runningOverall =
-    evaluations.length > 0
-      ? Math.round(
-          evaluations.reduce((sum, item) => sum + item.overall, 0) /
-            evaluations.length,
-        )
-      : 0;
-  const lastEvaluation = evaluations[evaluations.length - 1] ?? null;
 
   const proctoringRequired =
     interview.proctoring_mode !== "off" &&
@@ -287,6 +240,18 @@ function InterviewWorkspace() {
     }
   };
 
+  /** Stop the recorder, wait for upload, then navigate to the result page. */
+  const finishAndGoToResult = async () => {
+    setSaving(true);
+    try {
+      await recorder.stopAndUpload();
+    } catch {
+      // Upload is best-effort; the result page shows a "recording
+      // unavailable" state if the metadata was never sealed.
+    }
+    router.push(`/interviews/${params.id}/result`);
+  };
+
   const submitAnswer = async (text: string): Promise<void> => {
     if (!currentQuestion || completed) {
       throw new Error("No question available.");
@@ -298,61 +263,42 @@ function InterviewWorkspace() {
       ...prev,
       { id: messageId, author: "candidate", text, time },
     ]);
-    setEvalState("pending");
     setAiStatus("thinking");
     try {
       const result = await submitAnswerApi(currentQuestion.id, text);
-      setEvaluation(result.evaluation);
-      setEvaluations((prev) => [...prev, result.evaluation]);
-      setPendingNext(result.next_question);
-      setFeedback(feedbackFrom(result.evaluation));
-      setEvalState("done");
       if (result.status === "completed") {
         setCompleted(true);
+        await finishAndGoToResult();
+        return;
       }
-      setAiStatus("speaking");
-      // The status will reset to listening via onSpeechEnd callback from AIInterviewer
+      const next = result.next_question;
+      if (next) {
+        setCurrentQuestion(next);
+        setMessages((prev) => [
+          ...prev,
+          { id: `ai-${next.id}`, author: "ai", text: next.text, time },
+        ]);
+        setAiStatus("speaking");
+        // The status resets to listening via onSpeechEnd from AIInterviewer.
+      } else {
+        // No next question and not completed — treat as finished.
+        setCompleted(true);
+        await finishAndGoToResult();
+      }
     } catch (err) {
       const apiError = toApiError(err);
       // Roll back the optimistic message; the text stays in the input.
       setMessages((prev) => prev.filter((item) => item.id !== messageId));
-      setEvalState("idle");
       setAiStatus("listening");
       setAnswerError(apiError.message);
       throw err;
     }
   };
 
-  const goNextQuestion = () => {
-    if (!pendingNext || completed) {
-      router.push(`/interviews/${params.id}/result`);
-      return;
-    }
-    const next = pendingNext;
-    setCurrentQuestion(next);
-    setPendingNext(null);
-    setEvaluation(null);
-    setEvalState("idle");
-    setFeedback([]);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `ai-${next.id}`,
-        author: "ai",
-        text: next.text,
-        time: formatTime(elapsed),
-      },
-    ]);
-    setAiStatus("speaking");
-    // The status will reset to listening via onSpeechEnd callback from AIInterviewer
-  };
-
-  const leaveInterview = () => {
+  const leaveInterview = async () => {
     setEndOpen(false);
-    router.push("/interviews");
+    await finishAndGoToResult();
   };
-
-  const inProgress = interview.status !== "created";
 
   const header = (
     <header className="flex flex-wrap items-center gap-4">
@@ -460,8 +406,8 @@ function InterviewWorkspace() {
                     <p className="mt-1 text-sm leading-relaxed text-ink-2">
                       The AI interviewer will ask you {targetQuestions}{" "}
                       questions about the {interview.role} role. Answer out
-                      loud or by typing — you&apos;ll get instant feedback
-                      after each one.
+                      loud or by typing — your full report and a recording of
+                      the session are ready when you finish.
                     </p>
                   </div>
                 </div>
@@ -553,9 +499,8 @@ function InterviewWorkspace() {
                   <ul className="mt-3 space-y-2.5">
                     {[
                       "One question at a time, at your pace",
-                      "Instant scoring on each answer",
-                      "Coach tips and a stronger rewrite",
-                      "Full report when you finish",
+                      "Your session is recorded for review",
+                      "Full report and coaching when you finish",
                     ].map((item) => (
                       <li
                         key={item}
@@ -606,10 +551,19 @@ function InterviewWorkspace() {
       {header}
 
       <section className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <CandidateVideo
+        <CandidatePanel
           candidateName={user?.name ?? "Candidate"}
+          recording={recorder.state === "recording"}
+          elapsedSec={recorder.elapsedSec}
+          onDeviceChange={(kind, on) => {
+            if (interview?.status === "in_progress") {
+              void recordProctoringEvent(params.id, `${kind}_${on ? "on" : "off"}`).catch(
+                () => {},
+              );
+            }
+          }}
           onLeave={() => setEndOpen(true)}
-          className="order-6 lg:order-none"
+          className="order-3 lg:order-none"
         />
         <AIInterviewer
           status={aiStatus}
@@ -624,12 +578,6 @@ function InterviewWorkspace() {
             setAiStatus("listening");
             setTimeout(() => setAiStatus("speaking"), 10);
           }}
-        />
-        <LiveScore
-          overall={runningOverall}
-          label={lastEvaluation ? scoreLabel(runningOverall) : "Not started"}
-          metrics={lastEvaluation ? metricsFrom(lastEvaluation) : []}
-          className="order-5 lg:order-none"
         />
 
         <div className="order-2 flex flex-col overflow-hidden rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:order-none">
@@ -654,32 +602,30 @@ function InterviewWorkspace() {
           ) : null}
           <AnswerInput
             onSubmit={submitAnswer}
-            disabled={evalState === "pending" || completed}
-            busy={evalState === "pending"}
+            disabled={aiStatus === "thinking" || completed || saving}
+            busy={aiStatus === "thinking"}
           />
         </div>
-
-        <AIFeedback
-          items={feedback}
-          pending={evalState === "pending"}
-          className="order-4 lg:order-none"
-        />
-
-        <EvaluationCard
-          evaluation={evaluation}
-          state={evalState}
-          isLastQuestion={isLastQuestion || completed}
-          className="order-3 lg:order-none"
-          onNext={goNextQuestion}
-          onEnd={() => router.push(`/interviews/${params.id}/result`)}
-        />
       </section>
+
+      {saving ? (
+        <div className="flex items-center justify-center gap-2 rounded-card border border-line bg-card px-4 py-3 text-sm font-medium text-ink-2">
+          <span className="h-2 w-2 rounded-full bg-brand animate-pulse-dot" />
+          Saving your session…
+        </div>
+      ) : null}
+
+      {recorder.state === "error" && recorder.error ? (
+        <Alert tone="info">
+          Session recording unavailable: {recorder.error}
+        </Alert>
+      ) : null}
 
       <Modal
         open={endOpen}
         onClose={() => setEndOpen(false)}
         title="Leave this interview?"
-        description="Your answers are saved. You can resume from My Interviews — the report is generated once every question is answered."
+        description="Your answers are saved. The recording is uploaded and your full report is generated once every question is answered."
       >
         <div className="flex items-center justify-end gap-3">
           <Button variant="outline" onClick={() => setEndOpen(false)}>
@@ -687,7 +633,7 @@ function InterviewWorkspace() {
           </Button>
           <Button
             variant="danger"
-            onClick={leaveInterview}
+            onClick={() => void leaveInterview()}
             icon={<Square className="h-3.5 w-3.5" />}
           >
             Leave interview

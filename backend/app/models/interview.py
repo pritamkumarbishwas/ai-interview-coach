@@ -51,6 +51,18 @@ class ProctoringSession(BaseModel):
     events: list[ProctoringEvent] = Field(default_factory=list)
 
 
+class RecordingMeta(BaseModel):
+    """Metadata for one stored session recording (GridFS), keyed by kind."""
+
+    file_id: str
+    content_type: str = "video/webm"
+    size_bytes: int = 0
+    chunk_count: int = 0
+    finalized: bool = False
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 class Interview(BaseModel):
     id: str | None = Field(default=None, alias="_id")
     user_id: str
@@ -70,6 +82,8 @@ class Interview(BaseModel):
     # Cached final report; generated once on completion (backfilled by the
     # report endpoint if that first generation failed).
     report: Report | None = None
+    # Session recordings by kind ("camera" | "screen"); bytes live in GridFS.
+    recordings: dict[str, RecordingMeta] = Field(default_factory=dict)
     current_question_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None

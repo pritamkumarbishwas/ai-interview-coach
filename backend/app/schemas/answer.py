@@ -10,11 +10,15 @@ class AnswerInput(BaseModel):
 
 
 class AnswerResultOut(BaseModel):
-    """The evaluation of the submitted answer plus the next question (if any)."""
+    """The stored answer result plus the next question (if any).
+
+    `evaluation` is always `None` during the session — scoring is deferred to
+    the end of the exam (background task / report backfill).
+    """
 
     question_id: str
     status: InterviewStatus
-    evaluation: Evaluation
+    evaluation: Evaluation | None = None
     next_question: QuestionOut | None = None
     questions_answered: int
     target_questions: int

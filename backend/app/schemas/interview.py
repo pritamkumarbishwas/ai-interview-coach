@@ -3,7 +3,15 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from app.models.answer import Answer
-from app.models.interview import Difficulty, InterviewStatus, InterviewType, Level, ProctoringMode, ProctoringSession
+from app.models.interview import (
+    Difficulty,
+    InterviewStatus,
+    InterviewType,
+    Level,
+    ProctoringMode,
+    ProctoringSession,
+    RecordingMeta,
+)
 
 DEFAULT_TARGET_QUESTIONS = 5
 
@@ -55,6 +63,8 @@ class InterviewOut(BaseModel):
     target_questions: int = DEFAULT_TARGET_QUESTIONS
     questions: list[QuestionOut] = []
     answers: list[Answer] = []
+    # Recording metadata by kind (bytes are in GridFS, never inline here).
+    recordings: dict[str, RecordingMeta] = {}
     current_question_id: str | None = None
     created_at: datetime
     started_at: datetime | None = None

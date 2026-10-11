@@ -4,7 +4,7 @@ from typing import Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
-from app.models.answer import Answer
+from app.models.answer import Answer, Evaluation
 from app.models.interview import Interview, Question
 from app.models.report import Report
 from app.repositories.base import find_owned_document, stringify_id, to_object_id
@@ -70,6 +70,16 @@ class InterviewRepository:
         self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str
     ) -> dict | None:
         return await find_owned_document(db, self.collection_name, interview_id, user_id)
+
+    async def get_by_id(
+        self, db: AsyncIOMotorDatabase, interview_id: str
+    ) -> dict | None:
+        """Fetch by id regardless of owner (admin/cleanup paths only)."""
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return None
+        doc = await db[self.collection_name].find_one({"_id": object_id})
+        return stringify_id(doc) if doc else None
 
     async def find_by_question(
         self, db: AsyncIOMotorDatabase, question_id: str, user_id: str
@@ -197,6 +207,58 @@ class InterviewRepository:
             {"$set": {"report": report.model_dump()}},
             return_document=ReturnDocument.AFTER,
         )
+        return self._shape(doc) if doc else None
+
+    async def set_answer_evaluation(
+        self,
+        db: AsyncIOMotorDatabase,
+        interview_id: str,
+        user_id: str,
+        answer_id: str,
+        evaluation: Evaluation,
+    ) -> bool:
+        """Persist one answer's evaluation (incremental, deferred pipeline).
+
+        Uses `$set` with `arrayFilters` to target only the matching answer
+        element, so concurrent per-answer writes never clobber each other.
+        Returns True if an answer was updated.
+        """
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return False
+        result = await db[self.collection_name].update_one(
+            {
+                "_id": object_id,
+                "user_id": user_id,
+                "answers": {"$elemMatch": {"id": answer_id, "evaluation": None}},
+            },
+            {
+                "$set": {
+                    "answers.$[el].evaluation": evaluation.model_dump(),
+                }
+            },
+            array_filters=[{"el.id": answer_id}],
+        )
+        return result.modified_count == 1
+
+    async def set_recording_meta(
+        self,
+        db: AsyncIOMotorDatabase,
+        interview_id: str,
+        user_id: str,
+        kind: str,
+        meta: dict,
+    ) -> dict | None:
+        """Upsert one recording's metadata onto the interview document."""
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return None
+        doc = await db[self.collection_name].find_one_and_update(
+            {"_id": object_id, "user_id": user_id},
+            {f"$set": {f"recordings.{kind}": meta}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return self._shape(doc) if doc else None
     async def update_proctoring_session(
         self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str, session: dict
     ) -> dict | None:
@@ -209,6 +271,19 @@ class InterviewRepository:
             return_document=ReturnDocument.AFTER,
         )
         return self._shape(doc) if doc else None
+
+    async def push_proctoring_event(
+        self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str, event: dict
+    ) -> bool:
+        """Append one proctoring event to the session (race-safe `$push`)."""
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return False
+        result = await db[self.collection_name].update_one(
+            {"_id": object_id, "user_id": user_id},
+            {"$push": {"proctoring_session.events": event}},
+        )
+        return result.matched_count > 0
 
     @staticmethod
     def _shape(doc: dict[str, Any]) -> dict:

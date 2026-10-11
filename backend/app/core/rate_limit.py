@@ -90,6 +90,24 @@ _limiter = SlidingWindowRateLimiter(
     window_seconds=settings.rate_limit_window_seconds,
 )
 
+# Per-scope overrides for endpoints that legitimately need a higher budget
+# (e.g. authenticated chunked recording uploads: ~6/min at a 10s timeslice,
+# plus retries). Keyed by scope name; falls back to the global limiter.
+_scope_limiters: dict[str, SlidingWindowRateLimiter] = {}
+
+
+def _limiter_for(scope: str) -> SlidingWindowRateLimiter:
+    override = settings.rate_limit_overrides.get(scope)
+    if override is None:
+        return _limiter
+    limiter = _scope_limiters.get(scope)
+    if limiter is None:
+        limiter = SlidingWindowRateLimiter(
+            max_hits=override[0], window_seconds=override[1]
+        )
+        _scope_limiters[scope] = limiter
+    return limiter
+
 
 def client_key(request: Request) -> str:
     """Rate-limit key: the client IP, optionally taken from a trusted proxy."""
@@ -111,10 +129,11 @@ def rate_limit(scope: str) -> Callable[[Request], None]:
     def dependency(request: Request, response: Response) -> None:
         if settings.is_test:
             return
+        limiter = _limiter_for(scope)
         key = f"{scope}:{client_key(request)}"
-        response.headers.setdefault("X-RateLimit-Limit", str(_limiter.max_hits))
+        response.headers.setdefault("X-RateLimit-Limit", str(limiter.max_hits))
         try:
-            _limiter.check(key)
+            limiter.check(key)
         except HTTPException:
             logger.warning("Rate limit exceeded: %s", key, extra={"scope": scope})
             raise

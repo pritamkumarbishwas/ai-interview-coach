@@ -116,6 +116,17 @@ export interface ProctoringSession {
   consent_given_at: string | null;
 }
 
+/** Metadata for one stored session recording (kind = "camera" | "screen"). */
+export interface RecordingMeta {
+  file_id: string;
+  content_type: string;
+  size_bytes: number;
+  chunk_count: number;
+  finalized: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Full document returned by `GET /api/interviews/{id}` (detail). */
 export interface InterviewDetail {
   id: string;
@@ -131,6 +142,7 @@ export interface InterviewDetail {
   target_questions: number;
   questions: Question[];
   answers: AnswerRecord[];
+  recordings: Partial<Record<string, RecordingMeta>>;
   current_question_id: string | null;
   created_at: string;
   started_at: string | null;
@@ -160,7 +172,8 @@ export interface AnswerRecord {
   id: string;
   question_id: string;
   text: string;
-  evaluation: Evaluation;
+  /** Deferred: `null` until the end-of-exam evaluation has run. */
+  evaluation: Evaluation | null;
   created_at: string;
 }
 
@@ -168,7 +181,8 @@ export interface AnswerRecord {
 export interface AnswerResult {
   question_id: string;
   status: InterviewStatus;
-  evaluation: Evaluation;
+  /** Always `null` during the session — scoring is deferred to exam end. */
+  evaluation: Evaluation | null;
   next_question: Question | null;
   questions_answered: number;
   target_questions: number;

@@ -151,6 +151,50 @@ Return JSON: {{"question": "...", "topic": "..."}}
 </covered_topics>
 """
 
+# Eval-free variant: no separate evaluation runs during the session, so the
+# interviewer model decides the direction itself from the answer text alone.
+GENERATE_NEXT_QUESTION_EVALFREE_PROMPT = """
+You are an expert interviewer conducting a {type} interview for the role of
+{role} ({level} level, {difficulty} difficulty).
+
+The previous question and the candidate's answer are below. Based only on the
+answer, decide what to ask next:
+- follow_up: the answer was shallow, vague, or touched something worth
+  digging into — ask a deeper question on the same topic
+- harder: the answer was strong — raise the difficulty on this topic
+- easier: the answer was weak or off-base — lower the difficulty on this topic
+- new_topic: the topic is sufficiently covered — switch to a different,
+  not-yet-covered topic
+
+Never repeat or closely paraphrase a question or topic already covered.
+Ground the follow-up in the retrieved knowledge where it is relevant.
+Return JSON: {{"question": "...", "topic": "..."}}
+
+<resume_context>
+{resume_context}
+</resume_context>
+
+<job_description_context>
+{jd_context}
+</job_description_context>
+
+<relevant_knowledge>
+{knowledge}
+</relevant_knowledge>
+
+<previous_question>
+{previous_question}
+</previous_question>
+
+<candidate_answer>
+{candidate_answer}
+</candidate_answer>
+
+<covered_topics>
+{covered_topics}
+</covered_topics>
+"""
+
 GENERATE_REPORT_PROMPT = """
 You are an expert {type} interviewer writing the final report of a mock
 interview for the role of {role} ({level} level, {difficulty} difficulty).

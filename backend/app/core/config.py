@@ -36,12 +36,27 @@ class Settings(BaseSettings):
     max_upload_bytes: int = 5 * 1024 * 1024
     max_body_bytes: int = 10 * 1024 * 1024
 
+    # Interview session recordings (GridFS). Chunked upload: each chunk is
+    # capped, and the total per-kind recording is capped to bound storage.
+    max_recording_chunk_bytes: int = 16 * 1024 * 1024
+    max_recording_bytes: int = 500 * 1024 * 1024
+    recording_bucket_name: str = "interview_recordings"
+
     jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60 * 24
 
     rate_limit_attempts: int = 20
     rate_limit_window_seconds: int = 60
+    # Per-scope overrides as "scope=max_hits:window_seconds" pairs separated
+    # by semicolons, e.g. RATE_LIMIT_OVERRIDES="recording_upload=60:60".
+    # Bulk authenticated endpoints (chunked recording uploads) need a higher
+    # budget than the global credential-stuffing guard. The default gives
+    # recording uploads ~60/min (steady-state is ~6/min at a 10s timeslice,
+    # plus headroom for retries).
+    rate_limit_overrides: Annotated[dict[str, tuple[int, int]], NoDecode] = {
+        "recording_upload": (60, 60),
+    }
     trust_proxy_headers: bool = False
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "https://resume-builder-rho-woad.vercel.app"]
 
@@ -99,6 +114,39 @@ class Settings(BaseSettings):
                 raise ValueError("CORS_ORIGINS must be a list of origins")
             return parsed
         return [origin.strip() for origin in text.split(",") if origin.strip()]
+
+    @field_validator("rate_limit_overrides", mode="before")
+    @classmethod
+    def _parse_rate_limit_overrides(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return {}
+        overrides: dict[str, tuple[int, int]] = {}
+        for pair in text.split(";"):
+            pair = pair.strip()
+            if not pair:
+                continue
+            if "=" not in pair:
+                raise ValueError(
+                    "RATE_LIMIT_OVERRIDES entries must look like "
+                    "'scope=max_hits:window_seconds'"
+                )
+            scope, _, spec = pair.partition("=")
+            parts = spec.split(":")
+            if len(parts) != 2:
+                raise ValueError(
+                    f"RATE_LIMIT_OVERRIDES entry {pair!r} must provide "
+                    "max_hits and window_seconds"
+                )
+            try:
+                overrides[scope.strip()] = (int(parts[0]), int(parts[1]))
+            except ValueError as exc:
+                raise ValueError(
+                    f"RATE_LIMIT_OVERRIDES entry {pair!r} has non-integer limits"
+                ) from exc
+        return overrides
 
     @model_validator(mode="after")
     def _check_production_secrets(self) -> "Settings":
