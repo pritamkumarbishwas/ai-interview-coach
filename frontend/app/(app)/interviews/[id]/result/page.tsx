@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
 
 import {
   ArrowLeft,
   Award,
   CircleCheck,
+  ClipboardList,
   Lightbulb,
   Loader2,
   Mic,
@@ -19,12 +19,12 @@ import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonCard } from "@/components/ui/loading";
 import { StatCard } from "@/components/ui/stat-card";
 import { AnswerReview } from "@/components/interview/answer-review";
 import { RecordingPlayer } from "@/components/interview/recording-player";
 import { useAsync } from "@/hooks/use-async";
-import { ApiError, toApiError } from "@/lib/api";
 import { TYPE_LABELS } from "@/lib/interview";
 import { formatDateTime, scoreLabel } from "@/lib/utils";
 import {
@@ -32,10 +32,6 @@ import {
   getReport,
   recordingKinds,
 } from "@/services/interviews";
-import type { Report } from "@/types";
-
-const POLL_INTERVAL_MS = 3_000;
-const POLL_MAX_ATTEMPTS = 60; // ~3 minutes
 
 function durationLabel(startedAt: string | null, completedAt: string | null) {
   if (!startedAt || !completedAt) return null;
@@ -45,91 +41,26 @@ function durationLabel(startedAt: string | null, completedAt: string | null) {
   return `${Math.max(1, minutes)} min`;
 }
 
-/**
- * Loads the report, polling every 3s while it is still being generated
- * (409 = interview not finished, 404 = report not cached yet). Gives up after
- * ~3 minutes and shows a manual retry.
- */
-function useReportPolling(interviewId: string) {
-  const [report, setReport] = useState<Report | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<ApiError | null>(null);
-  const [pollAttempt, setPollAttempt] = useState(0);
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let count = 0;
-
-    const load = async () => {
-      setLoading(true);
-      try {
-        const data = await getReport(interviewId);
-        if (cancelled) return;
-        setReport(data);
-        setError(null);
-        setLoading(false);
-      } catch (err) {
-        if (cancelled) return;
-        const apiErr = toApiError(err);
-        // 409 (not finished) and 404 (not cached yet) are transient while the
-        // background evaluation pipeline is still running — keep polling.
-        if (
-          (apiErr.status === 409 || apiErr.status === 404) &&
-          count < POLL_MAX_ATTEMPTS
-        ) {
-          count += 1;
-          setPollAttempt(count);
-          timer = setTimeout(load, POLL_INTERVAL_MS);
-        } else {
-          setError(apiErr);
-          setLoading(false);
-        }
-      }
-    };
-
-    void load();
-
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [interviewId, reloadKey]);
-
-  const retry = useCallback(() => {
-    setReport(null);
-    setError(null);
-    setLoading(true);
-    setPollAttempt(0);
-    setReloadKey((k) => k + 1);
-  }, []);
-
-  return {
-    report,
-    loading,
-    error,
-    retry,
-    polling: pollAttempt > 0 && !report,
-  };
-}
-
 export default function ResultPage() {
   const params = useParams<{ id: string }>();
 
   const interviewState = useAsync(() => getInterview(params.id), [params.id]);
-  const {
-    report,
-    loading: reportLoading,
-    error: reportError,
-    retry: retryReport,
-    polling,
-  } = useReportPolling(params.id);
+  const reportState = useAsync(() => getReport(params.id), [params.id]);
 
   const interview = interviewState.data;
+  const report = reportState.data;
+  const reportError = reportState.error;
+  const retryReport = reportState.reload;
+  // The report endpoint blocks (per-interview lock) until evaluation and
+  // generation finish, so a single request covers the whole wait — this
+  // loading flag stays true for as long as that request is in flight.
+  const reportLoading = reportState.loading && !report;
 
   const notFound =
     reportError?.status === 404 || interviewState.error?.status === 404;
+  // 409 means the interview was left early and is still in progress — a
+  // permanent state until it is resumed, not a transient "still evaluating".
+  const notFinished = reportError?.status === 409;
 
   if (interviewState.loading && !interview && !interviewState.error) {
     return (
@@ -159,8 +90,33 @@ export default function ResultPage() {
     );
   }
 
-  // Show a "generating" state while the report is still being computed.
-  if (reportLoading && !report) {
+  if (notFinished) {
+    return (
+      <div className="mx-auto max-w-2xl py-10">
+        <EmptyState
+          icon={<ClipboardList className="h-6 w-6" />}
+          title="Interview not finished yet"
+          description="The report is generated once every question has been answered. Your progress is saved — resume where you left off."
+          action={
+            <div className="flex justify-center gap-3">
+              <ButtonLink
+                href={`/interviews/${params.id}`}
+                variant="primary"
+                icon={<Mic className="h-4 w-4" />}
+              >
+                Resume interview
+              </ButtonLink>
+              <ButtonLink href="/interviews" variant="outline">
+                Back to interviews
+              </ButtonLink>
+            </div>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (reportLoading) {
     return (
       <div className="mx-auto max-w-4xl space-y-6">
         <Link
@@ -178,8 +134,7 @@ export default function ResultPage() {
                 Generating your report…
               </p>
               <p className="mt-1 text-sm text-ink-2">
-                Your answers are being evaluated. This usually takes a few
-                minutes.
+                Your answers are being evaluated. This usually takes a moment.
               </p>
             </div>
           </CardContent>
@@ -194,7 +149,6 @@ export default function ResultPage() {
   }
 
   if (reportError && !report) {
-    // Interview finished but report failed to load after polling cap.
     return (
       <div className="mx-auto max-w-xl py-16">
         <Alert tone="error">
@@ -415,13 +369,6 @@ export default function ResultPage() {
           My Interviews
         </ButtonLink>
       </section>
-
-      {polling ? (
-        <p className="pb-2 text-center text-xs text-ink-3">
-          Some answers are still being evaluated — refresh shortly for updated
-          scores.
-        </p>
-      ) : null}
     </div>
   );
 }

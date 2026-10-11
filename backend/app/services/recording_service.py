@@ -85,13 +85,8 @@ class RecordingService:
                 f"{settings.max_recording_bytes // (1024 * 1024)}MB limit."
             )
 
-        # Open-for-append: GridFS has no native append, so we track the next
-        # chunk index in metadata and open a fresh GridIn per chunk with a
-        # distinct filename suffix, OR — simpler and robust — store each
-        # (interview,kind) as a single logical file by concatenating via
-        # `open_upload_stream` with `chunk_index` in metadata. To keep reads
-        # simple we instead store ONE GridFS file per chunk and concatenate on
-        # download. File id encodes the chunk seq.
+        # GridFS has no append, so each chunk is its own file, named
+        # "<interview>:<kind>#<seq>" and concatenated on read.
         chunk_filename = f"{file_id}#{seq}"
         grid_in = await bucket.open_upload_stream(
             chunk_filename,
@@ -99,7 +94,9 @@ class RecordingService:
                 "interview_id": interview_id,
                 "kind": kind,
                 "seq": seq,
-                "size_bytes": len(chunk),
+                # Running total, not this chunk's size — the next append reads
+                # it back to enforce the cap across the whole recording.
+                "size_bytes": total,
                 "content_type": content_type,
             },
         )

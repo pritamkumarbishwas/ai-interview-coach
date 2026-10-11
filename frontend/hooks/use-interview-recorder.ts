@@ -150,20 +150,10 @@ export function useInterviewRecorder({
     uploadedRef.current = true;
     setState("uploading");
     try {
-      // Send a zero-length finalize marker so the backend seals the recording
-      // even if no data chunk was produced (e.g. instant stop).
-      const lastSeq = Math.max(seqRef.current - 1, 0);
-      // If data chunks were produced, finalize on a tiny marker chunk.
-      if (seqRef.current > 0) {
-        const marker = new Blob([new Uint8Array(0)], { type: "video/webm" });
-        await uploadChunk(marker, seqRef.current, true);
-      } else {
-        await uploadChunk(
-          new Blob([new Uint8Array(0)], { type: "video/webm" }),
-          lastSeq,
-          true,
-        );
-      }
+      // Empty marker chunk with finalize=true seals the recording even when
+      // no media data was produced (e.g. an instant stop).
+      const marker = new Blob([], { type: "video/webm" });
+      await uploadChunk(marker, seqRef.current, true);
       setState("uploaded");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
@@ -221,16 +211,13 @@ export function useInterviewRecorder({
     clearElapsed();
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== "inactive") {
-      // Request a final dataavailable, then wait for it before finalizing.
+      // Swap the handler rather than wrapping it: the final dataavailable
+      // must upload exactly once, or the tail of the recording is duplicated.
       await new Promise<void>((resolve) => {
-        const prev = recorder.ondataavailable;
         recorder.ondataavailable = (event) => {
-          prev?.call(recorder, event);
-          // Flush the last blob as a chunk.
           const blob = event.data;
           if (blob && blob.size > 0) {
-            const seq = seqRef.current++;
-            void uploadChunk(blob, seq, false)
+            void uploadChunk(blob, seqRef.current++, false)
               .catch(() => {})
               .finally(() => resolve());
           } else {
