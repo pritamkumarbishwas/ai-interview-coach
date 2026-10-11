@@ -73,6 +73,9 @@ def interview_payload(context: dict, **overrides) -> dict:
         "level": "mid",
         "type": "technical",
         "difficulty": "intermediate",
+        # Flow tests don't exercise proctoring; "off" skips the
+        # consent-before-start requirement.
+        "proctoring_mode": "off",
     }
     payload.update(overrides)
     return payload

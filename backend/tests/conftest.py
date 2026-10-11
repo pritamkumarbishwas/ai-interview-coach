@@ -222,6 +222,9 @@ def env(client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch)
                 "level": "mid",
                 "type": "technical",
                 "difficulty": "intermediate",
+                # Flow tests exercise questions/answers/report, not proctoring;
+                # "off" skips the consent-before-start requirement.
+                "proctoring_mode": "off",
                 "target_questions": target,
             },
         )
