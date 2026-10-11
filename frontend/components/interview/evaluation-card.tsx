@@ -7,12 +7,14 @@ import {
 } from "lucide-react";
 
 import { ScoreBar } from "@/components/ui/score-bar";
+import { cx } from "@/lib/utils";
 import type { Evaluation } from "@/types";
 
 interface EvaluationCardProps {
   evaluation: Evaluation | null;
   state: "idle" | "pending" | "done";
   isLastQuestion: boolean;
+  className?: string;
   onNext: () => void;
   onEnd?: () => void;
 }
@@ -21,15 +23,18 @@ export function EvaluationCard({
   evaluation,
   state,
   isLastQuestion,
+  className,
   onNext,
   onEnd,
 }: EvaluationCardProps) {
+  const shellClass = cx(
+    "rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+    className,
+  );
+
   if (state === "idle") {
     return (
-      <section
-        className="rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
-        aria-label="Answer evaluation"
-      >
+      <section className={shellClass} aria-label="Answer evaluation">
         <header className="border-b border-line px-4 py-3">
           <h2 className="text-[15px] font-semibold text-ink">
             Answer Evaluation
@@ -54,7 +59,7 @@ export function EvaluationCard({
   if (state === "pending" || !evaluation) {
     return (
       <section
-        className="rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+        className={shellClass}
         aria-label="Answer evaluation"
         aria-busy="true"
       >
@@ -84,10 +89,7 @@ export function EvaluationCard({
   const scores = evaluation.scores;
 
   return (
-    <section
-      className="rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
-      aria-label="Answer evaluation"
-    >
+    <section className={shellClass} aria-label="Answer evaluation">
       <header className="flex items-center justify-between border-b border-line px-4 py-3">
         <h2 className="text-[15px] font-semibold text-ink">
           Answer Evaluation

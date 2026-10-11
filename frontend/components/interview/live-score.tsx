@@ -4,14 +4,16 @@ import { useEffect, useState } from "react";
 
 import { ScoreMetric } from "@/components/interview/score-metric";
 import type { MockScoreMetric } from "@/data/mock";
+import { cx } from "@/lib/utils";
 
 interface LiveScoreProps {
   overall: number;
   label: string;
   metrics: MockScoreMetric[];
+  className?: string;
 }
 
-export function LiveScore({ overall, label, metrics }: LiveScoreProps) {
+export function LiveScore({ overall, label, metrics, className }: LiveScoreProps) {
   const [mounted, setMounted] = useState(false);
   const radius = 56;
   const circumference = 2 * Math.PI * radius;
@@ -25,7 +27,10 @@ export function LiveScore({ overall, label, metrics }: LiveScoreProps) {
 
   return (
     <section
-      className="rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+      className={cx(
+        "rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+        className,
+      )}
       aria-label="Live scoring"
     >
       <header className="flex items-center justify-between border-b border-line px-4 py-3">
@@ -70,9 +75,19 @@ export function LiveScore({ overall, label, metrics }: LiveScoreProps) {
       </div>
 
       <div className="space-y-3.5 px-4 py-5">
-        {metrics.map((metric) => (
-          <ScoreMetric key={metric.label} label={metric.label} value={metric.value} />
-        ))}
+        {metrics.length === 0 ? (
+          <p className="text-center text-[13px] leading-relaxed text-ink-3">
+            Your score breakdown appears after the first answer.
+          </p>
+        ) : (
+          metrics.map((metric) => (
+            <ScoreMetric
+              key={metric.label}
+              label={metric.label}
+              value={metric.value}
+            />
+          ))
+        )}
       </div>
     </section>
   );

@@ -8,9 +8,10 @@ import { useSTT } from "@/hooks/use-speech";
 interface AnswerInputProps {
   onSubmit: (answer: string) => void | Promise<void>;
   disabled?: boolean;
+  busy?: boolean;
 }
 
-export function AnswerInput({ onSubmit, disabled }: AnswerInputProps) {
+export function AnswerInput({ onSubmit, disabled, busy }: AnswerInputProps) {
   const [value, setValue] = useState("");
   // Keep track of user's typed text prior to the current speech session
   const [baseText, setBaseText] = useState("");
@@ -107,6 +108,11 @@ export function AnswerInput({ onSubmit, disabled }: AnswerInputProps) {
               <span className="flex items-center gap-1.5 text-xs font-medium text-danger">
                 <span className="h-1.5 w-1.5 rounded-full bg-danger animate-pulse-dot" />
                 Listening
+              </span>
+            ) : busy ? (
+              <span className="flex items-center gap-1.5 text-xs font-medium text-brand">
+                <span className="h-1.5 w-1.5 rounded-full bg-brand animate-pulse-dot" />
+                AI is evaluating your answer…
               </span>
             ) : (
               <span className="text-xs text-ink-3">

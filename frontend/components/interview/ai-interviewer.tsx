@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Bot, RotateCcw, Settings, Volume2, VolumeX } from "lucide-react";
+import { Bot, RotateCcw, Volume2, VolumeX } from "lucide-react";
 
 import { AudioWaveform } from "@/components/interview/audio-waveform";
 import { QuestionCard } from "@/components/interview/question-card";
@@ -20,6 +20,7 @@ interface AIInterviewerProps {
   questionNumber: number;
   totalQuestions: number;
   muted?: boolean;
+  className?: string;
   onToggleMute?: () => void;
   onReplay?: () => void;
   onSpeechEnd?: () => void;
@@ -31,6 +32,7 @@ export function AIInterviewer({
   questionNumber,
   totalQuestions,
   muted = false,
+  className,
   onToggleMute,
   onReplay,
   onSpeechEnd,
@@ -51,7 +53,10 @@ export function AIInterviewer({
 
   return (
     <section
-      className="flex flex-col rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+      className={cx(
+        "flex flex-col rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+        className,
+      )}
       aria-label="AI interviewer"
     >
       <header className="flex items-center justify-between border-b border-line px-4 py-3">
@@ -97,11 +102,16 @@ export function AIInterviewer({
         <SmallControl label="Replay question" onClick={onReplay}>
           <RotateCcw className="h-4 w-4" />
         </SmallControl>
-        <SmallControl label={muted ? "Unmute interviewer" : "Mute interviewer"} onClick={onToggleMute} active={!muted}>
-          {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-        </SmallControl>
-        <SmallControl label="Interviewer settings">
-          <Settings className="h-4 w-4" />
+        <SmallControl
+          label={muted ? "Unmute interviewer" : "Mute interviewer"}
+          onClick={onToggleMute}
+          active={!muted}
+        >
+          {muted ? (
+            <VolumeX className="h-4 w-4" />
+          ) : (
+            <Volume2 className="h-4 w-4" />
+          )}
         </SmallControl>
       </div>
     </section>

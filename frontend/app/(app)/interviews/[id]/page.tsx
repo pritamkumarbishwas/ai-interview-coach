@@ -3,7 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-import { Mic, Play, Square } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Clock,
+  Lightbulb,
+  MessageSquare,
+  Mic,
+  Play,
+  Square,
+  Target,
+} from "lucide-react";
 
 import {
   AIInterviewer,
@@ -17,14 +27,20 @@ import { InterviewFeed } from "@/components/interview/interview-feed";
 import { InterviewProgress } from "@/components/interview/interview-progress";
 import { LiveScore } from "@/components/interview/live-score";
 import { Alert } from "@/components/ui/alert";
+import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { FullScreenLoader } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
 import { useAuth } from "@/hooks/use-auth";
 import { toApiError } from "@/lib/api";
-import { TYPE_LABELS } from "@/lib/interview";
+import {
+  DIFFICULTY_LABELS,
+  LEVEL_LABELS,
+  TYPE_LABELS,
+  TYPE_TONES,
+} from "@/lib/interview";
 import { scoreLabel } from "@/lib/utils";
 import {
   findCurrentQuestion,
@@ -32,12 +48,18 @@ import {
   startInterview,
   submitAnswer as submitAnswerApi,
 } from "@/services/interviews";
-import type { Evaluation, InterviewDetail, Question } from "@/types";
+import type { Difficulty, Evaluation, InterviewDetail, Question } from "@/types";
 import type {
   ChatMessage,
   FeedbackItem,
   MockScoreMetric,
 } from "@/data/mock";
+
+const DIFFICULTY_TONES: Record<Difficulty, BadgeTone> = {
+  beginner: "success",
+  intermediate: "warning",
+  advanced: "danger",
+};
 
 function formatTime(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
@@ -305,14 +327,22 @@ export default function InterviewWorkspacePage() {
     router.push("/interviews");
   };
 
+  const inProgress = interview.status !== "created";
+
   const header = (
     <header className="flex flex-wrap items-center gap-4">
       <div className="min-w-0">
         <div className="flex items-center gap-2.5">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-danger">
-            <span className="h-1.5 w-1.5 rounded-full bg-danger animate-pulse-dot" />
-            Live
-          </span>
+          {inProgress ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-danger">
+              <span className="h-1.5 w-1.5 rounded-full bg-danger animate-pulse-dot" />
+              Live
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-mist px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-ink-3">
+              Not started
+            </span>
+          )}
           <h2 className="text-xl font-bold tracking-tight text-ink lg:text-2xl">
             Mock Interview Session
           </h2>
@@ -323,24 +353,40 @@ export default function InterviewWorkspacePage() {
       </div>
 
       <div className="ml-auto flex flex-wrap items-center gap-3">
-        <InterviewProgress
-          current={Math.min(questionNumber, targetQuestions)}
-          total={targetQuestions}
-        />
-        <div className="flex items-center gap-2 rounded-btn border border-line bg-card px-3 py-2 shadow-sm">
-          <Mic className="h-4 w-4 text-success" aria-hidden />
-          <span className="text-sm font-semibold tabular-nums text-ink">
-            {formatTime(elapsed)}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={() => setEndOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-btn border border-[#f5c6c7] bg-[#fdf0f0] px-3.5 py-2 text-sm font-medium text-danger transition-colors hover:bg-[#fbe6e6]"
-        >
-          <Square className="h-3.5 w-3.5" aria-hidden />
-          End Interview
-        </button>
+        {inProgress ? (
+          <>
+            <InterviewProgress
+              current={Math.min(questionNumber, targetQuestions)}
+              total={targetQuestions}
+            />
+            <div
+              className="flex items-center gap-2 rounded-btn border border-line bg-card px-3 py-2 shadow-sm"
+              aria-label={`Elapsed time ${formatTime(elapsed)}`}
+            >
+              <Clock className="h-4 w-4 text-ink-3" aria-hidden />
+              <span className="text-sm font-semibold tabular-nums text-ink">
+                {formatTime(elapsed)}
+              </span>
+            </div>
+            <Button
+              variant="danger-soft"
+              size="sm"
+              onClick={() => setEndOpen(true)}
+              icon={<Square className="h-3.5 w-3.5" />}
+            >
+              End Interview
+            </Button>
+          </>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.push("/interviews")}
+            icon={<ArrowLeft className="h-4 w-4" />}
+          >
+            Back to interviews
+          </Button>
+        )}
       </div>
     </header>
   );
@@ -349,25 +395,111 @@ export default function InterviewWorkspacePage() {
     return (
       <div className="space-y-5">
         {header}
-        <Card className="mx-auto max-w-xl">
-          <CardHeader
-            title="Ready to begin?"
-            description={`${targetQuestions} questions · ${TYPE_LABELS[interview.type]} interview. The AI interviewer will ask one question at a time.`}
-          />
-          <CardContent className="space-y-4">
-            {startError ? <Alert tone="error">{startError}</Alert> : null}
-            <Button
-              variant="primary"
-              onClick={handleStart}
-              disabled={starting}
-              loading={starting}
-              icon={<Play className="h-4 w-4" />}
-              className="w-full"
-            >
-              {starting ? "Generating first question…" : "Start Interview"}
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="mx-auto max-w-2xl">
+          <Card>
+            <CardContent className="px-6 py-8 sm:px-8">
+              <div className="flex flex-col items-center text-center">
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-100 text-brand">
+                  <Mic className="h-7 w-7" aria-hidden />
+                </span>
+                <h3 className="mt-4 text-xl font-bold tracking-tight text-ink">
+                  Ready to begin?
+                </h3>
+                <p className="mt-1.5 max-w-md text-sm leading-relaxed text-ink-2">
+                  The AI interviewer will ask you {targetQuestions} questions
+                  about the {interview.role} role. Answer out loud or by typing
+                  — you&apos;ll get instant feedback after each one.
+                </p>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <Badge tone={TYPE_TONES[interview.type]}>
+                    {TYPE_LABELS[interview.type]}
+                  </Badge>
+                  <Badge tone={DIFFICULTY_TONES[interview.difficulty]}>
+                    {DIFFICULTY_LABELS[interview.difficulty]}
+                  </Badge>
+                  <Badge tone="neutral">
+                    {LEVEL_LABELS[interview.level]} level
+                  </Badge>
+                  <Badge tone="neutral">{targetQuestions} questions</Badge>
+                </div>
+              </div>
+
+              <div className="mt-8 grid gap-6 sm:grid-cols-2">
+                <div>
+                  <h4 className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+                    <Target className="h-4 w-4 text-brand" aria-hidden />
+                    What to expect
+                  </h4>
+                  <ul className="mt-3 space-y-2.5">
+                    {[
+                      "One question at a time, at your pace",
+                      "Instant scoring on each answer",
+                      "Coach tips and a stronger rewrite",
+                      "Full report when you finish",
+                    ].map((item) => (
+                      <li
+                        key={item}
+                        className="flex gap-2.5 text-[13px] leading-relaxed text-ink-2"
+                      >
+                        <CheckCircle2
+                          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success"
+                          aria-hidden
+                        />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="flex items-center gap-2 text-[13px] font-semibold text-ink">
+                    <Lightbulb className="h-4 w-4 text-warning" aria-hidden />
+                    Tips
+                  </h4>
+                  <ul className="mt-3 space-y-2.5">
+                    {[
+                      "Find a quiet spot with a stable connection",
+                      "Take a moment to structure your answer",
+                      "Use real examples from your experience",
+                      "Speak clearly — the AI evaluates content, not polish",
+                    ].map((item) => (
+                      <li
+                        key={item}
+                        className="flex gap-2.5 text-[13px] leading-relaxed text-ink-2"
+                      >
+                        <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-brand" />
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {startError ? (
+                <div className="mt-6">
+                  <Alert tone="error">{startError}</Alert>
+                </div>
+              ) : null}
+
+              <div className="mt-8">
+                <Button
+                  variant="primary"
+                  size="lg"
+                  onClick={handleStart}
+                  disabled={starting}
+                  loading={starting}
+                  icon={<Play className="h-4 w-4" />}
+                  className="w-full"
+                >
+                  {starting ? "Generating first question…" : "Start Interview"}
+                </Button>
+                <p className="mt-3 text-center text-xs text-ink-3">
+                  Your progress is saved — you can leave and resume anytime
+                  before the last question.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     );
   }
@@ -377,13 +509,18 @@ export default function InterviewWorkspacePage() {
       {header}
 
       <section className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <CandidateVideo candidateName={user?.name ?? "Candidate"} />
+        <CandidateVideo
+          candidateName={user?.name ?? "Candidate"}
+          onLeave={() => setEndOpen(true)}
+          className="order-6 lg:order-none"
+        />
         <AIInterviewer
           status={aiStatus}
           question={currentQuestion?.text ?? ""}
           questionNumber={Math.min(questionNumber, targetQuestions)}
           totalQuestions={targetQuestions}
           muted={muted}
+          className="order-1 lg:order-none"
           onToggleMute={() => setMuted((value) => !value)}
           onSpeechEnd={() => setAiStatus("listening")}
           onReplay={() => {
@@ -395,17 +532,17 @@ export default function InterviewWorkspacePage() {
           overall={runningOverall}
           label={lastEvaluation ? scoreLabel(runningOverall) : "Not started"}
           metrics={lastEvaluation ? metricsFrom(lastEvaluation) : []}
+          className="order-5 lg:order-none"
         />
-      </section>
 
-      <section className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        <div className="flex flex-col overflow-hidden rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="order-2 flex flex-col overflow-hidden rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:order-none">
           <header className="flex items-center justify-between border-b border-line px-4 py-3">
-            <h2 className="text-[15px] font-semibold text-ink">
+            <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
+              <MessageSquare className="h-4 w-4 text-ink-3" aria-hidden />
               Conversation
             </h2>
             <span className="text-xs text-ink-3">
-              {messages.length} messages
+              {messages.length} message{messages.length === 1 ? "" : "s"}
             </span>
           </header>
           <InterviewFeed messages={messages} />
@@ -421,15 +558,21 @@ export default function InterviewWorkspacePage() {
           <AnswerInput
             onSubmit={submitAnswer}
             disabled={evalState === "pending" || completed}
+            busy={evalState === "pending"}
           />
         </div>
 
-        <AIFeedback items={feedback} pending={evalState === "pending"} />
+        <AIFeedback
+          items={feedback}
+          pending={evalState === "pending"}
+          className="order-4 lg:order-none"
+        />
 
         <EvaluationCard
           evaluation={evaluation}
           state={evalState}
           isLastQuestion={isLastQuestion || completed}
+          className="order-3 lg:order-none"
           onNext={goNextQuestion}
           onEnd={() => router.push(`/interviews/${params.id}/result`)}
         />
@@ -442,21 +585,16 @@ export default function InterviewWorkspacePage() {
         description="Your answers are saved. You can resume from My Interviews — the report is generated once every question is answered."
       >
         <div className="flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={() => setEndOpen(false)}
-            className="rounded-btn border border-line bg-card px-4 py-2 text-sm font-medium text-ink-2 transition-colors hover:bg-mist"
-          >
+          <Button variant="outline" onClick={() => setEndOpen(false)}>
             Keep going
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="danger"
             onClick={leaveInterview}
-            className="inline-flex items-center gap-2 rounded-btn bg-danger px-4 py-2 text-sm font-semibold text-white transition-colors hover:brightness-95"
+            icon={<Square className="h-3.5 w-3.5" />}
           >
-            <Square className="h-3.5 w-3.5" aria-hidden />
             Leave interview
-          </button>
+          </Button>
         </div>
       </Modal>
     </div>

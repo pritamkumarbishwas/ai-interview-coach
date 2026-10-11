@@ -2,18 +2,31 @@
 
 import { useState } from "react";
 
-import { Mic, MicOff, Settings, Video, VideoOff, PhoneOff } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, PhoneOff } from "lucide-react";
 
 import { Avatar } from "@/components/ui/avatar";
 import { cx } from "@/lib/utils";
 
-export function CandidateVideo({ candidateName }: { candidateName: string }) {
+interface CandidateVideoProps {
+  candidateName: string;
+  onLeave?: () => void;
+  className?: string;
+}
+
+export function CandidateVideo({
+  candidateName,
+  onLeave,
+  className,
+}: CandidateVideoProps) {
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
 
   return (
     <section
-      className="rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+      className={cx(
+        "rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+        className,
+      )}
       aria-label="Candidate panel"
     >
       <header className="flex items-center justify-between border-b border-line px-4 py-3">
@@ -78,11 +91,13 @@ export function CandidateVideo({ candidateName }: { candidateName: string }) {
             <VideoOff className="h-4 w-4" />
           )}
         </ControlButton>
-        <ControlButton label="Leave interview" danger solid>
+        <ControlButton
+          label="Leave interview"
+          danger
+          solid
+          onClick={onLeave}
+        >
           <PhoneOff className="h-4 w-4" />
-        </ControlButton>
-        <ControlButton label="Settings">
-          <Settings className="h-4 w-4" />
         </ControlButton>
       </div>
     </section>

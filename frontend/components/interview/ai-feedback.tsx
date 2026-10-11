@@ -1,4 +1,4 @@
-import { CircleCheck, Sparkles, TriangleAlert } from "lucide-react";
+import { CircleCheck, MessageCircle, Sparkles, TriangleAlert } from "lucide-react";
 
 import type { FeedbackItem } from "@/data/mock";
 import { cx } from "@/lib/utils";
@@ -6,12 +6,16 @@ import { cx } from "@/lib/utils";
 interface AIFeedbackProps {
   items: FeedbackItem[];
   pending?: boolean;
+  className?: string;
 }
 
-export function AIFeedback({ items, pending }: AIFeedbackProps) {
+export function AIFeedback({ items, pending, className }: AIFeedbackProps) {
   return (
     <section
-      className="rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+      className={cx(
+        "rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+        className,
+      )}
       aria-label="AI feedback"
     >
       <header className="flex items-center justify-between border-b border-line px-4 py-3">
@@ -30,9 +34,18 @@ export function AIFeedback({ items, pending }: AIFeedbackProps) {
             ))}
           </div>
         ) : items.length === 0 ? (
-          <p className="py-6 text-center text-sm text-ink-3">
-            Feedback appears as you answer.
-          </p>
+          <div className="flex flex-col items-center py-8 text-center">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-50 text-brand">
+              <MessageCircle className="h-5 w-5" aria-hidden />
+            </span>
+            <p className="mt-3 text-sm font-medium text-ink">
+              Feedback appears as you answer
+            </p>
+            <p className="mt-1 max-w-[220px] text-[13px] leading-relaxed text-ink-3">
+              After each answer, the coach highlights what worked and what to
+              improve.
+            </p>
+          </div>
         ) : (
           <ol className="relative space-y-5 border-l border-dashed border-line pl-5">
             {items.map((item) => {
