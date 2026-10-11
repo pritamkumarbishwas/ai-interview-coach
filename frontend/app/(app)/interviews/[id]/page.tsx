@@ -23,6 +23,7 @@ import {
 import { AIFeedback } from "@/components/interview/ai-feedback";
 import { AnswerInput } from "@/components/interview/answer-input";
 import { CandidateVideo } from "@/components/interview/candidate-video";
+import { DeviceCheck } from "@/components/interview/device-check";
 import { EvaluationCard } from "@/components/interview/evaluation-card";
 import { InterviewFeed } from "@/components/interview/interview-feed";
 import { InterviewProgress } from "@/components/interview/interview-progress";
@@ -35,6 +36,7 @@ import { FullScreenLoader } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
 import { useAuth } from "@/hooks/use-auth";
+import { MediaProvider } from "@/hooks/use-media";
 import { toApiError } from "@/lib/api";
 import {
   DIFFICULTY_LABELS,
@@ -142,6 +144,14 @@ function metricsFrom(evaluation: Evaluation): MockScoreMetric[] {
 }
 
 export default function InterviewWorkspacePage() {
+  return (
+    <MediaProvider>
+      <InterviewWorkspace />
+    </MediaProvider>
+  );
+}
+
+function InterviewWorkspace() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -171,6 +181,8 @@ export default function InterviewWorkspacePage() {
   const [completed, setCompleted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [consentChecked, setConsentChecked] = useState(false);
+  // "ready" = waiting room · "check" = camera/screen verification step
+  const [step, setStep] = useState<"ready" | "check">("ready");
 
   const seededRef = useRef("");
   const timers = useRef<number[]>([]);
@@ -257,6 +269,8 @@ export default function InterviewWorkspacePage() {
     !interview.proctoring_session?.consent_given_at;
   const canStart = !proctoringRequired || consentChecked;
 
+  // Actual start — called from the device-check step once camera + screen
+  // share are verified.
   const handleStart = async () => {
     if (starting || !canStart) return;
     setStarting(true);

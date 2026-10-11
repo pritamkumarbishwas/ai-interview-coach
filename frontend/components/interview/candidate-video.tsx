@@ -1,7 +1,5 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-
 import {
   Mic,
   MicOff,
@@ -12,7 +10,9 @@ import {
   VideoOff,
 } from "lucide-react";
 
+import { StreamVideo } from "@/components/interview/stream-video";
 import { Avatar } from "@/components/ui/avatar";
+import { useMedia } from "@/hooks/use-media";
 import { cx } from "@/lib/utils";
 
 interface CandidateVideoProps {
@@ -21,142 +21,27 @@ interface CandidateVideoProps {
   className?: string;
 }
 
-type MediaState = "loading" | "active" | "denied" | "unavailable";
-
-function attachStream(
-  ref: React.RefObject<HTMLVideoElement | null>,
-  stream: MediaStream,
-) {
-  if (!ref.current) return;
-  ref.current.srcObject = stream;
-  void ref.current.play().catch(() => {});
-}
-
 export function CandidateVideo({
   candidateName,
   onLeave,
   className,
 }: CandidateVideoProps) {
-  const cameraRef = useRef<HTMLVideoElement>(null);
-  const screenRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const screenStreamRef = useRef<MediaStream | null>(null);
-  const autoShareAttempted = useRef(false);
+  const {
+    cameraStream,
+    screenStream,
+    cameraStatus,
+    screenStatus,
+    micOn,
+    camOn,
+    toggleMic,
+    toggleCam,
+    startScreen,
+    stopScreen,
+  } = useMedia();
 
-  const [camState, setCamState] = useState<MediaState>("loading");
-  const [micOn, setMicOn] = useState(true);
-  const [camOn, setCamOn] = useState(true);
-  const [sharing, setSharing] = useState(false);
+  const sharing = screenStatus === "active" && !!screenStream;
+  const cameraLive = cameraStatus === "active" && camOn && !!cameraStream;
 
-  const startCamera = useCallback(async () => {
-    setCamState("loading");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-      streamRef.current = stream;
-      attachStream(cameraRef, stream);
-      setCamState("active");
-    } catch (err) {
-      const name = (err as { name?: string })?.name;
-      setCamState(
-        name === "NotAllowedError" || name === "PermissionDeniedError"
-          ? "denied"
-          : "unavailable",
-      );
-    }
-  }, []);
-
-  useEffect(() => {
-    void startCamera();
-    return () => {
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      screenStreamRef.current?.getTracks().forEach((track) => track.stop());
-    };
-  }, [startCamera]);
-
-  // Re-attach the streams whenever the <video> elements (re)mount — e.g. when
-  // the camera flips from the fallback placeholder to the live feed.
-  useEffect(() => {
-    if (cameraRef.current && streamRef.current) {
-      attachStream(cameraRef, streamRef.current);
-    }
-  }, [camState, camOn, sharing]);
-
-  useEffect(() => {
-    if (screenRef.current && screenStreamRef.current) {
-      attachStream(screenRef, screenStreamRef.current);
-    }
-  }, [sharing]);
-
-  const startShare = useCallback(async () => {
-    if (screenStreamRef.current) return;
-    if (!navigator.mediaDevices?.getDisplayMedia) return;
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-      });
-      screenStreamRef.current = stream;
-      attachStream(screenRef, stream);
-      setSharing(true);
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
-        screenStreamRef.current = null;
-        if (screenRef.current) screenRef.current.srcObject = null;
-        setSharing(false);
-      });
-    } catch {
-      // User cancelled the picker, or the browser blocked it (no gesture).
-    }
-  }, []);
-
-  const stopShare = useCallback(() => {
-    screenStreamRef.current?.getTracks().forEach((track) => track.stop());
-    screenStreamRef.current = null;
-    if (screenRef.current) screenRef.current.srcObject = null;
-    setSharing(false);
-  }, []);
-
-  // Best-effort "share by default": try immediately (some browsers allow it),
-  // otherwise retry on the first user gesture — Chrome requires one.
-  useEffect(() => {
-    if (autoShareAttempted.current) return;
-    autoShareAttempted.current = true;
-    void startShare();
-    const onGesture = () => {
-      document.removeEventListener("pointerdown", onGesture);
-      document.removeEventListener("keydown", onGesture);
-      void startShare();
-    };
-    document.addEventListener("pointerdown", onGesture);
-    document.addEventListener("keydown", onGesture);
-    return () => {
-      document.removeEventListener("pointerdown", onGesture);
-      document.removeEventListener("keydown", onGesture);
-    };
-  }, [startShare]);
-
-  const toggleMic = () => {
-    const stream = streamRef.current;
-    if (stream) {
-      stream.getAudioTracks().forEach((track) => {
-        track.enabled = !micOn;
-      });
-    }
-    setMicOn((value) => !value);
-  };
-
-  const toggleCam = () => {
-    const stream = streamRef.current;
-    if (stream) {
-      stream.getVideoTracks().forEach((track) => {
-        track.enabled = !camOn;
-      });
-    }
-    setCamOn((value) => !value);
-  };
-
-  const cameraLive = camState === "active" && camOn;
   const statusLabel = sharing
     ? "Sharing screen"
     : cameraLive
@@ -199,55 +84,41 @@ export function CandidateVideo({
 
         {/* Screen share takes the main stage when active */}
         {sharing ? (
-          <video
-            ref={screenRef}
-            muted
-            playsInline
-            autoPlay
+          <StreamVideo
+            stream={screenStream}
             className="absolute inset-0 h-full w-full bg-black object-contain"
-            aria-label="Shared screen"
+            label="Shared screen"
           />
         ) : null}
 
         {/* Camera feed (mirrored self-view) or fallback */}
         {cameraLive ? (
-          <video
-            ref={cameraRef}
-            muted
-            playsInline
-            autoPlay
+          <StreamVideo
+            stream={cameraStream}
+            mirror
+            label="Camera preview"
             className={
               sharing
-                ? "absolute bottom-2 right-2 h-24 w-auto rounded-lg border border-white/20 shadow-lg -scale-x-100 object-cover"
-                : "h-full w-full -scale-x-100 object-cover"
+                ? "absolute bottom-2 right-2 h-24 w-auto rounded-lg border border-white/20 shadow-lg object-cover"
+                : "h-full w-full object-cover"
             }
-            aria-label="Camera preview"
           />
         ) : (
           <div className="relative flex h-full flex-col items-center justify-center gap-3">
             <Avatar
               name={candidateName}
               size="xl"
-              className={camState !== "active" ? "opacity-40" : undefined}
+              className={cameraStatus !== "active" ? "opacity-40" : undefined}
             />
             <p className="text-sm text-white/60">
-              {camState === "loading"
+              {cameraStatus === "starting"
                 ? "Starting camera…"
-                : camState === "denied"
+                : cameraStatus === "denied"
                   ? "Camera access denied"
-                  : camState === "unavailable"
+                  : cameraStatus === "unavailable"
                     ? "No camera found"
                     : "Camera is off"}
             </p>
-            {camState === "denied" || camState === "unavailable" ? (
-              <button
-                type="button"
-                onClick={() => void startCamera()}
-                className="rounded-btn bg-white/10 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-white/20"
-              >
-                Try again
-              </button>
-            ) : null}
           </div>
         )}
 
@@ -294,7 +165,7 @@ export function CandidateVideo({
         <ControlButton
           label={sharing ? "Stop sharing screen" : "Share screen"}
           active={sharing}
-          onClick={sharing ? stopShare : () => void startShare()}
+          onClick={sharing ? stopScreen : () => void startScreen()}
         >
           {sharing ? (
             <ScreenShareOff className="h-4 w-4" />
