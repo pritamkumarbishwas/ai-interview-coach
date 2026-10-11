@@ -88,7 +88,7 @@ class RecordingService:
         # GridFS has no append, so each chunk is its own file, named
         # "<interview>:<kind>#<seq>" and concatenated on read.
         chunk_filename = f"{file_id}#{seq}"
-        grid_in = await bucket.open_upload_stream(
+        grid_in = bucket.open_upload_stream(
             chunk_filename,
             metadata={
                 "interview_id": interview_id,
@@ -170,7 +170,8 @@ class RecordingService:
         chunks: dict[int, bytes] = {}
         async for grid_out in cursor:
             seq = int(str(grid_out.filename).rsplit("#", 1)[-1])
-            chunks[seq] = await grid_out.read()
+            # GridOut.read() returns bytes synchronously in Motor.
+            chunks[seq] = grid_out.read()
         if not chunks:
             raise NotFoundError("Recording data missing")
 
