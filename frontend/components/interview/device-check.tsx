@@ -121,12 +121,17 @@ export function DeviceCheck({
           </div>
           <div className="relative mt-3 aspect-video overflow-hidden rounded-xl bg-gradient-to-b from-[#2b3644] to-[#1f2933]">
             {cameraStatus === "active" && cameraStream ? (
-              <StreamVideo
-                stream={cameraStream}
-                mirror
-                className="h-full w-full object-cover"
-                label="Camera preview"
-              />
+              <>
+                <StreamVideo
+                  stream={cameraStream}
+                  mirror
+                  className="h-full w-full object-cover"
+                  label="Camera preview"
+                />
+                <span className="absolute bottom-2 left-2 rounded-md bg-black/40 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
+                  {candidateName}
+                </span>
+              </>
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-2 text-white/60">
                 {cameraStatus === "denied" ? (
