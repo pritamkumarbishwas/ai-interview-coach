@@ -138,7 +138,6 @@ function InterviewWorkspace() {
   const [saving, setSaving] = useState(false);
 
   const seededRef = useRef("");
-  const timers = useRef<number[]>([]);
 
   const inProgress = interview?.status === "in_progress";
 
@@ -183,11 +182,6 @@ function InterviewWorkspace() {
       setStarting(false);
     }
   }, [interview]);
-
-  useEffect(() => {
-    const pending = timers.current;
-    return () => pending.forEach((id) => window.clearTimeout(id));
-  }, []);
 
   if (loading && !interview) {
     return <FullScreenLoader label="Loading interview" />;
