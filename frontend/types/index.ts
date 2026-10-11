@@ -7,6 +7,7 @@ export type InterviewType =
 export type ExperienceLevel = "junior" | "mid" | "senior";
 export type Difficulty = "beginner" | "intermediate" | "advanced";
 export type InterviewStatus = "created" | "in_progress" | "completed";
+export type ProctoringMode = "off" | "camera_only" | "strict";
 export type NextStep = "follow_up" | "harder" | "easier" | "new_topic";
 
 export interface User {
@@ -111,6 +112,10 @@ export interface Question {
   topic: string;
 }
 
+export interface ProctoringSession {
+  consent_given_at: string | null;
+}
+
 /** Full document returned by `GET /api/interviews/{id}` (detail). */
 export interface InterviewDetail {
   id: string;
@@ -121,6 +126,8 @@ export interface InterviewDetail {
   type: InterviewType;
   difficulty: Difficulty;
   status: InterviewStatus;
+  proctoring_mode: ProctoringMode;
+  proctoring_session: ProctoringSession | null;
   target_questions: number;
   questions: Question[];
   answers: AnswerRecord[];

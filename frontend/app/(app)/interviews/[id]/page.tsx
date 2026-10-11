@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 
 import {
   ArrowLeft,
+  Camera,
   CheckCircle2,
   Clock,
   Lightbulb,
@@ -45,6 +46,7 @@ import { scoreLabel } from "@/lib/utils";
 import {
   findCurrentQuestion,
   getInterview,
+  recordProctoringConsent,
   startInterview,
   submitAnswer as submitAnswerApi,
 } from "@/services/interviews";
@@ -168,6 +170,7 @@ export default function InterviewWorkspacePage() {
   const [startError, setStartError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [consentChecked, setConsentChecked] = useState(false);
 
   const seededRef = useRef("");
   const timers = useRef<number[]>([]);
@@ -249,11 +252,19 @@ export default function InterviewWorkspacePage() {
       : 0;
   const lastEvaluation = evaluations[evaluations.length - 1] ?? null;
 
+  const proctoringRequired =
+    interview.proctoring_mode !== "off" &&
+    !interview.proctoring_session?.consent_given_at;
+  const canStart = !proctoringRequired || consentChecked;
+
   const handleStart = async () => {
-    if (starting) return;
+    if (starting || !canStart) return;
     setStarting(true);
     setStartError(null);
     try {
+      if (proctoringRequired) {
+        await recordProctoringConsent(params.id, true);
+      }
       await startInterview(params.id);
       reload();
     } catch (err) {
@@ -395,22 +406,29 @@ export default function InterviewWorkspacePage() {
     return (
       <div className="space-y-5">
         {header}
-        <div className="mx-auto max-w-2xl">
-          <Card>
-            <CardContent className="px-6 py-8 sm:px-8">
-              <div className="flex flex-col items-center text-center">
-                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-100 text-brand">
-                  <Mic className="h-7 w-7" aria-hidden />
-                </span>
-                <h3 className="mt-4 text-xl font-bold tracking-tight text-ink">
-                  Ready to begin?
-                </h3>
-                <p className="mt-1.5 max-w-md text-sm leading-relaxed text-ink-2">
-                  The AI interviewer will ask you {targetQuestions} questions
-                  about the {interview.role} role. Answer out loud or by typing
-                  — you&apos;ll get instant feedback after each one.
-                </p>
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+        <Card>
+          <CardContent className="p-0">
+            <div className="grid lg:grid-cols-[1fr_340px]">
+              {/* Main column */}
+              <div className="px-6 py-8 sm:px-10 sm:py-10">
+                <div className="flex items-start gap-4">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-100 text-brand">
+                    <Mic className="h-6 w-6" aria-hidden />
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="text-xl font-bold tracking-tight text-ink">
+                      Ready to begin?
+                    </h3>
+                    <p className="mt-1 text-sm leading-relaxed text-ink-2">
+                      The AI interviewer will ask you {targetQuestions}{" "}
+                      questions about the {interview.role} role. Answer out
+                      loud or by typing — you&apos;ll get instant feedback
+                      after each one.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2">
                   <Badge tone={TYPE_TONES[interview.type]}>
                     {TYPE_LABELS[interview.type]}
                   </Badge>
@@ -422,9 +440,76 @@ export default function InterviewWorkspacePage() {
                   </Badge>
                   <Badge tone="neutral">{targetQuestions} questions</Badge>
                 </div>
+
+                {proctoringRequired ? (
+                  <div className="mt-6 rounded-xl border border-line bg-surface p-4">
+                    <div className="flex gap-3">
+                      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand">
+                        <Camera className="h-4 w-4" aria-hidden />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-semibold text-ink">
+                          Proctored session
+                        </p>
+                        <p className="mt-0.5 text-[13px] leading-relaxed text-ink-2">
+                          This interview is monitored for integrity — your
+                          camera and microphone may be recorded during the
+                          session. You can still mute or turn off your camera
+                          in-session.
+                        </p>
+                        <label className="mt-3 flex cursor-pointer items-start gap-2.5">
+                          <input
+                            type="checkbox"
+                            checked={consentChecked}
+                            onChange={(event) =>
+                              setConsentChecked(event.target.checked)
+                            }
+                            className="mt-0.5 h-4 w-4 shrink-0 rounded border-line accent-[#f7931e]"
+                          />
+                          <span className="text-[13px] leading-relaxed text-ink">
+                            I understand and consent to proctoring
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {startError ? (
+                  <div className="mt-5">
+                    <Alert tone="error">{startError}</Alert>
+                  </div>
+                ) : null}
+
+                <div className="mt-7 max-w-md">
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    onClick={handleStart}
+                    disabled={starting || !canStart}
+                    loading={starting}
+                    icon={<Play className="h-4 w-4" />}
+                    className="w-full"
+                  >
+                    {starting
+                      ? "Generating first question…"
+                      : "Start Interview"}
+                  </Button>
+                  {!canStart ? (
+                    <p className="mt-3 text-xs text-warning">
+                      Please consent to proctoring to start the interview.
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-xs text-ink-3">
+                      Your progress is saved — you can leave and resume anytime
+                      before the last question.
+                    </p>
+                  )}
+                </div>
               </div>
 
-              <div className="mt-8 grid gap-6 sm:grid-cols-2">
+              {/* Sidebar */}
+              <aside className="border-t border-line bg-surface px-6 py-8 sm:px-8 lg:border-l lg:border-t-0">
                 <div>
                   <h4 className="flex items-center gap-2 text-[13px] font-semibold text-ink">
                     <Target className="h-4 w-4 text-brand" aria-hidden />
@@ -450,7 +535,8 @@ export default function InterviewWorkspacePage() {
                     ))}
                   </ul>
                 </div>
-                <div>
+
+                <div className="mt-7">
                   <h4 className="flex items-center gap-2 text-[13px] font-semibold text-ink">
                     <Lightbulb className="h-4 w-4 text-warning" aria-hidden />
                     Tips
@@ -472,34 +558,10 @@ export default function InterviewWorkspacePage() {
                     ))}
                   </ul>
                 </div>
-              </div>
-
-              {startError ? (
-                <div className="mt-6">
-                  <Alert tone="error">{startError}</Alert>
-                </div>
-              ) : null}
-
-              <div className="mt-8">
-                <Button
-                  variant="primary"
-                  size="lg"
-                  onClick={handleStart}
-                  disabled={starting}
-                  loading={starting}
-                  icon={<Play className="h-4 w-4" />}
-                  className="w-full"
-                >
-                  {starting ? "Generating first question…" : "Start Interview"}
-                </Button>
-                <p className="mt-3 text-center text-xs text-ink-3">
-                  Your progress is saved — you can leave and resume anytime
-                  before the last question.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              </aside>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }

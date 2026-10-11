@@ -41,6 +41,18 @@ export async function createInterview(
   }
 }
 
+/** Records proctoring consent; required before start when mode != "off". */
+export async function recordProctoringConsent(
+  id: string,
+  consent: boolean,
+): Promise<void> {
+  try {
+    await api.post(`/interviews/${id}/proctoring/consent`, { consent });
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
 /** Generates the first question (LLM) and marks the interview in_progress. */
 export async function startInterview(id: string): Promise<CurrentQuestion> {
   try {
