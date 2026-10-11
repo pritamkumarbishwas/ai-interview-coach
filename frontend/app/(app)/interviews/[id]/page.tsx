@@ -189,11 +189,6 @@ export default function InterviewWorkspacePage() {
     return () => pending.forEach((id) => window.clearTimeout(id));
   }, []);
 
-  const schedule = (fn: () => void, ms: number) => {
-    const id = window.setTimeout(fn, ms);
-    timers.current.push(id);
-  };
-
   if (loading && !interview) {
     return <FullScreenLoader label="Loading interview" />;
   }
