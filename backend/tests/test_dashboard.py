@@ -6,7 +6,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from app.core.config import settings
 from app.repositories.base import to_object_id
 from tests.conftest import Env
-from tests.test_report import complete_interview
+from tests.test_report import complete_interview, get_report
 
 
 def get_stats(client: TestClient, headers: dict) -> dict:
@@ -71,6 +71,9 @@ def test_dashboard_after_completion(client: TestClient, auth_headers: dict, env:
     ctx = env.setup(target=2)
     final = complete_interview(client, auth_headers, ctx)
     assert final["status"] == "completed"
+    # Force the deferred evaluation + report to settle (background task or
+    # backfill) before the dashboard aggregates them.
+    assert get_report(client, auth_headers, ctx["id"]).status_code == 200
 
     body = get_stats(client, auth_headers)
     assert body["interviews_total"] == 1
@@ -94,8 +97,10 @@ def test_dashboard_aggregates_topics_and_scores_across_interviews(
 ) -> None:
     first = env.setup(target=1)
     complete_interview(client, auth_headers, first)
+    assert get_report(client, auth_headers, first["id"]).status_code == 200
     second = env.setup(target=1)
     complete_interview(client, auth_headers, second)
+    assert get_report(client, auth_headers, second["id"]).status_code == 200
 
     patch_report_topics(
         {

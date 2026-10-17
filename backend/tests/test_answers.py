@@ -30,7 +30,7 @@ def test_answer_unknown_question_is_404(client: TestClient, auth_headers: dict) 
     assert response.json()["detail"] == "Question not found"
 
 
-def test_answer_returns_evaluation_and_next_question(
+def test_answer_defers_evaluation_and_returns_next_question(
     client: TestClient, auth_headers: dict, env: Env
 ) -> None:
     ctx = env.setup(target=3)
@@ -38,16 +38,9 @@ def test_answer_returns_evaluation_and_next_question(
     assert response.status_code == 200, response.text
     body = response.json()
 
-    evaluation = body["evaluation"]
-    scores = evaluation["scores"]
-    assert set(scores) == {"technical", "relevance", "completeness", "structure", "clarity"}
-    assert all(0 <= value <= 100 for value in scores.values())
-    assert evaluation["overall"] == round(sum(scores.values()) / 5)
-    assert evaluation["strengths"] == ["clear reasoning"]
-    assert evaluation["weaknesses"] == ["missed edge cases"]
-    assert evaluation["feedback"]
-    assert evaluation["improved_answer"]
-    assert evaluation["next_step"] == "new_topic"
+    # Scoring is deferred to the end of the exam, so the in-session response
+    # never carries an evaluation (see the deferred-evaluation feature spec).
+    assert body["evaluation"] is None
 
     assert body["status"] == "in_progress"
     assert body["questions_answered"] == 1
@@ -55,11 +48,11 @@ def test_answer_returns_evaluation_and_next_question(
     assert body["next_question"]["sequence"] == 2
     assert body["next_question"]["topic"] == "topic-2"
 
-    # The detail view carries the stored answers/evaluations.
+    # The detail view carries the stored answer, still un-scored.
     detail = client.get(f"/api/interviews/{ctx['id']}", headers=auth_headers).json()
     assert len(detail["answers"]) == 1
     assert detail["answers"][0]["question_id"] == ctx["question_id"]
-    assert detail["answers"][0]["evaluation"]["overall"] == 80
+    assert detail["answers"][0]["evaluation"] is None
 
 
 def test_list_shows_progress_counts(client: TestClient, auth_headers: dict, env: Env) -> None:
@@ -135,7 +128,9 @@ def test_next_question_failure_saves_nothing(
     client: TestClient, auth_headers: dict, env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def fail_generation_only(prompt: str, schema, **kwargs):
-        if schema.__name__ == "QuestionGeneration" and "next_step_decision" in prompt:
+        # The eval-free flow makes exactly one LLM call on a non-final answer:
+        # next-question generation. Failing it must leave no half-recorded state.
+        if schema.__name__ == "QuestionGeneration":
             raise RuntimeError("generation down")
         return await env.dispatcher(prompt, schema, **kwargs)
 
@@ -155,22 +150,16 @@ def test_next_question_failure_saves_nothing(
     assert retry.status_code == 200, retry.text
 
 
-def test_decision_and_covered_topics_reach_the_next_question_prompt(
-    client: TestClient, auth_headers: dict, env: Env, monkeypatch: pytest.MonkeyPatch
+def test_covered_topics_reach_the_next_question_prompt(
+    client: TestClient, auth_headers: dict, env: Env
 ) -> None:
-    async def follow_up_instead(prompt: str, schema, **kwargs):
-        result = await env.dispatcher(prompt, schema, **kwargs)
-        if schema.__name__ == "EvaluationGeneration":
-            result.next_step = "follow_up"
-        return result
-
-    monkeypatch.setattr(INTERVIEW_LLM, follow_up_instead)
     ctx = env.setup(target=3)
     answer(client, auth_headers, ctx["question_id"])
 
-    next_prompt = next(p for p in env.prompts if "next_step_decision" in p)
-    assert "<next_step_decision>" in next_prompt
-    assert "\nfollow_up" in next_prompt
+    # The eval-free follow-up prompt carries the previous question, the answer,
+    # and the topics already covered (so the model avoids repeats).
+    next_prompt = next(p for p in env.prompts if "<covered_topics>" in p)
+    assert "<candidate_answer>" in next_prompt
     assert "topic-1" in next_prompt  # covered topics include the first question
     assert "Question number 1?" in next_prompt
 

@@ -54,11 +54,14 @@ def test_report_is_generated_on_completion_and_cached(
     ctx = env.setup(target=2)
     final = complete_interview(client, auth_headers, ctx)
     assert final["status"] == "completed"
-    assert len(report_prompts(env)) == 1  # generated once, at completion
 
     response = get_report(client, auth_headers, ctx["id"])
     assert response.status_code == 200, response.text
     body = response.json()
+
+    # The report is generated exactly once — either by the background
+    # completion task or, if that has not finished, by the report backfill.
+    assert len(report_prompts(env)) == 1
 
     # Numbers are aggregated in code from the stored evaluations:
     # every answer scores (80, 85, 70, 75, 90) -> overall 80, comm (75+90)/2.

@@ -1,7 +1,8 @@
+import asyncio
 import logging
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -54,10 +55,26 @@ async def lifespan(app: FastAPI):
     )
     client = await connect_to_mongo()
     app.state.mongo = client
-    await ensure_indexes(client[settings.mongo_db_name])
+    db = client[settings.mongo_db_name]
+    await ensure_indexes(db)
+
+    # Background jobs are opt-in; the worker polls the persistent queue.
+    worker_task: asyncio.Task | None = None
+    if settings.jobs_enabled:
+        from app.core.jobs import job_worker
+
+        worker_task = asyncio.create_task(job_worker.run_forever(db))
+        logger.info("Background job worker started")
     try:
         yield
     finally:
+        if worker_task is not None:
+            from app.core.jobs import job_worker
+
+            job_worker.stop()
+            worker_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker_task
         await close_mongo(getattr(app.state, "mongo", None))
         app.state.mongo = None
         logger.info("Shutting down %s", settings.app_name)

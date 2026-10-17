@@ -45,6 +45,10 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         await db.interviews.create_index(
             [("user_id", 1), ("created_at", -1)], name="ix_interviews_user_created"
         )
+        # Background job queue: the claim query filters by status and due time.
+        await db[settings.jobs_collection_name].create_index(
+            [("status", 1), ("run_at", 1)], name="ix_jobs_status_run_at"
+        )
     except Exception as exc:
         # If this fails, the application cannot safely enforce uniqueness constraints.
         logger.critical("Could not create MongoDB indexes: %s", exc)

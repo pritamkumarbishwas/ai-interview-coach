@@ -1,13 +1,8 @@
-import os
-
-os.environ.setdefault("ENVIRONMENT", "test")
-os.environ.setdefault("MONGO_DB_NAME", "test_ai_interview_coach")
-os.environ.setdefault("JWT_SECRET", "test-secret-do-not-use-in-production")
-os.environ.setdefault("JWT_EXPIRES_MINUTES", "60")
-os.environ.setdefault("LOG_LEVEL", "WARNING")
-# Tests always use an embedded in-process Qdrant — never a server (and the
-# backend/.env value may point at a cloud instance). Forced, not setdefault.
-os.environ["QDRANT_URL"] = ":memory:"
+# ruff: noqa: I001
+# tests/_bootstrap.py must be imported before any `app.*` module (it sets the
+# test environment and starts the ephemeral MongoDB), so it intentionally
+# precedes the stdlib / third-party import blocks below.
+from tests import _bootstrap
 
 import asyncio
 import math
@@ -76,6 +71,9 @@ def database() -> Iterator[None]:
     _drop_test_database()
     yield
     _drop_test_database()
+    if _bootstrap.MONGO_SERVER is not None:
+        # Stop the ephemeral mongod we started in tests/_bootstrap.py.
+        _bootstrap.MONGO_SERVER.close()
 
 
 @pytest.fixture(autouse=True)

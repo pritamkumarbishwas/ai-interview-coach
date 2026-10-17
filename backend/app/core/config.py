@@ -8,6 +8,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_JWT_SECRET = "dev-only-secret-change-me"
 SUPPORTED_LLM_PROVIDERS = ("openai", "groq")
+# Only the console provider ships today; real transport providers (e.g. smtp)
+# slot in here without touching call sites.
+SUPPORTED_MAIL_PROVIDERS = ("console",)
 
 # <repo>/backend — the directory that owns the `app` package.
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -74,6 +77,28 @@ class Settings(BaseSettings):
     rag_top_k: int = Field(default=5, ge=3, le=5)
     knowledge_base_dir: str = "../data/knowledge_base"
 
+    # --- Outbound email ----------------------------------------------------
+    # "console" logs the message instead of sending it — safe default so no
+    # email leaves the process until a real provider is configured.
+    mail_provider: str = "console"
+    mail_from: str = "no-reply@example.com"
+    mail_from_name: str = "AI Interview Coach"
+
+    # --- Background jobs ---------------------------------------------------
+    # The worker is opt-in: the queue and its storage are always available, but
+    # nothing polls for jobs unless this is enabled (or a worker is started in
+    # code, as tests do).
+    jobs_enabled: bool = False
+    jobs_collection_name: str = "jobs"
+    jobs_poll_interval_seconds: float = Field(default=5.0, gt=0)
+    jobs_max_attempts: int = Field(default=3, ge=1)
+    jobs_backoff_seconds: float = Field(default=30.0, gt=0)
+
+    # --- Feature flags (staged rollout of the screening platform) -----------
+    feature_screening_enabled: bool = False
+    feature_magic_links_enabled: bool = False
+    feature_proctoring_integrity_enabled: bool = False
+
     @field_validator("log_format", mode="before")
     @classmethod
     def _validate_log_format(cls, value: object) -> object:
@@ -96,6 +121,19 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"LLM_PROVIDER={value!r} is not supported. "
                 f"Valid options: {', '.join(SUPPORTED_LLM_PROVIDERS)}."
+            )
+        return provider
+
+    @field_validator("mail_provider", mode="before")
+    @classmethod
+    def _validate_mail_provider(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        provider = value.strip().lower()
+        if provider not in SUPPORTED_MAIL_PROVIDERS:
+            raise ValueError(
+                f"MAIL_PROVIDER={value!r} is not supported. "
+                f"Valid options: {', '.join(SUPPORTED_MAIL_PROVIDERS)}."
             )
         return provider
 
