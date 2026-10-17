@@ -82,7 +82,7 @@ class Interview(BaseModel):
     # Cached final report; generated once on completion (backfilled by the
     # report endpoint if that first generation failed).
     report: Report | None = None
-    # Session recordings by kind ("camera" | "screen"); bytes live in GridFS.
+    # Session recording (keyed by kind: "camera" composite); bytes live in GridFS.
     recordings: dict[str, RecordingMeta] = Field(default_factory=dict)
     current_question_id: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

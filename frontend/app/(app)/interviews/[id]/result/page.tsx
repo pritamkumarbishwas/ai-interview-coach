@@ -30,7 +30,7 @@ import { formatDateTime, scoreLabel } from "@/lib/utils";
 import {
   getInterview,
   getReport,
-  recordingKinds,
+  hasSessionRecording,
 } from "@/services/interviews";
 
 function durationLabel(startedAt: string | null, completedAt: string | null) {
@@ -185,7 +185,7 @@ export default function ResultPage() {
     .filter(Boolean)
     .join(" · ");
 
-  const kinds = recordingKinds(interview);
+  const hasRecording = hasSessionRecording(interview);
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -218,7 +218,7 @@ export default function ResultPage() {
         </div>
       </section>
 
-      <RecordingPlayer interviewId={interview.id} kinds={kinds} />
+      <RecordingPlayer interviewId={interview.id} available={hasRecording} />
 
       <section
         className="grid grid-cols-1 gap-4 sm:grid-cols-3"

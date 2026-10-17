@@ -100,7 +100,6 @@ export function useInterviewRecorder({
     async (blob: Blob, seq: number, finalize: boolean) => {
       await uploadRecordingChunk(
         interviewId,
-        "camera",
         seq,
         blob,
         finalize,

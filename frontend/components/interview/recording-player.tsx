@@ -2,32 +2,32 @@
 
 import { useEffect, useState } from "react";
 
-import { Film, Monitor, User } from "lucide-react";
+import { Film } from "lucide-react";
 
 import { Alert } from "@/components/ui/alert";
 import { getRecordingBlob } from "@/services/interviews";
-import { cx } from "@/lib/utils";
-
-type Kind = "camera" | "screen";
 
 interface RecordingPlayerProps {
   interviewId: string;
-  /** Which kinds are present (finalized) on the interview. */
-  kinds: Kind[];
+  /** Whether a finalized session recording is present on the interview. */
+  available: boolean;
 }
 
 /**
- * Plays a finalized session recording. Fetches the blob with the axios
- * interceptor (Bearer header) and plays via an object URL, revoked on
- * unmount. Shows a Camera/Screen toggle when both kinds exist.
+ * Plays the finalized session recording (screen + camera composite). Fetches
+ * the blob with the axios interceptor (Bearer header) and plays via an object
+ * URL, revoked on unmount.
  */
-export function RecordingPlayer({ interviewId, kinds }: RecordingPlayerProps) {
-  const [active, setActive] = useState<Kind>(kinds[0] ?? "camera");
+export function RecordingPlayer({
+  interviewId,
+  available,
+}: RecordingPlayerProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!available) return;
     let cancelled = false;
     let objectUrl: string | null = null;
 
@@ -35,7 +35,7 @@ export function RecordingPlayer({ interviewId, kinds }: RecordingPlayerProps) {
       setLoading(true);
       setError(null);
       try {
-        const blob = await getRecordingBlob(interviewId, active);
+        const blob = await getRecordingBlob(interviewId);
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setUrl(objectUrl);
@@ -56,9 +56,9 @@ export function RecordingPlayer({ interviewId, kinds }: RecordingPlayerProps) {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [interviewId, active]);
+  }, [interviewId, available]);
 
-  if (kinds.length === 0) {
+  if (!available) {
     return (
       <div className="flex items-center gap-2 rounded-card border border-line bg-card px-4 py-3 text-sm text-ink-3">
         <Film className="h-4 w-4" aria-hidden />
@@ -77,37 +77,11 @@ export function RecordingPlayer({ interviewId, kinds }: RecordingPlayerProps) {
           <Film className="h-4 w-4 text-ink-3" aria-hidden />
           Session Recording
         </h2>
-        {kinds.length > 1 ? (
-          <div className="flex gap-1 rounded-lg bg-surface p-0.5">
-            {kinds.map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                onClick={() => setActive(kind)}
-                className={cx(
-                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors",
-                  active === kind
-                    ? "bg-card text-ink shadow-sm"
-                    : "text-ink-3 hover:text-ink",
-                )}
-              >
-                {kind === "camera" ? (
-                  <User className="h-3.5 w-3.5" aria-hidden />
-                ) : (
-                  <Monitor className="h-3.5 w-3.5" aria-hidden />
-                )}
-                {kind === "camera" ? "Camera" : "Screen"}
-              </button>
-            ))}
-          </div>
-        ) : null}
       </header>
 
       <div className="p-4">
         {error ? (
-          <Alert tone="error">
-            Recording unavailable: {error}
-          </Alert>
+          <Alert tone="error">Recording unavailable: {error}</Alert>
         ) : loading ? (
           <div className="flex aspect-video items-center justify-center rounded-xl bg-surface text-sm text-ink-3">
             Loading recording…

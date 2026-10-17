@@ -1,11 +1,11 @@
 """Session recording storage: chunked GridFS upload and streamed download.
 
-Interviews record camera (composite) and optionally screen as webm. The
-frontend records with `MediaRecorder(timeslice=...)` and uploads each blob as
-a chunk; the first chunk (`seq=0`) resets any prior incomplete upload for that
-kind, and `finalize=True` seals the file and writes `RecordingMeta` onto the
-interview document. Bytes live in GridFS; only metadata is ever returned in
-API JSON.
+Interviews record a single camera composite (screen base layer + camera PiP +
+mic audio) as webm. The frontend records with `MediaRecorder(timeslice=...)` and
+uploads each blob as a chunk; the first chunk (`seq=0`) resets any prior
+incomplete upload, and `finalize=True` seals the file and writes `RecordingMeta`
+onto the interview document. Bytes live in GridFS; only metadata is ever
+returned in API JSON.
 """
 
 import logging
@@ -25,8 +25,8 @@ from app.repositories.interview_repository import InterviewRepository, interview
 
 logger = logging.getLogger(__name__)
 
-RecordingKind = str  # "camera" | "screen" — validated by the API layer
-ALLOWED_RECORDING_KINDS = ("camera", "screen")
+RecordingKind = str  # "camera" (screen+camera composite) — validated by the API layer
+ALLOWED_RECORDING_KINDS = ("camera",)
 ALLOWED_RECORDING_CONTENT_TYPES = ("video/webm", "video/mp4", "video/x-matroska")
 
 
@@ -221,8 +221,8 @@ class RecordingService:
         admin endpoint. Returns the number of chunk files deleted.
         """
         bucket = self._bucket(db)
-        # All recording chunk filenames look like "<interview_id>:<kind>#<seq>".
-        cursor = bucket.find({"filename": {"$regex": "^[0-9a-f]{24}:(camera|screen)#\\d+$"}})
+        # All recording chunk filenames look like "<interview_id>:camera#<seq>".
+        cursor = bucket.find({"filename": {"$regex": "^[0-9a-f]{24}:camera#\\d+$"}})
         deleted = 0
         async for grid_out in cursor:
             filename = str(grid_out.filename)

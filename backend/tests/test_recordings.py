@@ -136,22 +136,18 @@ def test_seq_zero_restarts_upload(
     assert r.content == new0 + new1
 
 
-def test_screen_kind_is_independent_of_camera(
+def test_screen_kind_is_rejected(
     client: TestClient, auth_headers: dict, env: Env
 ) -> None:
+    # Only the "camera" composite kind is supported; a separate screen kind is
+    # not produced by the recorder, so it must be rejected.
     ctx = env.setup()
     iid = ctx["id"]
-    cam, scr = b"CAMERA-DATA", b"SCREEN-DATA"
-    upload_chunk(client, auth_headers, iid, kind="camera", finalize=True, blob=cam)
-    upload_chunk(client, auth_headers, iid, kind="screen", finalize=True, blob=scr)
-
+    r = upload_chunk(client, auth_headers, iid, kind="screen", finalize=True, blob=b"SCR")
+    assert r.status_code == 404
     assert (
-        client.get(f"/api/interviews/{iid}/recordings/camera", headers=auth_headers).content
-        == cam
-    )
-    assert (
-        client.get(f"/api/interviews/{iid}/recordings/screen", headers=auth_headers).content
-        == scr
+        client.get(f"/api/interviews/{iid}/recordings/screen", headers=auth_headers).status_code
+        == 404
     )
 
 

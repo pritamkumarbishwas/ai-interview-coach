@@ -116,7 +116,7 @@ export interface ProctoringSession {
   consent_given_at: string | null;
 }
 
-/** Metadata for one stored session recording (kind = "camera" | "screen"). */
+/** Metadata for the session recording (kind = "camera" composite). */
 export interface RecordingMeta {
   file_id: string;
   content_type: string;

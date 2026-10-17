@@ -134,10 +134,9 @@ export function findCurrentQuestion(
   );
 }
 
-/** Upload one recorded chunk for the given interview + kind. */
+/** Upload one recorded chunk of the session (screen+camera composite). */
 export async function uploadRecordingChunk(
   interviewId: string,
-  kind: "camera" | "screen",
   seq: number,
   chunk: Blob,
   finalize: boolean,
@@ -147,11 +146,11 @@ export async function uploadRecordingChunk(
   // the API expects the bare MIME type.
   const baseContentType = contentType.split(";")[0].trim() || "video/webm";
   const form = new FormData();
-  form.append("kind", kind);
+  form.append("kind", "camera");
   form.append("seq", String(seq));
   form.append("finalize", String(finalize));
   form.append("content_type", baseContentType);
-  form.append("chunk", chunk, `${kind}-${seq}.webm`);
+  form.append("chunk", chunk, `camera-${seq}.webm`);
   try {
     await api.post(`/interviews/${interviewId}/recordings/chunk`, form, {
       timeout: UPLOAD_TIMEOUT_MS,
@@ -162,16 +161,13 @@ export async function uploadRecordingChunk(
 }
 
 /**
- * Fetch a finalized recording as a blob (authenticated via the axios
+ * Fetch the finalized session recording as a blob (authenticated via the axios
  * interceptor). Callers should `URL.createObjectURL` and revoke on unmount.
  */
-export async function getRecordingBlob(
-  interviewId: string,
-  kind: "camera" | "screen",
-): Promise<Blob> {
+export async function getRecordingBlob(interviewId: string): Promise<Blob> {
   try {
     const { data } = await api.get<Blob>(
-      `/interviews/${interviewId}/recordings/${kind}`,
+      `/interviews/${interviewId}/recordings/camera`,
       { responseType: "blob", timeout: UPLOAD_TIMEOUT_MS },
     );
     return data;
@@ -180,12 +176,7 @@ export async function getRecordingBlob(
   }
 }
 
-/** Convenience: which recording kinds are present on an interview. */
-export function recordingKinds(
-  interview: InterviewDetail,
-): ("camera" | "screen")[] {
-  const kinds: ("camera" | "screen")[] = [];
-  if (interview.recordings?.camera?.finalized) kinds.push("camera");
-  if (interview.recordings?.screen?.finalized) kinds.push("screen");
-  return kinds;
+/** Whether a finalized session recording is present on an interview. */
+export function hasSessionRecording(interview: InterviewDetail): boolean {
+  return Boolean(interview.recordings?.camera?.finalized);
 }

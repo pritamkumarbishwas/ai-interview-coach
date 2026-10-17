@@ -28,7 +28,7 @@ Feature specification for the AI Interview Coach mock-interview flow.
 3. Background task evaluates all answers in parallel and generates the report. If it fails, the report endpoint backfills on first access.
 
 ### 2.4 Result page
-1. Recording player: camera composite video by default; Camera/Screen toggle if both exist; blob fetched with auth, played via `URL.createObjectURL` (revoked on unmount).
+1. Recording player: the camera composite video; blob fetched with auth, played via `URL.createObjectURL` (revoked on unmount).
 2. Answer review: per-question card with question, candidate answer, 5-dimension score bars, strengths, weaknesses, coach feedback, improved answer.
 3. Aggregate report: overall/technical/communication scores, narrative, strong/weak topics, preparation plan.
 4. Report loading: poll `GET /report` every 3s with an "Analyzing your answers…" state; after ~3 minutes fall back to a manual "Try again" button (never a single hung 120s request).
@@ -58,7 +58,7 @@ class RecordingMeta(BaseModel):
 
 class Interview(BaseModel):
     ...
-    recordings: dict[str, RecordingMeta] = {}   # keyed by kind: "camera" | "screen"
+    recordings: dict[str, RecordingMeta] = {}   # keyed by kind: "camera" (composite)
 ```
 
 ### 3.3 Storage
@@ -83,7 +83,7 @@ class Interview(BaseModel):
 
 ### 4.3 Recording upload (new)
 `POST /api/interviews/{id}/recordings/chunk`
-- Multipart form: `kind` (`camera` | `screen`), `seq` (int, chunk index, 0-based), `chunk` (file part), `finalize` (bool, optional).
+- Multipart form: `kind` (`camera` — the only supported kind), `seq` (int, chunk index, 0-based), `chunk` (file part), `finalize` (bool, optional).
 - Appends the chunk to the GridFS logical file for (interview, kind). First chunk (`seq=0`) resets any previous incomplete upload for that kind.
 - `finalize=true`: seals the file, writes `RecordingMeta` (`finalized: true`, `size_bytes`, `chunk_count`) onto the interview document.
 - Guards: ownership check, per-chunk size cap, total size cap (~500MB), content-type validation (`video/webm`), rate-limited.
@@ -110,7 +110,7 @@ class Interview(BaseModel):
 
 ### 5.1 Composite (single recording, synced)
 - `<canvas>` compositor: screen stream as base layer, camera stream drawn as a PiP overlay (bottom-right corner), mic audio attached.
-- Output: `canvas.captureStream()` + audio track → one `MediaRecorder` → one webm file (kind `camera` conceptually contains the full composite; `screen` kind is optional and only stored when a separate raw screen capture is desired — default: composite only, uploaded under kind `camera`).
+- Output: `canvas.captureStream()` + audio track → one `MediaRecorder` → one webm file stored under kind `camera`. The composite already contains the screen, so no separate `screen` kind is produced or stored.
 - Fallback: if `captureStream` is unsupported, record the raw camera stream (video + audio) only.
 
 ### 5.2 Chunked upload (crash-tolerant)
@@ -185,7 +185,7 @@ class Interview(BaseModel):
 - [x] Verify: typecheck; manual session with no scoring UI
 
 ### Phase 5 — Frontend: result page
-- [x] Recording player (blob → objectURL, revoked on unmount; camera/screen toggle if both)
+- [x] Recording player (blob → objectURL, revoked on unmount; single composite recording)
 - [x] Answer review section (per question: text, answer, score bars, strengths, weaknesses, feedback, improved answer)
 - [x] Report polling (3s interval, ~3min cap, manual retry fallback)
 - [x] Verify: typecheck; end-to-end complete → result shows recording + review + report
