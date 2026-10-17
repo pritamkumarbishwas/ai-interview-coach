@@ -12,6 +12,7 @@ import {
   VideoOff,
 } from "lucide-react";
 
+import { StreamVideo } from "@/components/interview/stream-video";
 import { Avatar } from "@/components/ui/avatar";
 import { useMedia } from "@/hooks/use-media";
 import { cx } from "@/lib/utils";
@@ -35,9 +36,11 @@ function formatTime(totalSeconds: number): string {
 }
 
 /**
- * In-session candidate panel: recording status only (no live previews).
- * Capture happens silently in the background; this panel surfaces the
- * recording indicator, device status, and controls.
+ * In-session candidate panel: live self-view plus recording status. Capture
+ * still happens in the background; this panel surfaces the screen-share base
+ * layer with a camera PiP (mirroring the composited recording), a camera-only
+ * view, or a placeholder, alongside the recording indicator, device status,
+ * and controls.
  */
 export function CandidatePanel({
   candidateName,
@@ -48,6 +51,8 @@ export function CandidatePanel({
   className,
 }: CandidatePanelProps) {
   const {
+    cameraStream,
+    screenStream,
     cameraStatus,
     screenStatus,
     micOn,
@@ -86,6 +91,8 @@ export function CandidatePanel({
 
   const sharing = screenStatus === "active";
   const cameraLive = cameraStatus === "active";
+  const cameraReady = cameraLive && camOn && !!cameraStream;
+  const screenReady = sharing && !!screenStream;
 
   return (
     <section
@@ -109,32 +116,62 @@ export function CandidatePanel({
         )}
       </header>
 
-      {/* Silent capture: avatar + status, no video preview. */}
+      {/* Live self-view: screen share as the base layer with a camera PiP
+          (mirrors the composited recording), or camera-only, or a placeholder
+          when neither is active. */}
       <div className="relative m-3 flex aspect-video flex-col items-center justify-center gap-3 overflow-hidden rounded-xl bg-gradient-to-b from-[#2b3644] to-[#1f2933]">
-        <div
-          className="absolute inset-0 opacity-[0.15]"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle at 30% 20%, #f7931e 0%, transparent 45%), radial-gradient(circle at 75% 80%, #f7931e 0%, transparent 40%)",
-          }}
-          aria-hidden
-        />
-        <Avatar
-          name={candidateName}
-          size="xl"
-          className={cameraLive ? undefined : "opacity-40"}
-        />
-        <p className="text-sm text-white/60">
-          {recording
-            ? `Recording in progress · ${formatTime(elapsedSec)}`
-            : cameraStatus === "starting"
-              ? "Starting camera…"
-              : cameraStatus === "denied"
-                ? "Camera access denied"
-                : cameraStatus === "unavailable"
-                  ? "No camera found"
-                  : "Camera is off"}
-        </p>
+        {screenReady ? (
+          <StreamVideo
+            stream={screenStream}
+            className="absolute inset-0 h-full w-full bg-black object-contain"
+            label="Screen share preview"
+          />
+        ) : cameraReady ? (
+          <StreamVideo
+            stream={cameraStream}
+            mirror
+            className="absolute inset-0 h-full w-full object-cover"
+            label="Camera preview"
+          />
+        ) : (
+          <>
+            <div
+              className="absolute inset-0 opacity-[0.15]"
+              style={{
+                backgroundImage:
+                  "radial-gradient(circle at 30% 20%, #f7931e 0%, transparent 45%), radial-gradient(circle at 75% 80%, #f7931e 0%, transparent 40%)",
+              }}
+              aria-hidden
+            />
+            <Avatar
+              name={candidateName}
+              size="xl"
+              className={cameraLive ? undefined : "opacity-40"}
+            />
+            <p className="relative text-sm text-white/60">
+              {recording
+                ? `Recording in progress · ${formatTime(elapsedSec)}`
+                : cameraStatus === "starting"
+                  ? "Starting camera…"
+                  : cameraStatus === "denied"
+                    ? "Camera access denied"
+                    : cameraStatus === "unavailable"
+                      ? "No camera found"
+                      : "Camera is off"}
+            </p>
+          </>
+        )}
+
+        {screenReady && cameraReady ? (
+          <div className="absolute bottom-2 right-2 h-[26%] w-[26%] overflow-hidden rounded-lg border border-white/60 shadow-md">
+            <StreamVideo
+              stream={cameraStream}
+              mirror
+              className="h-full w-full object-cover"
+              label="Camera preview"
+            />
+          </div>
+        ) : null}
 
         <span className="absolute bottom-2 left-2 rounded-md bg-black/40 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
           {candidateName}

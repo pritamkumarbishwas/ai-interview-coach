@@ -35,6 +35,11 @@ class PayloadTooLargeError(AppError):
         super().__init__(message, status_code=413, code="payload_too_large")
 
 
+class UnsupportedMediaTypeError(AppError):
+    def __init__(self, message: str = "Unsupported media type") -> None:
+        super().__init__(message, status_code=415, code="unsupported_media_type")
+
+
 class AuthenticationError(AppError):
     def __init__(self, message: str = "Could not authenticate credentials") -> None:
         super().__init__(message, status_code=401, code="unauthenticated")

@@ -203,6 +203,27 @@ def test_unsupported_content_type_rejected(
     assert r.status_code in (400, 413, 415, 422)
 
 
+def test_codec_suffixed_content_type_accepted(
+    client: TestClient, auth_headers: dict, env: Env
+) -> None:
+    # MediaRecorder emits blobs typed "video/webm;codecs=vp9,opus"; the codec
+    # parameters must not cause a false rejection.
+    ctx = env.setup()
+    r = upload_chunk(
+        client,
+        auth_headers,
+        ctx["id"],
+        content_type="video/webm;codecs=vp9,opus",
+        finalize=True,
+        blob=b"\x00\x01\x02",
+    )
+    assert r.status_code == 204
+    dl = client.get(
+        f"/api/interviews/{ctx['id']}/recordings/camera", headers=auth_headers
+    )
+    assert dl.status_code == 200
+
+
 def test_download_before_finalize_is_404(
     client: TestClient, auth_headers: dict, env: Env
 ) -> None:

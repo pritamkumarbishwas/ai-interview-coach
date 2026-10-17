@@ -18,6 +18,7 @@ from app.core.exceptions import (
     ConflictError,
     NotFoundError,
     PayloadTooLargeError,
+    UnsupportedMediaTypeError,
 )
 from app.models.interview import Interview, RecordingMeta
 from app.repositories.interview_repository import InterviewRepository, interview_repository
@@ -57,8 +58,12 @@ class RecordingService:
         """
         if kind not in ALLOWED_RECORDING_KINDS:
             raise NotFoundError(f"Unknown recording kind: {kind}")
-        if content_type not in ALLOWED_RECORDING_CONTENT_TYPES:
-            raise PayloadTooLargeError("Unsupported recording content type.")
+        # Normalize away codec/parameters (e.g. "video/webm;codecs=vp9,opus")
+        # so MediaRecorder blobs validate against the bare MIME allow-list.
+        base_content_type = content_type.split(";", 1)[0].strip().lower()
+        if base_content_type not in ALLOWED_RECORDING_CONTENT_TYPES:
+            raise UnsupportedMediaTypeError("Unsupported recording content type.")
+        content_type = base_content_type
         if len(chunk) > settings.max_recording_chunk_bytes:
             raise PayloadTooLargeError(
                 f"Recording chunk exceeds the "

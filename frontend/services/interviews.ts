@@ -143,11 +143,14 @@ export async function uploadRecordingChunk(
   finalize: boolean,
   contentType = "video/webm",
 ): Promise<void> {
+  // MediaRecorder blobs carry codec parameters (e.g. "video/webm;codecs=vp9,opus");
+  // the API expects the bare MIME type.
+  const baseContentType = contentType.split(";")[0].trim() || "video/webm";
   const form = new FormData();
   form.append("kind", kind);
   form.append("seq", String(seq));
   form.append("finalize", String(finalize));
-  form.append("content_type", contentType);
+  form.append("content_type", baseContentType);
   form.append("chunk", chunk, `${kind}-${seq}.webm`);
   try {
     await api.post(`/interviews/${interviewId}/recordings/chunk`, form, {

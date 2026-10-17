@@ -4,7 +4,7 @@ Feature specification for the AI Interview Coach mock-interview flow.
 
 ## 1. Goals
 
-- **Silent session recording.** Camera, microphone, and screen share are captured during the interview and persisted for post-exam playback. No preview is shown in the in-session Candidate panel.
+- **Silent session recording.** Camera, microphone, and screen share are captured during the interview and persisted for post-exam playback. The in-session Candidate panel shows a live self-view (screen base layer + camera PiP) alongside recording status; capture itself is silent and never blocks the session.
 - **Scoring happens only at exam end.** During the session the AI only asks questions and the candidate only answers. Live scoring, AI feedback, and per-answer evaluation are removed from the in-progress workspace.
 - **Everything is reviewable after the exam.** The result page shows the recording, per-answer evaluations (scores, strengths, weaknesses, coach feedback, improved answer), and the aggregate report.
 
@@ -13,13 +13,13 @@ Feature specification for the AI Interview Coach mock-interview flow.
 ### 2.1 Start (unchanged, plus recording start)
 1. Waiting room: proctoring consent checkbox → Start.
 2. Device check: camera + screen-share previews with status pills → Next.
-3. Interview starts → recorder hook starts capturing (screen base layer, camera PiP, mic audio). Candidate panel shows recording status only.
+3. Interview starts → recorder hook starts capturing (screen base layer, camera PiP, mic audio). Candidate panel shows a live self-view plus recording status.
 
 ### 2.2 In-session (simplified)
 1. AI interviewer asks a question (TTS auto-plays).
 2. Candidate answers by typing or voice (STT).
 3. Submit → answer stored → next question generated → appended to conversation → TTS auto-plays. No evaluation, no score panels, no manual "Next question" click.
-4. Candidate panel: avatar + pulsing red "Recording" indicator + elapsed time + cam/mic/screen status pills + control buttons (mic, camera, screen, leave).
+4. Candidate panel: live self-view (screen share base with a camera PiP, or camera-only, or an avatar placeholder) + pulsing red "Recording" indicator + elapsed time + cam/mic/screen status pills + control buttons (mic, camera, screen, leave).
 5. Controls still toggle tracks mid-session; toggles also emit proctoring events.
 
 ### 2.3 Completion
@@ -177,7 +177,7 @@ class Interview(BaseModel):
 
 ### Phase 4 — Frontend: in-session UX
 - [x] Remove `LiveScore`, `AIFeedback`, `EvaluationCard` and all evaluation/feedback/metrics state from the workspace page
-- [x] Candidate panel: no `<video>` previews; avatar + recording indicator + elapsed + status pills + controls
+- [x] Candidate panel: live self-view (screen base + camera PiP, camera-only, or avatar placeholder) + recording indicator + elapsed + status pills + controls
 - [x] Auto-advance: submit → next question appended → TTS auto-play
 - [x] Completion / End Interview → stop recorder → "Saving your session…" → upload → navigate
 - [x] Proctoring events on track toggles (`camera_on/off`, `mic_on/off`, `screen_on/off` via `POST /proctoring/events`)
