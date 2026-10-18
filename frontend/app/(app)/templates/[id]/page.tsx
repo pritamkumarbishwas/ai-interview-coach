@@ -317,7 +317,7 @@ function TemplateBuilder() {
                   <input
                     id="t-pauses"
                     type="checkbox"
-                    className="h-4 w-4 rounded border-line accent-[#f7931e]"
+                    className="h-4 w-4 rounded border-line accent-brand"
                     checked={draft.config.allow_pauses}
                     onChange={(event) =>
                       updateConfig({ allow_pauses: event.target.checked })

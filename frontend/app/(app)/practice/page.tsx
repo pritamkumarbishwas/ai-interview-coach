@@ -216,7 +216,7 @@ export default function PracticePage() {
                 "flex flex-col items-center justify-center rounded-card border-2 border-dashed px-6 py-12 text-center transition-colors",
                 dragging
                   ? "border-brand bg-brand-50"
-                  : "border-line bg-surface hover:border-[#f3d3a8]",
+                  : "border-line bg-surface hover:border-brand-border",
               )}
             >
               <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand">

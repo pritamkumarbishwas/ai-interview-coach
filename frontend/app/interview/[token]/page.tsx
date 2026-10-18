@@ -326,7 +326,7 @@ function ScreeningInterview() {
   if (stage === "done") {
     return (
       <div className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center px-6 py-16 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#e7f6ef] text-success">
+        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-success-soft text-success-ink">
           <CheckCircle2 className="h-7 w-7" aria-hidden />
         </span>
         <h1 className="mt-5 text-2xl font-bold tracking-tight text-ink">
@@ -425,7 +425,7 @@ function ScreeningInterview() {
                             type="checkbox"
                             checked={consent}
                             onChange={(event) => setConsent(event.target.checked)}
-                            className="mt-0.5 h-4 w-4 shrink-0 rounded border-line accent-[#f7931e]"
+                            className="mt-0.5 h-4 w-4 shrink-0 rounded border-line accent-brand"
                           />
                           <span className="text-[13px] leading-relaxed text-ink">
                             I understand and consent to proctoring
@@ -575,7 +575,7 @@ function ScreeningInterview() {
           }}
         />
 
-        <div className="order-2 flex flex-col overflow-hidden rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:order-none">
+        <div className="order-2 flex flex-col overflow-hidden rounded-card border border-line bg-card shadow-card lg:order-none">
           <header className="flex items-center justify-between border-b border-line px-4 py-3">
             <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
               <MessageSquare className="h-4 w-4 text-ink-3" aria-hidden />

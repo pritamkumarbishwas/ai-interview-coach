@@ -37,9 +37,9 @@ function StatusPill({ state, label }: { state: CheckState; label: string }) {
     <span
       className={cx(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
-        state === "pass" && "bg-[#e7f6ef] text-success",
+        state === "pass" && "bg-success-soft text-success-ink",
         state === "checking" && "bg-brand-50 text-brand-hover",
-        state === "fail" && "bg-[#fdf0f0] text-danger",
+        state === "fail" && "bg-danger-soft text-danger-ink",
       )}
     >
       {state === "pass" ? (
@@ -83,7 +83,7 @@ export function DeviceCheck({
   return (
     <section
       className={cx(
-        "rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+        "rounded-card border border-line bg-card shadow-card",
         className,
       )}
       aria-label="Device check"

@@ -197,7 +197,7 @@ export default function ResultPage() {
         Back to interviews
       </Link>
 
-      <section className="overflow-hidden rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+      <section className="overflow-hidden rounded-card border border-line bg-card shadow-card">
         <div className="flex flex-col items-center gap-5 bg-gradient-to-b from-brand-50 to-card px-6 py-8 text-center sm:px-8">
           <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand text-white shadow-md">
             <Award className="h-7 w-7" aria-hidden />
@@ -270,7 +270,7 @@ export default function ResultPage() {
               report.strong_topics.map((area) => (
                 <span
                   key={area}
-                  className="inline-flex items-center gap-1.5 rounded-full border border-[#bfe8d5] bg-[#e7f6ef] px-3 py-1.5 text-[13px] font-medium text-[#18794e]"
+                  className="inline-flex items-center gap-1.5 rounded-full border border-success-border bg-success-soft px-3 py-1.5 text-[13px] font-medium text-success-ink"
                 >
                   <CircleCheck className="h-3.5 w-3.5" aria-hidden />
                   {area}
@@ -295,7 +295,7 @@ export default function ResultPage() {
                 report.weak_topics.map((area) => (
                   <span
                     key={area}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[#f3d3a8] bg-brand-50 px-3 py-1.5 text-[13px] font-medium text-brand-hover"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-brand-border bg-brand-soft px-3 py-1.5 text-[13px] font-medium text-brand-ink"
                   >
                     <Target className="h-3.5 w-3.5" aria-hidden />
                     {area}

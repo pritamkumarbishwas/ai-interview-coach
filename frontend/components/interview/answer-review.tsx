@@ -45,7 +45,7 @@ export function AnswerReview({ questions, answers }: AnswerReviewProps) {
 
   return (
     <section
-      className="rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+      className="rounded-card border border-line bg-card shadow-card"
       aria-label="Answer review"
     >
       <header className="border-b border-line px-4 py-3">
@@ -109,10 +109,10 @@ function ReviewItem({
             className={cx(
               "mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full",
               evaluation.overall >= 70
-                ? "bg-[#e7f6ef] text-success"
+                ? "bg-success-soft text-success-ink"
                 : evaluation.overall >= 50
                   ? "bg-brand-50 text-brand"
-                  : "bg-[#fdf0f0] text-danger",
+                  : "bg-danger-soft text-danger-ink",
             )}
           >
             {evaluation.overall >= 70 ? (

@@ -68,7 +68,7 @@ export function Input({ invalid, className, ...props }: InputProps) {
       suppressHydrationWarning
       className={cx(
         inputClasses,
-        invalid && "border-danger focus:border-danger focus:ring-[#fdf0f0]",
+        invalid && "border-danger focus:border-danger focus:ring-danger-soft",
         className,
       )}
       {...props}
@@ -86,7 +86,7 @@ export function PasswordInput({ invalid, className, ...props }: InputProps) {
         className={cx(
           inputClasses,
           "pr-11",
-          invalid && "border-danger focus:border-danger focus:ring-[#fdf0f0]",
+          invalid && "border-danger focus:border-danger focus:ring-danger-soft",
           className,
         )}
         {...props}
@@ -125,7 +125,7 @@ export function Textarea({
       className={cx(
         inputClasses,
         "min-h-28 resize-y leading-relaxed",
-        invalid && "border-danger focus:border-danger focus:ring-[#fdf0f0]",
+        invalid && "border-danger focus:border-danger focus:ring-danger-soft",
         className,
       )}
       {...props}

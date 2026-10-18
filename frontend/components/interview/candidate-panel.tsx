@@ -97,7 +97,7 @@ export function CandidatePanel({
   return (
     <section
       className={cx(
-        "rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+        "rounded-card border border-line bg-card shadow-card",
         className,
       )}
       aria-label="Candidate panel"
@@ -243,7 +243,7 @@ function StatusPill({ label, on }: { label: string; on: boolean }) {
     <span
       className={cx(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
-        on ? "bg-[#e7f6ef] text-success" : "bg-mist text-ink-3",
+        on ? "bg-success-soft text-success-ink" : "bg-mist text-ink-3",
       )}
     >
       <span
@@ -285,7 +285,7 @@ function ControlButton({
         solid
           ? "bg-danger text-white hover:brightness-95"
           : danger
-            ? "bg-[#fdf0f0] text-danger hover:bg-[#fbe6e6]"
+            ? "bg-danger-soft text-danger-ink hover:brightness-95"
             : "border border-line bg-card text-ink-2 shadow-sm hover:bg-mist hover:text-ink",
       )}
     >

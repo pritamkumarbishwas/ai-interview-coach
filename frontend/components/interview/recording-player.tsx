@@ -69,7 +69,7 @@ export function RecordingPlayer({
 
   return (
     <section
-      className="overflow-hidden rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]"
+      className="overflow-hidden rounded-card border border-line bg-card shadow-card"
       aria-label="Session recording"
     >
       <header className="flex items-center justify-between border-b border-line px-4 py-3">

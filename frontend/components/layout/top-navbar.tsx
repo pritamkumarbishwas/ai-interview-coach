@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { Bell, Search } from "lucide-react";
 
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { UserMenu } from "@/components/layout/user-menu";
 import { titleCase } from "@/lib/utils";
 
@@ -66,8 +67,15 @@ export function TopNavbar({ onMenuClick }: TopNavbarProps) {
         setBellOpen(false);
       }
     };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setBellOpen(false);
+    };
     document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
   }, []);
 
   return (
@@ -171,6 +179,8 @@ export function TopNavbar({ onMenuClick }: TopNavbarProps) {
               <path d="M12 17h.01" />
             </svg>
           </button>
+
+          <ThemeToggle />
 
           <UserMenu />
         </div>

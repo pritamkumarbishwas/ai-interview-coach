@@ -21,7 +21,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       {mobileOpen ? (
         <div className="fixed inset-0 z-50 xl:hidden">
           <div
-            className="absolute inset-0 bg-[#1f2933]/40"
+            className="absolute inset-0 bg-scrim"
             onClick={() => setMobileOpen(false)}
             aria-hidden
           />

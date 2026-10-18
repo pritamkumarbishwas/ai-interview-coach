@@ -28,7 +28,7 @@ export function ChatMessageBubble({ message }: { message: ChatMessage }) {
           className={cx(
             "rounded-2xl px-4 py-3 text-sm leading-relaxed",
             isAI
-              ? "rounded-tl-md border border-[#f8dcb8] bg-ai text-ink"
+              ? "rounded-tl-md border border-info-border bg-info-soft text-ink"
               : "rounded-tr-md bg-mist text-ink",
           )}
         >

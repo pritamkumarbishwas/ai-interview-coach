@@ -13,11 +13,11 @@ export type BadgeTone =
 
 const TONES: Record<BadgeTone, string> = {
   neutral: "bg-mist text-ink-2 ring-line",
-  brand: "bg-brand-100 text-brand-hover ring-[#f8dcb8]",
-  ai: "bg-ai text-[#b3620a] ring-[#f8dcb8]",
-  success: "bg-[#e7f6ef] text-success ring-[#c4ebdc]",
-  warning: "bg-[#fdf3e2] text-[#b57a09] ring-[#f5dfb4]",
-  danger: "bg-[#fdf0f0] text-danger ring-[#f5c6c7]",
+  brand: "bg-brand-soft text-brand-ink ring-brand-border",
+  ai: "bg-info-soft text-info-ink ring-info-border",
+  success: "bg-success-soft text-success-ink ring-success-border",
+  warning: "bg-warning-soft text-warning-ink ring-warning-border",
+  danger: "bg-danger-soft text-danger-ink ring-danger-border",
   muted: "bg-mist text-ink-3 ring-line",
 };
 

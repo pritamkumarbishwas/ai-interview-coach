@@ -73,7 +73,7 @@ function Team() {
       </header>
 
       {link ? (
-        <div className="rounded-btn border border-[#f8dcb8] bg-ai p-3">
+        <div className="rounded-btn border border-info-border bg-info-soft p-3">
           <div className="flex items-center gap-2">
             <input
               readOnly
@@ -84,7 +84,7 @@ function Team() {
             />
             <CopyButton url={link} />
           </div>
-          <p className="mt-1.5 text-xs text-[#8a5310]">
+          <p className="mt-1.5 text-xs text-info-ink">
             Share this invitation link with the new team member.
           </p>
         </div>

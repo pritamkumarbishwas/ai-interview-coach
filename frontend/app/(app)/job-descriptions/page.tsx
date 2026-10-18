@@ -251,7 +251,7 @@ function JobDescriptionCard({
               onClick={onRemove}
               disabled={busy}
               aria-label={`Delete ${item.title}`}
-              className="rounded-btn p-1.5 text-ink-3 transition-colors hover:bg-[#fdf0f0] hover:text-danger disabled:opacity-50"
+              className="rounded-btn p-1.5 text-ink-3 transition-colors hover:bg-danger-soft hover:text-danger-ink disabled:opacity-50"
             >
               <Trash className="h-4 w-4" aria-hidden />
             </button>

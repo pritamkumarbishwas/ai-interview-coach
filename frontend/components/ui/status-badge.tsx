@@ -26,10 +26,10 @@ export function DifficultyBadge({
 }) {
   const tone =
     label === "Advanced"
-      ? "bg-[#fdf0f0] text-danger"
+      ? "bg-danger-soft text-danger-ink"
       : label === "Intermediate"
-        ? "bg-[#fdf3e2] text-[#b57a09]"
-        : "bg-[#e7f6ef] text-success";
+        ? "bg-warning-soft text-warning-ink"
+        : "bg-success-soft text-success-ink";
   return (
     <span
       className={cx(

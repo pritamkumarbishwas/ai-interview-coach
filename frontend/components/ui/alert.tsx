@@ -7,9 +7,9 @@ import { cx } from "@/lib/utils";
 export type AlertTone = "error" | "success" | "info";
 
 const TONES: Record<AlertTone, string> = {
-  error: "border-[#f5c6c7] bg-[#fdf0f0] text-[#a02c30]",
-  success: "border-[#c4ebdc] bg-[#e7f6ef] text-[#157a52]",
-  info: "border-[#f8dcb8] bg-ai text-[#8a5310]",
+  error: "border-danger-border bg-danger-soft text-danger-ink",
+  success: "border-success-border bg-success-soft text-success-ink",
+  info: "border-info-border bg-info-soft text-info-ink",
 };
 
 const ICONS: Record<AlertTone, ReactNode> = {

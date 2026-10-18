@@ -15,9 +15,9 @@ export function QuestionCard({
   totalQuestions,
 }: QuestionCardProps) {
   return (
-    <div className="rounded-card border border-[#f8dcb8] bg-ai p-4">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[#b3620a]">
+    <div className="rounded-card border border-info-border bg-info-soft p-4">
+      <div className="flex items-center gap-2">
+        <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-info-ink">
           <Sparkles className="h-3.5 w-3.5" aria-hidden />
           Current question
         </span>

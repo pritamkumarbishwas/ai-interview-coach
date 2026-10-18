@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -23,10 +25,35 @@
   --color-ink-2: var(--color-ink-2-val);
   --color-ink-3: var(--color-ink-3-val);
 
-  /* Status */
+  /* Status accents (fixed) */
   --color-success: #22a06b;
   --color-warning: #f5a623;
   --color-danger: #e5484d;
+
+  /* Status surfaces + soft brand/info (theme-aware) */
+  --color-brand-soft: var(--color-brand-soft-val);
+  --color-brand-border: var(--color-brand-border-val);
+  --color-brand-ink: var(--color-brand-ink-val);
+  --color-info-soft: var(--color-info-soft-val);
+  --color-info-border: var(--color-info-border-val);
+  --color-info-ink: var(--color-info-ink-val);
+  --color-success-soft: var(--color-success-soft-val);
+  --color-success-border: var(--color-success-border-val);
+  --color-success-ink: var(--color-success-ink-val);
+  --color-warning-soft: var(--color-warning-soft-val);
+  --color-warning-border: var(--color-warning-border-val);
+  --color-warning-ink: var(--color-warning-ink-val);
+  --color-danger-soft: var(--color-danger-soft-val);
+  --color-danger-border: var(--color-danger-border-val);
+  --color-danger-ink: var(--color-danger-ink-val);
+
+  /* Intentionally dark feature surfaces (auth hero, video) — fixed in both themes */
+  --color-hero: var(--color-hero-val);
+  --color-scrim: var(--color-scrim-val);
+
+  /* Elevation */
+  --shadow-card: var(--shadow-card-val);
+  --shadow-card-hover: var(--shadow-card-hover-val);
 
   /* Radii */
   --radius-card: 14px;
@@ -84,37 +111,83 @@
 
 @layer base {
   :root {
+    color-scheme: light;
+
     --color-brand-100-val: #fff1dd;
     --color-brand-50-val: #fff8ef;
     --color-ai-val: #fff4e5;
-    
+
     --color-canvas-val: #f7f9fa;
     --color-surface-val: #fafbfc;
     --color-card-val: #ffffff;
     --color-line-val: #e8ecef;
     --color-mist-val: #f2f4f7;
-    
+
     --color-ink-val: #1f2933;
     --color-ink-2-val: #667085;
-    --color-ink-3-val: #98a2b3;
+    --color-ink-3-val: #6b7280;
+
+    --color-brand-soft-val: #fff1dd;
+    --color-brand-border-val: #f8dcb8;
+    --color-brand-ink-val: #b3620a;
+    --color-info-soft-val: #fff4e5;
+    --color-info-border-val: #f8dcb8;
+    --color-info-ink-val: #8a5310;
+    --color-success-soft-val: #e7f6ef;
+    --color-success-border-val: #c4ebdc;
+    --color-success-ink-val: #157a52;
+    --color-warning-soft-val: #fdf3e2;
+    --color-warning-border-val: #f5dfb4;
+    --color-warning-ink-val: #b57a09;
+    --color-danger-soft-val: #fdf0f0;
+    --color-danger-border-val: #f5c6c7;
+    --color-danger-ink-val: #a02c30;
+
+    --color-hero-val: #1f2933;
+    --color-scrim-val: rgba(31, 41, 51, 0.4);
+
+    --shadow-card-val: 0 1px 2px rgba(16, 24, 40, 0.04);
+    --shadow-card-hover-val: 0 6px 16px rgba(16, 24, 40, 0.07);
   }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --color-brand-100-val: #3f2a13;
-      --color-brand-50-val: #2b1f13;
-      --color-ai-val: #2d2315;
-      
-      --color-canvas-val: #0f1115;
-      --color-surface-val: #16181d;
-      --color-card-val: #1e2028;
-      --color-line-val: #2b2e38;
-      --color-mist-val: #242730;
-      
-      --color-ink-val: #f1f3f5;
-      --color-ink-2-val: #a3aab5;
-      --color-ink-3-val: #747b86;
-    }
+  .dark {
+    color-scheme: dark;
+
+    --color-brand-100-val: #3f2a13;
+    --color-brand-50-val: #2b1f13;
+    --color-ai-val: #2d2315;
+
+    --color-canvas-val: #0f1115;
+    --color-surface-val: #16181d;
+    --color-card-val: #1e2028;
+    --color-line-val: #2b2e38;
+    --color-mist-val: #242730;
+
+    --color-ink-val: #f1f3f5;
+    --color-ink-2-val: #a3aab5;
+    --color-ink-3-val: #8b93a1;
+
+    --color-brand-soft-val: #3f2a13;
+    --color-brand-border-val: #5a3d1d;
+    --color-brand-ink-val: #f0a44e;
+    --color-info-soft-val: #2d2315;
+    --color-info-border-val: #4a3a1d;
+    --color-info-ink-val: #e0a944;
+    --color-success-soft-val: #12261e;
+    --color-success-border-val: #1f4a39;
+    --color-success-ink-val: #4cc38a;
+    --color-warning-soft-val: #2a2113;
+    --color-warning-border-val: #4a3a1d;
+    --color-warning-ink-val: #e0a944;
+    --color-danger-soft-val: #2a1618;
+    --color-danger-border-val: #4a2529;
+    --color-danger-ink-val: #f27f83;
+
+    --color-hero-val: #1f2933;
+    --color-scrim-val: rgba(0, 0, 0, 0.55);
+
+    --shadow-card-val: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-card-hover-val: 0 6px 16px rgba(0, 0, 0, 0.5);
   }
 
   html {
@@ -145,7 +218,7 @@
   background-image: linear-gradient(
     90deg,
     var(--color-mist) 25%,
-    #e9ecf0 50%,
+    var(--color-line) 50%,
     var(--color-mist) 75%
   );
   background-size: 200% 100%;
@@ -158,4 +231,15 @@
 
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

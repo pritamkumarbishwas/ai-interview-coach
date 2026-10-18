@@ -14,7 +14,7 @@ interface StatCardProps {
 
 export function StatCard({ label, value, hint, icon, trend }: StatCardProps) {
   return (
-    <div className="group rounded-card border border-line bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-shadow duration-200 hover:shadow-[0_4px_12px_rgba(16,24,40,0.06)]">
+    <div className="group rounded-card border border-line bg-card p-5 shadow-card transition-shadow duration-200 hover:shadow-card-hover">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[13px] font-medium text-ink-2">{label}</p>

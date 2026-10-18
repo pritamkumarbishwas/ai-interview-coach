@@ -54,7 +54,7 @@ export function AIInterviewer({
   return (
     <section
       className={cx(
-        "flex flex-col rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)]",
+        "flex flex-col rounded-card border border-line bg-card shadow-card",
         className,
       )}
       aria-label="AI interviewer"

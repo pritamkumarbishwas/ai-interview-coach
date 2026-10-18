@@ -84,7 +84,7 @@ function Templates() {
               href={`/templates/${template.id}`}
               className="block"
             >
-              <Card className="transition-shadow hover:shadow-[0_4px_12px_rgba(16,24,40,0.06)]">
+              <Card className="transition-shadow hover:shadow-card-hover">
                 <CardContent className="flex items-center gap-4">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand">
                     <ClipboardList className="h-5 w-5" aria-hidden />

@@ -21,13 +21,13 @@ const VARIANTS: Record<ButtonVariant, string> = {
   primary:
     "bg-brand text-white shadow-sm hover:bg-brand-hover active:shadow-none",
   secondary:
-    "bg-ink text-white shadow-sm hover:bg-[#2c3a47] active:shadow-none",
+    "bg-ink text-canvas shadow-sm hover:opacity-90 active:shadow-none",
   outline:
     "border border-line bg-card text-ink-2 shadow-sm hover:bg-mist hover:text-ink",
   ghost: "text-ink-2 hover:bg-mist hover:text-ink",
   danger: "bg-danger text-white shadow-sm hover:brightness-95",
   "danger-soft":
-    "border border-[#f5c6c7] bg-[#fdf0f0] text-danger hover:bg-[#fbe6e6]",
+    "border border-danger-border bg-danger-soft text-danger-ink hover:brightness-95",
 };
 
 const SIZES: Record<ButtonSize, string> = {

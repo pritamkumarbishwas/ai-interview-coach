@@ -60,7 +60,7 @@ export function Modal({
       aria-labelledby="modal-title"
       aria-describedby={description ? "modal-desc" : undefined}
       className={cx(
-        "backdrop:bg-[#1f2933]/40 backdrop:backdrop-blur-sm",
+        "backdrop:bg-scrim backdrop:backdrop-blur-sm",
         "relative z-10 w-full max-w-md overflow-y-auto rounded-2xl bg-card shadow-xl p-0 m-auto animate-rise",
         className,
       )}

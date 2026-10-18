@@ -36,7 +36,7 @@ export function AuthLayout({
   footer,
 }: AuthLayoutProps) {
   return (
-    <div className="flex min-h-screen bg-white">
+    <div className="flex min-h-screen bg-canvas">
       <div className="flex w-full flex-col justify-center px-6 py-12 sm:px-12 lg:w-[46%] lg:px-16">
         <div className="mx-auto w-full max-w-md">
           <Logo className="mb-10" />
@@ -54,7 +54,7 @@ export function AuthLayout({
         </div>
       </div>
 
-      <div className="relative hidden flex-1 overflow-hidden bg-ink lg:block">
+      <div className="relative hidden flex-1 overflow-hidden bg-hero lg:block">
         <div
           className="absolute inset-0 bg-[radial-gradient(circle_at_70%_20%,rgba(247,147,30,0.5),transparent_55%)]"
           aria-hidden

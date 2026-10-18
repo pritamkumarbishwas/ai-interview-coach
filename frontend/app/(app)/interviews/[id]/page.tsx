@@ -442,7 +442,7 @@ function InterviewWorkspace() {
                             onChange={(event) =>
                               setConsentChecked(event.target.checked)
                             }
-                            className="mt-0.5 h-4 w-4 shrink-0 rounded border-line accent-[#f7931e]"
+                            className="mt-0.5 h-4 w-4 shrink-0 rounded border-line accent-brand"
                           />
                           <span className="text-[13px] leading-relaxed text-ink">
                             I understand and consent to proctoring
@@ -574,7 +574,7 @@ function InterviewWorkspace() {
           }}
         />
 
-        <div className="order-2 flex flex-col overflow-hidden rounded-card border border-line bg-card shadow-[0_1px_2px_rgba(16,24,40,0.04)] lg:order-none">
+        <div className="order-2 flex flex-col overflow-hidden rounded-card border border-line bg-card shadow-card lg:order-none">
           <header className="flex items-center justify-between border-b border-line px-4 py-3">
             <h2 className="flex items-center gap-2 text-[15px] font-semibold text-ink">
               <MessageSquare className="h-4 w-4 text-ink-3" aria-hidden />

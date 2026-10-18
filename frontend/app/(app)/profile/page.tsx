@@ -7,7 +7,10 @@ import {
   BookOpen,
   Clock,
   Mail,
+  Monitor,
+  Moon,
   Save,
+  Sun,
   Target,
   Trophy,
 } from "lucide-react";
@@ -20,8 +23,9 @@ import { Field, Input } from "@/components/ui/input";
 import { StatCard } from "@/components/ui/stat-card";
 import { MOCK_STATS } from "@/data/mock";
 import { useAuth } from "@/hooks/use-auth";
+import { useTheme, type Theme } from "@/hooks/use-theme";
 import { toApiError } from "@/lib/api";
-import { formatDate } from "@/lib/utils";
+import { cx, formatDate } from "@/lib/utils";
 
 const SKILLS = [
   "React",
@@ -53,8 +57,15 @@ const PREFERENCES = [
   },
 ];
 
+const APPEARANCE: Array<{ value: Theme; label: string; icon: typeof Sun }> = [
+  { value: "system", label: "System", icon: Monitor },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+];
+
 export default function ProfilePage() {
   const { user, updateProfile } = useAuth();
+  const { theme, setTheme } = useTheme();
   const name = user?.name ?? "";
   const email = user?.email ?? "";
   const memberSince = user?.created_at ? formatDate(user.created_at) : "";
@@ -209,6 +220,38 @@ export default function ProfilePage() {
         </div>
 
         <div className="space-y-6">
+          <Card>
+            <CardHeader
+              title="Appearance"
+              description="Choose how the interface looks."
+            />
+            <CardContent>
+              <div className="grid grid-cols-3 gap-2">
+                {APPEARANCE.map((option) => {
+                  const Icon = option.icon;
+                  const active = theme === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setTheme(option.value)}
+                      aria-pressed={active}
+                      className={cx(
+                        "flex flex-col items-center gap-1.5 rounded-btn border px-3 py-3 text-xs font-medium transition-colors",
+                        active
+                          ? "border-brand-border bg-brand-soft text-brand-ink"
+                          : "border-line bg-surface text-ink-2 hover:bg-mist hover:text-ink",
+                      )}
+                    >
+                      <Icon className="h-4 w-4" aria-hidden />
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader title="Your skills" description="Used to tailor questions." />
             <CardContent className="flex flex-wrap gap-2">

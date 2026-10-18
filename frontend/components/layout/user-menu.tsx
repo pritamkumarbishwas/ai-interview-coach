@@ -21,8 +21,15 @@ export function UserMenu() {
         setOpen(false);
       }
     };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
     document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
   }, []);
 
   // <AuthGuard> guarantees a user; never fall back to placeholder identity.
@@ -81,7 +88,7 @@ export function UserMenu() {
               setOpen(false);
               logout();
             }}
-            className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-danger transition-colors hover:bg-[#fdf0f0]"
+            className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-danger transition-colors hover:bg-danger-soft"
           >
             <LogOut className="h-4 w-4" aria-hidden />
             Sign out

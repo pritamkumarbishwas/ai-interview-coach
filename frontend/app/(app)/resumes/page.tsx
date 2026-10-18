@@ -132,7 +132,7 @@ export default function ResumesPage() {
               "flex flex-col items-center justify-center rounded-card border-2 border-dashed px-6 py-10 text-center transition-colors",
               dragging
                 ? "border-brand bg-brand-50"
-                : "border-line bg-surface hover:border-[#f3d3a8]",
+                : "border-line bg-surface hover:border-brand-border",
             )}
           >
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-card text-brand shadow-sm">
@@ -295,7 +295,7 @@ function ResumeCard({
           onClick={onRemove}
           disabled={busy}
           aria-label={`Delete ${resume.filename}`}
-          className="rounded-btn p-2 text-ink-3 transition-colors hover:bg-[#fdf0f0] hover:text-danger disabled:opacity-50"
+          className="rounded-btn p-2 text-ink-3 transition-colors hover:bg-danger-soft hover:text-danger-ink disabled:opacity-50"
         >
           <Trash className="h-4 w-4" aria-hidden />
         </button>

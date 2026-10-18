@@ -158,7 +158,7 @@ function InterviewCard({ interview }: { interview: InterviewSummary }) {
       : `/interviews/${interview.id}`;
 
   return (
-    <li className="group flex flex-col rounded-card border border-line bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#f3d3a8] hover:shadow-[0_6px_16px_rgba(16,24,40,0.07)]">
+    <li className="group flex flex-col rounded-card border border-line bg-card p-5 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-border hover:shadow-card-hover">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-[15px] font-semibold text-ink">

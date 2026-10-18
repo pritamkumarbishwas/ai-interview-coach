@@ -280,7 +280,7 @@ export default function DashboardPage() {
                   {strongTopics.map((topic) => (
                     <li
                       key={topic}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-[#e7f6ef] px-3 py-1 text-xs font-medium text-success ring-1 ring-inset ring-[#c4ebdc]"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-success-soft px-3 py-1 text-xs font-medium text-success-ink ring-1 ring-inset ring-success-border"
                     >
                       <CircleCheck className="h-3.5 w-3.5" aria-hidden />
                       {topic}
@@ -303,7 +303,7 @@ export default function DashboardPage() {
                   {weakTopics.map((topic) => (
                     <li
                       key={topic}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-[#fdf3e2] px-3 py-1 text-xs font-medium text-[#b57a09] ring-1 ring-inset ring-[#f5dfb4]"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-warning-soft px-3 py-1 text-xs font-medium text-warning-ink ring-1 ring-inset ring-warning-border"
                     >
                       <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
                       {topic}

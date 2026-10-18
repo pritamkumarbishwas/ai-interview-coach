@@ -368,7 +368,7 @@ function JobDetail() {
           />
           <CardContent className="space-y-5">
             {link ? (
-              <div className="rounded-btn border border-[#f8dcb8] bg-ai p-3">
+              <div className="rounded-btn border border-info-border bg-info-soft p-3">
                 <div className="flex items-center gap-2">
                   <input
                     readOnly
@@ -379,7 +379,7 @@ function JobDetail() {
                   />
                   <CopyLinkButton url={link} />
                 </div>
-                <p className="mt-1.5 text-xs text-[#8a5310]">
+                <p className="mt-1.5 text-xs text-info-ink">
                   Share this link with the candidate — it expires and works once.
                 </p>
               </div>

@@ -73,20 +73,20 @@ export default function ResultsPage() {
       </section>
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-card border border-line bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="rounded-card border border-line bg-card p-5 shadow-card">
           <p className="text-[13px] font-medium text-ink-2">Completed</p>
           <p className="mt-2 text-[26px] font-bold leading-none text-ink">
             {results.length}
           </p>
         </div>
-        <div className="rounded-card border border-line bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="rounded-card border border-line bg-card p-5 shadow-card">
           <p className="text-[13px] font-medium text-ink-2">Average score</p>
           <p className="mt-2 text-[26px] font-bold leading-none text-ink">
             {average}
             <span className="text-base font-medium text-ink-3">%</span>
           </p>
         </div>
-        <div className="rounded-card border border-line bg-card p-5 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+        <div className="rounded-card border border-line bg-card p-5 shadow-card">
           <p className="text-[13px] font-medium text-ink-2">Best score</p>
           <p className="mt-2 flex items-center gap-2 text-[26px] font-bold leading-none text-ink">
             {best}
@@ -134,16 +134,16 @@ export default function ResultsPage() {
             <li key={item.id}>
               <Link
                 href={`/interviews/${item.id}/result`}
-                className="group flex flex-wrap items-center gap-4 rounded-card border border-line bg-card px-5 py-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)] transition-all duration-200 hover:-translate-y-0.5 hover:border-[#f3d3a8] hover:shadow-[0_6px_16px_rgba(16,24,40,0.07)]"
+                className="group flex flex-wrap items-center gap-4 rounded-card border border-line bg-card px-5 py-4 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-border hover:shadow-card-hover"
               >
                 <span
                   className={cx(
                     "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-base font-bold tabular-nums",
                     item.score !== null && item.score >= 80
-                      ? "bg-[#e7f6ef] text-success"
+                      ? "bg-success-soft text-success-ink"
                       : item.score !== null && item.score >= 70
                         ? "bg-brand-100 text-brand"
-                        : "bg-[#fef3e2] text-warning",
+                  : "bg-warning-soft text-warning-ink",
                   )}
                 >
                   {item.score}
@@ -171,7 +171,7 @@ export default function ResultsPage() {
                   className={cx(
                     "rounded-full px-2.5 py-1 text-xs font-semibold",
                     item.score !== null && item.score >= 80
-                      ? "bg-[#e7f6ef] text-success"
+                      ? "bg-success-soft text-success-ink"
                       : "bg-brand-100 text-brand-hover",
                   )}
                 >
