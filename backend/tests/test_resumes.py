@@ -267,3 +267,17 @@ def test_job_description_list_handles_legacy_documents(
     assert response.status_code == 200
     legacy = next(item for item in response.json() if item["title"] == "Legacy Role")
     assert legacy["snippet"] == ""
+
+
+def test_missing_resume_sections_default_to_empty_lists() -> None:
+    """A section the model omits must not fail extraction (e.g. no education)."""
+    from app.schemas.resume import ResumeStructuredData
+
+    parsed = ResumeStructuredData.model_validate(
+        {"skills": ["Python"], "experience": [], "projects": []}
+    )
+    assert parsed.education == []
+    assert parsed.skills == ["Python"]
+
+    # The empty object is valid too -- every section is optional.
+    assert ResumeStructuredData.model_validate({}).education == []

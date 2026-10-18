@@ -82,13 +82,59 @@ async def _enforce_budget() -> None:
         )
 
 
+# Provider-side signals that the model emitted unusable JSON. Groq enforces
+# `response_format=json_object` server-side and rejects a malformed generation
+# with HTTP 400 `json_validate_failed` — a model-output problem, so a fresh
+# sample (with a tighter instruction) is worth trying.
+PROVIDER_JSON_ERROR_MARKERS = ("json_validate_failed", "Failed to validate JSON")
+
+
+def _provider_rejected_json(error: Exception) -> bool:
+    text = str(error)
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        text = f"{text} {body}"
+    return any(marker in text for marker in PROVIDER_JSON_ERROR_MARKERS)
+
+
 def _is_retryable(error: Exception) -> bool:
     if isinstance(error, ValidationError):
         return True  # the model answered, just not in the shape we asked for
+    if _provider_rejected_json(error):
+        return True  # the model produced invalid JSON; resample
     status_code = getattr(error, "status_code", None)
     if isinstance(status_code, int):
         return status_code in RETRYABLE_STATUS_CODES or status_code >= 500
     return isinstance(error, APIError)  # connection-level failure, no status
+
+
+def _correction_hint(error: Exception) -> str:
+    """A short, JSON-oriented correction for the next attempt.
+
+    Deliberately avoids echoing the raw error: providers in strict JSON mode can
+    regurgitate that text and fail to produce valid JSON (an empty generation).
+    """
+    if isinstance(error, ValidationError):
+        missing = sorted(
+            {
+                str(err["loc"][0])
+                for err in error.errors()
+                if err.get("type") == "missing" and err.get("loc")
+            }
+        )
+        detail = (
+            f" It was missing required keys: {', '.join(missing)}." if missing else ""
+        )
+        return (
+            "Your previous response was rejected by schema validation."
+            f"{detail} Return ONLY valid JSON matching the schema exactly, "
+            "including every required key (use an empty list for any section "
+            "with no data)."
+        )
+    return (
+        "Your previous response was not valid JSON. Return ONLY a single valid "
+        "JSON object matching the schema."
+    )
 
 
 class LLMService:
@@ -171,14 +217,7 @@ class LLMService:
             messages = list(base_messages)
             if last_error is not None:
                 messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "Your last response failed validation with the "
-                            f"following error:\n{last_error}\n\n"
-                            "Return corrected JSON only."
-                        ),
-                    }
+                    {"role": "user", "content": _correction_hint(last_error)}
                 )
             try:
                 response = await self.client.chat.completions.create(

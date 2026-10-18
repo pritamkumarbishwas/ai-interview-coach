@@ -13,7 +13,7 @@ class Experience(BaseModel):
 class Project(BaseModel):
     name: str
     description: str
-    technologies: list[str]
+    technologies: list[str] = Field(default_factory=list)
 
 
 class Education(BaseModel):
@@ -23,10 +23,26 @@ class Education(BaseModel):
 
 
 class ResumeStructuredData(BaseModel):
-    skills: list[str] = Field(description="A list of technical and soft skills")
-    experience: list[Experience] = Field(description="Work experience entries")
-    projects: list[Project] = Field(description="Notable projects")
-    education: list[Education] = Field(description="Educational background")
+    """Extraction result.
+
+    Every section defaults to an empty list: a resume legitimately may not have
+    a given section (or the model may omit one), and a missing section must not
+    fail the whole upload. This mirrors the prompt's "return an empty list for
+    that section" instruction with a schema-level safety net.
+    """
+
+    skills: list[str] = Field(
+        default_factory=list, description="A list of technical and soft skills"
+    )
+    experience: list[Experience] = Field(
+        default_factory=list, description="Work experience entries"
+    )
+    projects: list[Project] = Field(
+        default_factory=list, description="Notable projects"
+    )
+    education: list[Education] = Field(
+        default_factory=list, description="Educational background"
+    )
 
 
 class ResumeUploadResponse(BaseModel):

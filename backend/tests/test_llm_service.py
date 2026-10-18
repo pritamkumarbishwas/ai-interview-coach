@@ -97,9 +97,10 @@ class FailingAsyncOpenAI:
 class FakeStatusError(Exception):
     """Minimal stand-in for an API error that carries an HTTP status."""
 
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, body: dict | None = None) -> None:
         super().__init__(f"HTTP {status_code}")
         self.status_code = status_code
+        self.body = body
 
 
 @pytest.mark.asyncio
@@ -125,3 +126,43 @@ async def test_generate_structured_retries_server_errors() -> None:
         await service.generate_structured("Evaluate this", MockResponseSchema)
 
     assert mock_client.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_generate_structured_retries_provider_json_rejection() -> None:
+    """Groq's 400 `json_validate_failed` is a bad generation, not a bad request."""
+    service = LLMService()
+    error = FakeStatusError(
+        400,
+        body={"error": {"code": "json_validate_failed", "failed_generation": ""}},
+    )
+    mock_client = FailingAsyncOpenAI(error)
+    service.client = mock_client
+
+    with pytest.raises(FakeStatusError):
+        await service.generate_structured("Evaluate this", MockResponseSchema)
+
+    assert mock_client.call_count == 3
+
+
+@pytest.mark.asyncio
+async def test_correction_hint_names_missing_keys_without_dumping_the_error() -> None:
+    """The retry instruction is concise and JSON-oriented (safe for JSON mode)."""
+    from app.services.llm_service import _correction_hint
+
+    class NeedsEducation(BaseModel):
+        skills: list[str] = Field(default_factory=list)
+        education: list[str]
+
+    try:
+        NeedsEducation.model_validate({"skills": ["python"]})
+    except ValidationError as exc:
+        hint = _correction_hint(exc)
+    else:  # pragma: no cover - the model above must fail
+        raise AssertionError("expected a ValidationError")
+
+    assert "education" in hint
+    assert "empty list" in hint
+    # The raw pydantic dump (which JSON-mode providers can echo) is not included.
+    assert "type=missing" not in hint
+    assert "for further information" not in hint.lower()
