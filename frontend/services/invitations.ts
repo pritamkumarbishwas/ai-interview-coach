@@ -4,13 +4,14 @@ import type {
   Decision,
   IntegrityReport,
   Invitation,
+  JobAnalytics,
   ReviewTimeline,
   Scorecard,
   ShortlistEntry,
 } from "@/types";
 
-/** Recordings are large; allow the same headroom as an upload. */
-const RECORDING_TIMEOUT_MS = 60_000;
+/** Recordings and exports can be large; allow the same headroom as an upload. */
+const LARGE_RESPONSE_TIMEOUT_MS = 60_000;
 
 export async function listInvitations(jobId: string): Promise<Invitation[]> {
   try {
@@ -101,6 +102,32 @@ export async function getJobShortlist(jobId: string): Promise<ShortlistEntry[]> 
   }
 }
 
+/** Aggregate funnel + score/integrity distributions for a job (advisory). */
+export async function getJobAnalytics(jobId: string): Promise<JobAnalytics> {
+  try {
+    const { data } = await api.get<JobAnalytics>("/invitations/analytics", {
+      params: { job_id: jobId },
+    });
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/** Download a job's candidate rows as a CSV blob (caller revokes the URL). */
+export async function downloadJobCandidatesCsv(jobId: string): Promise<Blob> {
+  try {
+    const { data } = await api.get<Blob>("/invitations/export", {
+      params: { job_id: jobId },
+      responseType: "blob",
+      timeout: LARGE_RESPONSE_TIMEOUT_MS,
+    });
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
 /** Record the human decision for a candidate (never set by the AI). */
 export async function setInvitationDecision(
   id: string,
@@ -141,7 +168,7 @@ export async function getInvitationRecordingBlob(
   try {
     const { data } = await api.get<Blob>(
       `/invitations/${id}/recordings/${kind}`,
-      { responseType: "blob", timeout: RECORDING_TIMEOUT_MS },
+      { responseType: "blob", timeout: LARGE_RESPONSE_TIMEOUT_MS },
     );
     return data;
   } catch (error) {

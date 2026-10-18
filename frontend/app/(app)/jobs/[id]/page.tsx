@@ -10,6 +10,7 @@ import {
   Check,
   Clock,
   Copy,
+  Download,
   Film,
   Gauge,
   Save,
@@ -427,6 +428,16 @@ function JobDetail() {
               reloadSignal={reviewSignal}
               onChanged={refreshCandidates}
             />
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader
+            title="Pipeline analytics"
+            description="Aggregate funnel and advisory score distribution for this role."
+          />
+          <CardContent>
+            <AnalyticsPanel jobId={job.id} reloadSignal={reviewSignal} />
           </CardContent>
         </Card>
       </div>
@@ -1020,6 +1031,145 @@ function ShortlistPanel({ jobId, reloadSignal, onChanged }: ShortlistPanelProps)
           </li>
         ))}
       </ol>
+    </div>
+  );
+}
+
+interface AnalyticsPanelProps {
+  jobId: string;
+  reloadSignal: number;
+}
+
+function AnalyticsPanel({ jobId, reloadSignal }: AnalyticsPanelProps) {
+  const { data, loading, error } = useAsync(
+    () => invitationService.getJobAnalytics(jobId),
+    [jobId, reloadSignal],
+  );
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const onExport = async () => {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const blob = await invitationService.downloadJobCandidatesCsv(jobId);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "candidates.csv";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (caught) {
+      setExportError(toApiError(caught).message);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  if (loading && !data) return <SkeletonList rows={2} />;
+  if (error) return <Alert tone="error">{error.message}</Alert>;
+  if (!data) return null;
+
+  const stats: { label: string; value: string | number }[] = [
+    { label: "Invited", value: data.total_invited },
+    { label: "In progress", value: data.in_progress },
+    { label: "Completed", value: data.completed },
+    { label: "Expired / revoked", value: data.expired + data.revoked },
+    { label: "Completion rate", value: `${data.completion_rate}%` },
+    { label: "Pass rate", value: `${data.pass_rate}%` },
+    {
+      label: "Average score",
+      value: data.completed ? data.average_score.toFixed(1) : "—",
+    },
+    {
+      label: "Median score",
+      value: data.completed ? data.median_score.toFixed(1) : "—",
+    },
+  ];
+  const maxBucket = Math.max(
+    1,
+    ...data.score_distribution.map((bucket) => bucket.count),
+  );
+
+  return (
+    <div className="space-y-5">
+      {exportError ? <Alert tone="error">{exportError}</Alert> : null}
+
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          loading={exporting}
+          icon={<Download className="h-3.5 w-3.5" aria-hidden />}
+          onClick={() => void onExport()}
+        >
+          Export CSV
+        </Button>
+      </div>
+
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {stats.map((stat) => (
+          <div
+            key={stat.label}
+            className="rounded-btn border border-line px-3 py-2.5"
+          >
+            <dt className="text-xs text-ink-2">{stat.label}</dt>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">
+              {stat.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <div>
+        <h5 className="text-[13px] font-semibold text-ink">
+          Score distribution
+        </h5>
+        <ul className="mt-2 space-y-1.5">
+          {data.score_distribution.map((bucket) => (
+            <li key={bucket.label} className="flex items-center gap-3 text-xs">
+              <span className="w-14 shrink-0 tabular-nums text-ink-2">
+                {bucket.label}
+              </span>
+              <span className="h-2 flex-1 overflow-hidden rounded-full bg-mist">
+                <span
+                  className="block h-full rounded-full bg-brand"
+                  style={{ width: `${(bucket.count / maxBucket) * 100}%` }}
+                />
+              </span>
+              <span className="w-6 shrink-0 text-right tabular-nums text-ink-2">
+                {bucket.count}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-ink-2">
+        <span>
+          Decisions:{" "}
+          {DECISION_OPTIONS.map((option) => (
+            <span key={option.value} className="mr-2 tabular-nums">
+              {option.label} {data.decisions[option.value] ?? 0}
+            </span>
+          ))}
+        </span>
+        <span>
+          Integrity:{" "}
+          {Object.entries(data.integrity_distribution)
+            .filter(([, count]) => count > 0)
+            .map(([level, count]) => (
+              <span key={level} className="mr-2 tabular-nums">
+                {INTEGRITY_LEVEL_LABELS[
+                  level as keyof typeof INTEGRITY_LEVEL_LABELS
+                ] ?? level}{" "}
+                {count}
+              </span>
+            ))}
+        </span>
+      </div>
     </div>
   );
 }

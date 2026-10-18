@@ -501,7 +501,6 @@ export interface Scorecard {
 }
 
 /* ---- Review timeline (transcript ↔ recording navigation) ---------------- */
-
 export type TimelineEntryKind = "answer" | "signal";
 
 export interface TimelineEntry {
@@ -525,6 +524,32 @@ export interface ReviewTimeline {
   recording_available: boolean;
   duration_seconds: number;
   entries: TimelineEntry[];
+  generated_at: string;
+}
+
+/* ---- Analytics (job funnel + distributions) ----------------------------- */
+
+export interface ScoreBucket {
+  label: string;
+  count: number;
+}
+
+export interface JobAnalytics {
+  job_id: string;
+  total_invited: number;
+  pending: number;
+  in_progress: number;
+  completed: number;
+  expired: number;
+  revoked: number;
+  completion_rate: number;
+  passed: number;
+  pass_rate: number;
+  average_score: number;
+  median_score: number;
+  score_distribution: ScoreBucket[];
+  decisions: Record<string, number>;
+  integrity_distribution: Record<string, number>;
   generated_at: string;
 }
 

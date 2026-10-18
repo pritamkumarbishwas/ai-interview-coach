@@ -21,6 +21,7 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.core.mailer import EmailMessage, get_mailer
 from app.core.transcription import get_transcriber
 from app.emails.templates import invitation_email, reminder_email
+from app.models.analytics import JobAnalytics
 from app.models.integrity import IntegrityReport
 from app.models.interview import Interview
 from app.models.invitation import ScreeningInvitation
@@ -44,6 +45,7 @@ from app.schemas.invitation import (
     InvitationSessionOut,
     ShortlistEntry,
 )
+from app.services.analytics_service import analytics_service
 from app.services.audit_service import audit_service
 from app.services.integrity_service import integrity_service
 from app.services.interview_service import InterviewService
@@ -402,6 +404,24 @@ class ScreeningService:
         return await self._recordings.read_recording(
             db, interview.user_id, interview.id or "", kind
         )
+
+    async def analytics(
+        self, db: AsyncIOMotorDatabase, recruiter: User, job_id: str
+    ) -> JobAnalytics:
+        """Aggregate funnel + score/integrity distribution for a job (advisory).
+
+        Reuses the shortlist pipeline (ownership gate, score backfill, cohort
+        normalization) so analytics never diverges from what the reviewer sees.
+        """
+        entries = await self.shortlist(db, recruiter, job_id)
+        return analytics_service.build(job_id, entries)
+
+    async def export_csv(
+        self, db: AsyncIOMotorDatabase, recruiter: User, job_id: str
+    ) -> str:
+        """Row-level CSV of a job's candidates (recruiter-gated, defanged)."""
+        entries = await self.shortlist(db, recruiter, job_id)
+        return analytics_service.to_csv(entries)
 
     async def _require_interview(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str

@@ -15,6 +15,7 @@ from app.api.deps import get_screening_service, require_recruiter
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import rate_limit
+from app.models.analytics import JobAnalytics
 from app.models.integrity import IntegrityReport
 from app.models.review import ReviewTimeline
 from app.models.scorecard import Scorecard
@@ -70,6 +71,37 @@ async def get_job_shortlist(
 ) -> list[ShortlistEntry]:
     """Ranked, advisory shortlist for a job (score + integrity + decision)."""
     return await service.shortlist(db, recruiter, job_id)
+
+
+@router.get("/analytics", response_model=JobAnalytics)
+async def get_job_analytics(
+    job_id: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+) -> JobAnalytics:
+    """Aggregate funnel + score/integrity distributions for a job (advisory)."""
+    return await service.analytics(db, recruiter, job_id)
+
+
+@router.get("/export")
+async def export_job_candidates(
+    job_id: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+    _: None = Depends(rate_limit("candidate_export")),
+) -> Response:
+    """Download a job's candidate rows as CSV (recruiter-gated)."""
+    csv_text = await service.export_csv(db, recruiter, job_id)
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="candidates.csv"',
+            "Cache-Control": NO_STORE,
+        },
+    )
 
 
 @router.delete("/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
