@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.schemas.invitation import ShortlistEntry
 from app.services.analytics_service import AnalyticsService
+from app.services.pdf_service import pdf_service
 from tests.test_scorecard import _job_with_rubric, _patch_llm, _run_candidate_flow
 from tests.test_shortlist import _invite, _token
 
@@ -195,3 +196,29 @@ def test_pdf_export_returns_a_pdf(
     assert "Backend Engineer" in text
     assert "done@example.com" not in text  # names only, no PII leakage in summary
     assert "done" in text
+
+
+def test_pdf_renders_only_latin1_safe_text() -> None:
+    """Base-14 fonts are Latin-1 only; other codepoints must not corrupt output."""
+    entries = [
+        _entry(
+            candidate_name="Jos\u00e9 \u5f20\u4e09",
+            overall_score=80.0,
+            percentile=50.0,
+            integrity_level="low",
+        )
+    ]
+    analytics = AnalyticsService().build("job-1", entries)
+    data = pdf_service.render_job_summary(
+        "Backend \u2014 Engineer", "Acme \u00b7 Inc", analytics, entries
+    )
+
+    with fitz.open(stream=data, filetype="pdf") as doc:
+        text = "\n".join(page.get_text() for page in doc)
+
+    # The middot is PyMuPDF's silent fallback for unsupported glyphs: it must
+    # never appear as a result of our input text.
+    assert "\xb7" not in text
+    assert "Jos\u00e9 ??" in text  # accented Latin-1 kept, CJK replaced with "?"
+    assert "Backend - Engineer" in text  # em-dash transliterated
+    assert "Acme - Inc" in text

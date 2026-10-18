@@ -231,10 +231,12 @@ Funnel/pass-rate/score distributions, CSV/PDF export, ATS webhooks
 ### Phase 9 — Compliance, security & billing (L) — *post-MVP*
 Retention & erasure, DPA/data-processing, region residency, encryption at rest,
 SSO/SAML, per-role limits, LLM cost tracking, seats/credits billing.
-> **Status: retention & erasure done** (`POST /api/invitations/{id}/erase`,
-> `POST /api/invitations/retention/purge`, `retention.purge` job). Remaining:
-> DPA, residency, encryption at rest, SSO/SAML, per-role limits, LLM cost
-> tracking, seats/credits billing.
+> **Status: retention & erasure and LLM cost tracking done**
+> (`POST /api/invitations/{id}/erase`,
+> `POST /api/invitations/retention/purge`, `retention.purge` job;
+> per-call `llm_usage` records + admin `GET /api/usage/summary`). Remaining:
+> DPA, residency, encryption at rest, SSO/SAML, per-role limits, seats/credits
+> billing.
 
 ### Phase 10 — Advanced AI (ongoing) — *post-MVP*
 Shadow mode (AI vs human panel agreement), explain-answer assist, cheating ML,

@@ -7,6 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.database import get_db
 from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.core.security import decode_access_token
+from app.core.usage import usage_actor
 from app.models.api_key import ApiKey
 from app.models.user import STAFF_ROLES, User
 from app.repositories.api_key_repository import api_key_repository
@@ -116,6 +117,8 @@ async def get_current_user(
     user = await users.get_by_id(db, payload.sub)
     if user is None:
         raise AuthenticationError("User no longer exists")
+    # Attribute any LLM usage in this request to the acting user.
+    usage_actor.set(user.id)
     return user
 
 

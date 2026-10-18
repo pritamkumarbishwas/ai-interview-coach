@@ -83,6 +83,12 @@ class Settings(BaseSettings):
     groq_api_key: str | None = None
     groq_model: str = "openai/gpt-oss-20b"
 
+    # --- LLM cost tracking (Phase 9) ---------------------------------------
+    # Record token usage + estimated cost per call. Prices come from the price
+    # book; override or add entries as "model=usd_per_1m_in:usd_per_1m_out".
+    llm_cost_tracking_enabled: bool = True
+    llm_pricing_overrides: Annotated[dict[str, tuple[float, float]], NoDecode] = {}
+
     # --- Server-side transcription (speech-to-text) ------------------------
     # "none" disables server STT; candidates then rely on the browser Web
     # Speech API (Chromium only). openai/groq reuse the LLM API keys above.
@@ -238,6 +244,39 @@ class Settings(BaseSettings):
             except ValueError as exc:
                 raise ValueError(
                     f"RATE_LIMIT_OVERRIDES entry {pair!r} has non-integer limits"
+                ) from exc
+        return overrides
+
+    @field_validator("llm_pricing_overrides", mode="before")
+    @classmethod
+    def _parse_llm_pricing_overrides(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return {}
+        overrides: dict[str, tuple[float, float]] = {}
+        for pair in text.split(";"):
+            pair = pair.strip()
+            if not pair:
+                continue
+            if "=" not in pair:
+                raise ValueError(
+                    "LLM_PRICING_OVERRIDES entries must look like "
+                    "'model=usd_per_1m_in:usd_per_1m_out'"
+                )
+            model, _, spec = pair.partition("=")
+            parts = spec.split(":")
+            if len(parts) != 2:
+                raise ValueError(
+                    f"LLM_PRICING_OVERRIDES entry {pair!r} must provide input and "
+                    "output prices"
+                )
+            try:
+                overrides[model.strip()] = (float(parts[0]), float(parts[1]))
+            except ValueError as exc:
+                raise ValueError(
+                    f"LLM_PRICING_OVERRIDES entry {pair!r} has non-numeric prices"
                 ) from exc
         return overrides
 

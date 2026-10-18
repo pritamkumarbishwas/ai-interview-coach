@@ -79,6 +79,10 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         await db[settings.jobs_collection_name].create_index(
             [("status", 1), ("run_at", 1)], name="ix_jobs_status_run_at"
         )
+        # LLM usage/cost records are queried by time window.
+        await db.llm_usage.create_index(
+            [("created_at", -1)], name="ix_llm_usage_created"
+        )
     except Exception as exc:
         # If this fails, the application cannot safely enforce uniqueness constraints.
         logger.critical("Could not create MongoDB indexes: %s", exc)

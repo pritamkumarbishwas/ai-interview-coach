@@ -75,6 +75,7 @@ def test_erase_candidate_destroys_session_data(
         client, staff_headers, monkeypatch, "erase-me@example.com"
     )
     _add_recording_chunk(interview_id)
+    jd_id = _run(lambda db: _jd_for(db, interview_id))
 
     response = client.post(
         f"/api/invitations/{invitation_id}/erase", headers=staff_headers
@@ -92,6 +93,13 @@ def test_erase_candidate_destroys_session_data(
     assert state["invite"]["interview_id"] is None
     assert state["invite"]["status"] == "revoked"
     assert state["invite"]["erased_at"] is not None
+    # The candidate's synthesized job description is purged with the session.
+    assert _run(lambda db: db.job_descriptions.count_documents({"_id": ObjectId(jd_id)})) == 0
+
+
+async def _jd_for(db, interview_id: str) -> str:
+    doc = await db.interviews.find_one({"_id": ObjectId(interview_id)})
+    return doc["jd_id"]
 
 
 def test_erase_is_idempotent_and_recruiter_gated(

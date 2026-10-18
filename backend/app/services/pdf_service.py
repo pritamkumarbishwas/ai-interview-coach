@@ -18,6 +18,27 @@ FONT_SIZE = 9
 MAX_ROWS = 20
 NAME_WIDTH = 34
 
+# PyMuPDF's base-14 fonts are Latin-1 only: any other codepoint is silently
+# rendered as a middot, corrupting names. Transliterate common typography and
+# let the Latin-1 encoder replace the rest (CJK, emoji) with "?".
+_TRANSLATIONS = str.maketrans(
+    {
+        "\u2014": "-",  # em dash
+        "\u2013": "-",  # en dash
+        "\u2018": "'",  # left single quote
+        "\u2019": "'",  # right single quote
+        "\u201c": '"',  # left double quote
+        "\u201d": '"',  # right double quote
+        "\u2026": "...",  # ellipsis
+        "\u00b7": "-",  # middle dot
+    }
+)
+
+
+def _safe_text(value: str) -> str:
+    """Force text into the Latin-1 subset the base-14 fonts can encode."""
+    return value.translate(_TRANSLATIONS).encode("latin-1", "replace").decode("latin-1")
+
 
 class PdfService:
     def render_job_summary(
@@ -33,7 +54,7 @@ class PdfService:
             for index, line in enumerate(self._lines(job_title, company, analytics, entries)):
                 page.insert_text(
                     (PAGE_MARGIN, PAGE_MARGIN + index * LINE_HEIGHT),
-                    line,
+                    _safe_text(line),
                     fontsize=FONT_SIZE,
                 )
             return doc.tobytes()
@@ -93,7 +114,7 @@ class PdfService:
 
 def _clip(value: str, width: int) -> str:
     value = " ".join(value.split())
-    return value if len(value) <= width else value[: width - 1] + "…"
+    return value if len(value) <= width else value[: width - 1] + "\u2026"
 
 
 pdf_service = PdfService()

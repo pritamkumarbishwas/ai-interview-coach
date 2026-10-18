@@ -26,6 +26,7 @@ from app.api.screening import public_router as screening_public_router
 from app.api.screening import router as screening_router
 from app.api.staff import router as staff_router
 from app.api.templates import router as templates_router
+from app.api.usage import router as usage_router
 from app.core.config import settings
 from app.core.database import close_mongo, connect_to_mongo, ensure_indexes
 from app.core.exceptions import AppError
@@ -106,6 +107,26 @@ app = FastAPI(
 )
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+@app.middleware("http")
+async def bind_usage_context(request: Request, call_next):
+    """Expose the request's database to LLM usage recording (Phase 9).
+
+    The LLM client is a process-wide singleton with no request context; this
+    binds the acting request's database (and resets it afterwards) so token
+    usage is attributed to the request that triggered it.
+    """
+    from app.core.usage import usage_actor, usage_db
+
+    client = getattr(request.app.state, "mongo", None)
+    db_token = usage_db.set(client[settings.mongo_db_name] if client is not None else None)
+    actor_token = usage_actor.set(None)
+    try:
+        return await call_next(request)
+    finally:
+        usage_actor.reset(actor_token)
+        usage_db.reset(db_token)
 
 
 @app.middleware("http")
@@ -282,6 +303,7 @@ app.include_router(
 app.include_router(
     public_router, prefix=f"{settings.api_prefix}/public", tags=["public api"]
 )
+app.include_router(usage_router, prefix=f"{settings.api_prefix}/usage", tags=["usage"])
 app.include_router(
     interviews_router, prefix=f"{settings.api_prefix}/interviews", tags=["interviews"]
 )

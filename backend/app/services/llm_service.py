@@ -7,6 +7,7 @@ from openai import APIError, AsyncOpenAI
 from pydantic import BaseModel, ValidationError
 
 from app.core.config import settings
+from app.core.usage import record_llm_usage
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,21 @@ RETRYABLE_STATUS_CODES = {408, 409, 429}
 
 class LLMConfigurationError(RuntimeError):
     """Raised when the LLM provider is missing or misconfigured."""
+
+
+async def _record_usage(provider: str, model: str, response: object) -> None:
+    """Extract token counts from a completion and record them (best-effort)."""
+    usage = getattr(response, "usage", None)
+    if usage is None:
+        return
+    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+    if prompt_tokens == 0 and completion_tokens == 0:
+        return
+    try:
+        await record_llm_usage(provider, model, prompt_tokens, completion_tokens)
+    except Exception as exc:  # never let metering break a completion
+        logger.warning("LLM usage recording failed: %s", exc)
 
 
 def _is_retryable(error: Exception) -> bool:
@@ -129,6 +145,10 @@ class LLMService:
                     temperature=0,
                 )
                 raw_json = response.choices[0].message.content or ""
+
+                # Tokens are spent whether or not the JSON validates, so record
+                # usage as soon as the response arrives (best-effort).
+                await _record_usage(self.provider, self.model, response)
 
                 # Strip markdown code blocks if the LLM includes them
                 raw_json = raw_json.strip()

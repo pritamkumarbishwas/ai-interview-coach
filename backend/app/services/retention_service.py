@@ -22,6 +22,10 @@ from app.models.invitation import ScreeningInvitation
 from app.models.user import User
 from app.repositories.interview_repository import InterviewRepository, interview_repository
 from app.repositories.invitation_repository import InvitationRepository, invitation_repository
+from app.repositories.job_description_repository import (
+    JobDescriptionRepository,
+    job_description_repository,
+)
 from app.schemas.retention import ErasureResult
 from app.services.audit_service import audit_service
 from app.services.recording_service import RecordingService, recording_service
@@ -41,10 +45,12 @@ class RetentionService:
         invitations: InvitationRepository,
         interviews: InterviewRepository,
         recordings: RecordingService,
+        job_descriptions: JobDescriptionRepository,
     ) -> None:
         self._invitations = invitations
         self._interviews = interviews
         self._recordings = recordings
+        self._job_descriptions = job_descriptions
 
     async def erase_candidate(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
@@ -82,12 +88,20 @@ class RetentionService:
         chunks = 0
 
         if invitation.interview_id:
+            interview = await self._interviews.get_by_id(db, invitation.interview_id)
             chunks = await self._recordings.purge_interview_recordings(
                 db, invitation.interview_id
             )
             interview_deleted = await self._interviews.delete_by_id(
                 db, invitation.interview_id
             )
+            if interview:
+                # The synthesized job description is a per-candidate artifact and
+                # is owned by the candidate's guest user; remove it too so erasure
+                # leaves no candidate-linked documents behind.
+                await self._job_descriptions.delete(
+                    db, interview.get("jd_id", ""), interview.get("user_id", "")
+                )
 
         now = datetime.now(UTC)
         await self._invitations.mark_erased(
@@ -146,5 +160,8 @@ def _anonymized_email(invitation_id: str) -> str:
 
 
 retention_service = RetentionService(
-    invitation_repository, interview_repository, recording_service
+    invitation_repository,
+    interview_repository,
+    recording_service,
+    job_description_repository,
 )
