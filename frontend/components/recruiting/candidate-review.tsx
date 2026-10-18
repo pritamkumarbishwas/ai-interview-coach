@@ -301,6 +301,9 @@ export function CompareModal({ entries, open, onClose }: CompareModalProps) {
   const scoreOf = (card: Scorecard | null, name: string) =>
     card?.competencies.find((item) => item.competency === name)?.score ?? null;
 
+  const leftEntry = completed.find((entry) => entry.invitation_id === leftId);
+  const rightEntry = completed.find((entry) => entry.invitation_id === rightId);
+
   return (
     <Modal
       open={open}
@@ -339,8 +342,18 @@ export function CompareModal({ entries, open, onClose }: CompareModalProps) {
           ) : left && right ? (
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
-                <CandidateHeadline card={left} integrity={leftIntegrity} />
-                <CandidateHeadline card={right} integrity={rightIntegrity} />
+                <CandidateHeadline
+                  name={leftEntry ? displayName(leftEntry) : "Candidate A"}
+                  entry={leftEntry}
+                  card={left}
+                  integrity={leftIntegrity}
+                />
+                <CandidateHeadline
+                  name={rightEntry ? displayName(rightEntry) : "Candidate B"}
+                  entry={rightEntry}
+                  card={right}
+                  integrity={rightIntegrity}
+                />
               </div>
 
               <table className="w-full text-[13px]">
@@ -431,20 +444,27 @@ function CandidatePicker({
 }
 
 function CandidateHeadline({
+  name,
+  entry,
   card,
   integrity,
 }: {
+  name: string;
+  entry: ShortlistEntry | undefined;
   card: Scorecard;
   integrity: IntegrityReport | null;
 }) {
   return (
     <div className="rounded-btn border border-line px-3 py-2.5">
-      <p className="truncate text-[13px] font-medium text-ink">{card.role}</p>
+      <p className="truncate text-[13px] font-medium text-ink">{name}</p>
       <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-2">
         <span className="tabular-nums">
           {card.overall_score}/100
           {card.threshold > 0 ? ` · threshold ${card.threshold}` : ""}
         </span>
+        {entry?.percentile !== null && entry?.percentile !== undefined ? (
+          <span className="tabular-nums">{entry.percentile}th pct</span>
+        ) : null}
         <Badge tone={card.meets_threshold ? "success" : "muted"}>
           {card.meets_threshold ? "Meets threshold" : "Below threshold"}
         </Badge>
@@ -454,8 +474,13 @@ function CandidateHeadline({
           </Badge>
         ) : null}
       </p>
+      <p className="mt-1 truncate text-xs text-ink-3">{card.role}</p>
     </div>
   );
+}
+
+function displayName(entry: ShortlistEntry): string {
+  return entry.candidate_name || entry.candidate_email;
 }
 
 function CandidateNotes({ card }: { card: Scorecard }) {
