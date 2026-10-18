@@ -150,8 +150,8 @@ def test_timeline_endpoint_requires_started_interview(
 def test_recording_download_is_recruiter_only_and_404_when_missing(
     client: TestClient, staff_headers: dict, auth_headers: dict, monkeypatch
 ) -> None:
-    from tests.test_scorecard import _job_with_rubric, _patch_llm, _run_candidate_flow
     from tests.test_shortlist import _invite
+    from tests.test_scorecard import _job_with_rubric, _patch_llm, _run_candidate_flow
 
     _patch_llm(monkeypatch, [])
     job_id = _job_with_rubric(client, staff_headers)
@@ -163,3 +163,84 @@ def test_recording_download_is_recruiter_only_and_404_when_missing(
     # Nothing was recorded in this flow, so the recording is absent (not a 500).
     assert client.get(url, headers=staff_headers).status_code == 404
     assert client.get(url, headers=auth_headers).status_code == 403
+
+
+def test_recording_download_and_anchored_timeline_end_to_end(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    """A recorded, proctored session streams back and anchors the timeline."""
+    from tests.test_screening import (
+        _invite,
+        _job_with_template,
+        _patch_llm,
+        _start,
+        _token,
+    )
+
+    _patch_llm(monkeypatch)
+    job_id = _job_with_template(client, staff_headers, proctoring_mode="strict", target=2)
+    invitation = _invite(client, staff_headers, job_id)
+    token = _token(invitation)
+    capture_started_at = datetime.now(UTC).isoformat()
+    question_id = _start(client, token)
+
+    chunk_url = f"/api/screening/{token}/recordings/chunk"
+    first = client.post(
+        chunk_url,
+        data={
+            "kind": "camera",
+            "seq": "0",
+            "finalize": "false",
+            "content_type": "video/webm",
+            # Only the first chunk reports the start; the service carries it.
+            "capture_started_at": capture_started_at,
+        },
+        files={"chunk": ("0.webm", b"first-half-", "video/webm")},
+    )
+    assert first.status_code == 204, first.text
+
+    client.post(
+        f"/api/screening/{token}/proctoring/events",
+        json={"type": "tab_blur", "details": {}},
+    )
+
+    # Answer both questions so the session (and recording) completes.
+    answer = client.post(
+        f"/api/screening/{token}/questions/{question_id}/answer",
+        json={"answer": "Use a covering index."},
+    )
+    next_id = answer.json()["next_question"]["id"]
+    client.post(
+        f"/api/screening/{token}/questions/{next_id}/answer",
+        json={"answer": "Measure with EXPLAIN."},
+    )
+
+    final = client.post(
+        chunk_url,
+        data={"kind": "camera", "seq": "1", "finalize": "true", "content_type": "video/webm"},
+        files={"chunk": ("1.webm", b"second-half", "video/webm")},
+    )
+    assert final.status_code == 204, final.text
+
+    download = client.get(
+        f"/api/invitations/{invitation['id']}/recordings/camera", headers=staff_headers
+    )
+    assert download.status_code == 200, download.text
+    assert download.headers["content-type"].startswith("video/webm")
+    assert download.content == b"first-half-second-half"
+
+    body = client.get(
+        f"/api/invitations/{invitation['id']}/timeline", headers=staff_headers
+    ).json()
+    assert body["recording_available"] is True
+    assert body["anchored_to_recording"] is True
+
+    kinds = [entry["kind"] for entry in body["entries"]]
+    assert "answer" in kinds
+    assert "signal" in kinds
+    # Chronological, non-negative offsets (recorder start precedes answers).
+    offsets = [entry["at_seconds"] for entry in body["entries"]]
+    assert offsets == sorted(offsets)
+    assert all(offset >= 0 for offset in offsets)
+    assert body["duration_seconds"] >= offsets[-1]
+
