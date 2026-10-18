@@ -44,3 +44,15 @@ export async function deleteJob(id: string): Promise<void> {
     throw toApiError(error);
   }
 }
+
+/** Replace the reviewers assigned to a requisition (recruiter/admin only). */
+export async function setJobReviewers(id: string, reviewerIds: string[]): Promise<Job> {
+  try {
+    const { data } = await api.put<Job>(`/jobs/${id}/reviewers`, {
+      reviewer_ids: reviewerIds,
+    });
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}

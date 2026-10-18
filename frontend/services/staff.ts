@@ -17,6 +17,16 @@ export async function listStaff(): Promise<User[]> {
   }
 }
 
+/** Reviewer accounts a recruiter may assign to a requisition. */
+export async function listReviewers(): Promise<User[]> {
+  try {
+    const { data } = await api.get<User[]>("/staff/reviewers");
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
 export async function listStaffInvitations(): Promise<StaffInvitation[]> {
   try {
     const { data } = await api.get<StaffInvitation[]>("/staff/invitations");

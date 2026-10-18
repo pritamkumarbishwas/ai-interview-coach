@@ -40,7 +40,12 @@ const CANDIDATE_NAV: NavItem[] = [
 
 const STAFF_NAV: NavItem[] = [
   { href: "/jobs", label: "Jobs", icon: Briefcase },
-  { href: "/templates", label: "Templates", icon: ClipboardList },
+  {
+    href: "/templates",
+    label: "Templates",
+    icon: ClipboardList,
+    roles: ["admin", "recruiter"],
+  },
   { href: "/team", label: "Team", icon: Users, roles: ["admin"] },
   { href: "/audit", label: "Audit log", icon: ScrollText, roles: ["admin"] },
   { href: "/profile", label: "Profile", icon: User },

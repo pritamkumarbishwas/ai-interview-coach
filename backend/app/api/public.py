@@ -31,13 +31,18 @@ NO_STORE = "private, no-store"
 
 
 def _owner(key: ApiKey) -> User:
-    """The staff identity a key acts as (id is all the services need)."""
+    """A stand-in identity for the key's owner.
+
+    Deliberately *owner-scoped only*: even an admin's key must not read another
+    user's data through the public API, so the stand-in never carries an
+    elevated role (a ``recruiter`` resolves to owner-only access everywhere).
+    """
     return User(
         id=key.created_by,
         name="api-key",
         email="",
         password_hash="",
-        role=key.role,
+        role="recruiter",
     )
 
 
@@ -52,7 +57,7 @@ async def list_jobs(
 ) -> list[JobSummary]:
     """List the requisitions visible to the key's owner."""
     response.headers["Cache-Control"] = NO_STORE
-    return await jobs.list(db, key.created_by, limit)
+    return await jobs.list(db, _owner(key), limit)
 
 
 @router.get("/jobs/{job_id}/candidates", response_model=list[ShortlistEntry])

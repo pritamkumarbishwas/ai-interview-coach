@@ -20,9 +20,27 @@ def test_templates_require_a_staff_role(client: TestClient, auth_headers: dict) 
     assert client.get("/api/templates", headers=auth_headers).status_code == 403
 
 
-def test_reviewer_cannot_manage_jobs(client: TestClient) -> None:
+def test_reviewer_is_read_only_on_jobs(client: TestClient) -> None:
+    # A reviewer may list the requisitions assigned to them (none here) but
+    # cannot create, edit, or delete any requisition.
     headers = login(client, make_user("reviewer.jobs@example.com", role="reviewer"))
-    assert client.get("/api/jobs", headers=headers).status_code == 403
+    assert client.get("/api/jobs", headers=headers).status_code == 200
+    assert client.get("/api/jobs", headers=headers).json() == []
+    assert (
+        client.post("/api/jobs", headers=headers, json={"title": "Backend Engineer"})
+        .status_code
+        == 403
+    )
+    assert (
+        client.patch("/api/jobs/000000000000000000000000", headers=headers, json={})
+        .status_code
+        == 403
+    )
+    assert (
+        client.delete("/api/jobs/000000000000000000000000", headers=headers).status_code
+        == 403
+    )
+    assert client.get("/api/templates", headers=headers).status_code == 403
 
 
 def test_recruiter_can_manage_jobs(client: TestClient, staff_headers: dict) -> None:

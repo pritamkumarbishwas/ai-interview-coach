@@ -16,6 +16,9 @@ import { TYPE_LABELS } from "@/lib/interview";
 /** Stable role sets for guards (module-level so effect deps stay constant). */
 export const STAFF_ROLES: Role[] = ["admin", "recruiter", "reviewer"];
 export const ADMIN_ROLES: Role[] = ["admin"];
+/** Roles allowed to create/edit requisitions and templates (matches the API's
+ * `require_recruiter`); reviewers are read/decide only. */
+export const RECRUITING_ROLES: Role[] = ["admin", "recruiter"];
 
 export const ROLE_LABELS: Record<Role, string> = {
   candidate: "Candidate",

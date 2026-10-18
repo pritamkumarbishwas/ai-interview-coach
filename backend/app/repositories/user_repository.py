@@ -69,6 +69,18 @@ class UserRepository:
         )
         return [_to_user(doc) async for doc in cursor]
 
+    async def list_by_role(
+        self, db: AsyncIOMotorDatabase, role: Role, limit: int
+    ) -> list[User]:
+        """Users with an exact role, newest first (e.g. assignable reviewers)."""
+        cursor = (
+            db[self.collection_name]
+            .find({"role": role})
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+        return [_to_user(doc) async for doc in cursor]
+
     async def count_staff(self, db: AsyncIOMotorDatabase) -> int:
         """Number of provisioned staff accounts (admin/recruiter/reviewer)."""
         return await db[self.collection_name].count_documents(

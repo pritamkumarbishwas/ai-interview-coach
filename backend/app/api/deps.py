@@ -59,7 +59,7 @@ def get_job_description_service() -> JobDescriptionService:
 
 
 def get_job_service() -> JobService:
-    return JobService(job_repository, template_repository)
+    return JobService(job_repository, template_repository, user_repository)
 
 
 def get_template_service() -> TemplateService:

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.api.deps import get_staff_service, require_admin
+from app.api.deps import get_staff_service, require_admin, require_recruiter
 from app.core.database import get_db
 from app.core.rate_limit import rate_limit
 from app.models.user import User
@@ -79,3 +79,14 @@ async def update_staff_role(
     service: StaffService = Depends(get_staff_service),
 ) -> UserOut:
     return await service.update_role(db, admin, user_id, payload)
+
+
+@router.get("/reviewers", response_model=list[UserOut])
+async def list_reviewers(
+    current_user: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: StaffService = Depends(get_staff_service),
+    limit: int = Query(default=200, ge=1, le=500),
+) -> list[UserOut]:
+    """Reviewer accounts a recruiter may assign to a requisition."""
+    return await service.list_reviewers(db, limit)

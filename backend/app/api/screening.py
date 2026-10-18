@@ -17,6 +17,7 @@ from app.api.deps import (
     require_admin,
     require_quota,
     require_recruiter,
+    require_staff,
 )
 from app.core.config import settings
 from app.core.database import get_db
@@ -64,18 +65,18 @@ async def create_invitation(
 @router.get("", response_model=list[InvitationOut])
 async def list_invitations(
     job_id: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_staff),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[InvitationOut]:
-    return await service.list_invitations(db, recruiter.id or "", job_id, limit)
+    return await service.list_invitations(db, recruiter, job_id, limit)
 
 
 @router.get("/shortlist", response_model=list[ShortlistEntry])
 async def get_job_shortlist(
     job_id: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_staff),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
 ) -> list[ShortlistEntry]:
@@ -86,7 +87,7 @@ async def get_job_shortlist(
 @router.get("/analytics", response_model=JobAnalytics)
 async def get_job_analytics(
     job_id: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_staff),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
 ) -> JobAnalytics:
@@ -97,7 +98,7 @@ async def get_job_analytics(
 @router.get("/shadow", response_model=ShadowReport)
 async def get_shadow_report(
     job_id: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_staff),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
 ) -> ShadowReport:
@@ -108,7 +109,7 @@ async def get_shadow_report(
 @router.get("/export")
 async def export_job_candidates(
     job_id: str,
-    recruiter: User = Depends(require_quota("exports", require_recruiter)),
+    recruiter: User = Depends(require_quota("exports", require_staff)),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
     _: None = Depends(rate_limit("candidate_export")),
@@ -128,7 +129,7 @@ async def export_job_candidates(
 @router.get("/export.pdf")
 async def export_job_candidates_pdf(
     job_id: str,
-    recruiter: User = Depends(require_quota("exports", require_recruiter)),
+    recruiter: User = Depends(require_quota("exports", require_staff)),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
     _: None = Depends(rate_limit("candidate_export")),
@@ -219,7 +220,7 @@ async def extend_invitation(
 async def decide_invitation(
     invitation_id: str,
     payload: InvitationDecision,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_staff),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
 ) -> InvitationOut:
@@ -232,7 +233,7 @@ async def decide_invitation(
 @router.get("/{invitation_id}/integrity", response_model=IntegrityReport)
 async def get_invitation_integrity(
     invitation_id: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_staff),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
 ) -> IntegrityReport:
@@ -243,7 +244,7 @@ async def get_invitation_integrity(
 @router.get("/{invitation_id}/scorecard", response_model=Scorecard)
 async def get_invitation_scorecard(
     invitation_id: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_staff),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
 ) -> Scorecard:
@@ -254,7 +255,7 @@ async def get_invitation_scorecard(
 @router.get("/{invitation_id}/timeline", response_model=ReviewTimeline)
 async def get_invitation_timeline(
     invitation_id: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_staff),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
 ) -> ReviewTimeline:
@@ -266,7 +267,7 @@ async def get_invitation_timeline(
 async def download_invitation_recording(
     invitation_id: str,
     kind: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_staff),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
     _: None = Depends(rate_limit("recording_download")),

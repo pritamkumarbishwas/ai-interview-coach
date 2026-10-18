@@ -17,14 +17,14 @@ import { SkeletonList } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
 import { toApiError } from "@/lib/api";
-import { PROCTORING_LABELS, STAFF_ROLES, defaultTemplateConfig } from "@/lib/recruiting";
+import { PROCTORING_LABELS, RECRUITING_ROLES, defaultTemplateConfig } from "@/lib/recruiting";
 import { formatDate } from "@/lib/utils";
 import * as templateService from "@/services/templates";
 import type { ProctoringMode } from "@/types";
 
 export default function TemplatesPage() {
   return (
-    <RequireRole roles={STAFF_ROLES}>
+    <RequireRole roles={RECRUITING_ROLES}>
       <Templates />
     </RequireRole>
   );

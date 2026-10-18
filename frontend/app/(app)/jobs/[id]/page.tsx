@@ -33,6 +33,7 @@ import { Field, Input, Textarea, inputClasses } from "@/components/ui/input";
 import { FullScreenLoader, SkeletonList } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
+import { useAuth } from "@/hooks/use-auth";
 import { toApiError } from "@/lib/api";
 import {
   INTEGRITY_LEVEL_LABELS,
@@ -43,6 +44,7 @@ import {
 } from "@/lib/recruiting";
 import { cx, formatDate, formatTime } from "@/lib/utils";import * as invitationService from "@/services/invitations";
 import * as jobService from "@/services/jobs";
+import * as staffService from "@/services/staff";
 import * as templateService from "@/services/templates";
 import type {
   BiasVerdict,
@@ -50,6 +52,7 @@ import type {
   IntegrityReport,
   Invitation,
   InvitationStatus,
+  Job,
   JobStatus,
   Scorecard,
   ShadowReport,
@@ -101,6 +104,128 @@ function CopyLinkButton({ url }: { url: string }) {
   );
 }
 
+function ReviewersPanel({ job, onSaved }: { job: Job; onSaved: () => void }) {
+  const {
+    data: reviewers,
+    loading,
+    error,
+  } = useAsync(() => staffService.listReviewers(), []);
+  const [selected, setSelected] = useState<string[]>(job.reviewer_ids ?? []);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setSelected(job.reviewer_ids ?? []);
+  }, [job.id, job.reviewer_ids]);
+
+  const toggle = (id: string) => {
+    setSaved(false);
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      await jobService.setJobReviewers(job.id, selected);
+      setSaved(true);
+      onSaved();
+    } catch (caught) {
+      setSaveError(toApiError(caught).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {saveError ? <Alert tone="error">{saveError}</Alert> : null}
+      {saved ? <Alert tone="success">Reviewers updated.</Alert> : null}
+
+      {loading && !reviewers ? (
+        <SkeletonList rows={2} />
+      ) : error ? (
+        <Alert tone="error">{error.message}</Alert>
+      ) : !reviewers || reviewers.length === 0 ? (
+        <p className="text-[13px] text-ink-2">
+          No reviewer accounts yet. An admin can invite reviewers from the Team
+          page.
+        </p>
+      ) : (
+        <>
+          <ul className="space-y-2">
+            {reviewers.map((reviewer) => (
+              <li
+                key={reviewer.id}
+                className="flex items-center gap-3 rounded-btn border border-line px-3.5 py-2.5"
+              >
+                <input
+                  type="checkbox"
+                  id={`reviewer-${reviewer.id}`}
+                  checked={selected.includes(reviewer.id)}
+                  onChange={() => toggle(reviewer.id)}
+                  className="h-4 w-4 shrink-0 rounded border-line text-brand focus:ring-brand"
+                />
+                <label
+                  htmlFor={`reviewer-${reviewer.id}`}
+                  className="min-w-0 flex-1 cursor-pointer"
+                >
+                  <span className="block truncate text-[13px] font-medium text-ink">
+                    {reviewer.name}
+                  </span>
+                  <span className="block truncate text-xs text-ink-2">
+                    {reviewer.email}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+          <div className="flex justify-end">
+            <Button
+              loading={saving}
+              icon={<Save className="h-4 w-4" aria-hidden />}
+              onClick={() => void save()}
+            >
+              Save reviewers
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ReadOnlyJobDetails({ job }: { job: Job }) {
+  const rows: { label: string; value: string; pre?: boolean }[] = [
+    { label: "Title", value: job.title },
+    { label: "Company", value: job.company || "—" },
+    { label: "Location", value: job.location || "—" },
+    { label: "Status", value: JOB_STATUS_LABELS[job.status] },
+    { label: "Description", value: job.description || "—", pre: true },
+  ];
+  return (
+    <dl className="space-y-3">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <dt className="text-xs font-medium text-ink-2">{row.label}</dt>
+          <dd
+            className={cx(
+              "mt-0.5 text-[13px] text-ink",
+              row.pre && "whitespace-pre-wrap",
+            )}
+          >
+            {row.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 export default function JobDetailPage() {
   return (
     <RequireRole roles={STAFF_ROLES}>
@@ -112,6 +237,8 @@ export default function JobDetailPage() {
 function JobDetail() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  const { user } = useAuth();
+  const canManage = user?.role === "admin" || user?.role === "recruiter";
 
   const {
     data: job,
@@ -119,7 +246,10 @@ function JobDetail() {
     error,
     reload,
   } = useAsync(() => jobService.getJob(params.id), [params.id]);
-  const { data: templates } = useAsync(() => templateService.listTemplates(), []);
+  const { data: templates } = useAsync(
+    () => (canManage ? templateService.listTemplates() : Promise.resolve([])),
+    [canManage],
+  );
   const {
     data: invitations,
     loading: invitationsLoading,
@@ -244,9 +374,14 @@ function JobDetail() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
-          <CardHeader title="Job details" description="Edit the requisition." />
+          <CardHeader
+            title="Job details"
+            description={canManage ? "Edit the requisition." : "Requisition details."}
+          />
           <CardContent>
-            {form ? (
+            {!canManage ? (
+              <ReadOnlyJobDetails job={job} />
+            ) : form ? (
               <form onSubmit={onSave} className="space-y-4" noValidate>
                 {saveError ? <Alert tone="error">{saveError}</Alert> : null}
                 {saved ? <Alert tone="success">Job saved.</Alert> : null}
@@ -364,7 +499,11 @@ function JobDetail() {
         <Card>
           <CardHeader
             title="Candidates"
-            description="Invite candidates by magic link."
+            description={
+              canManage
+                ? "Invite candidates by magic link."
+                : "Candidates invited to this role."
+            }
           />
           <CardContent className="space-y-5">
             {link ? (
@@ -385,13 +524,15 @@ function JobDetail() {
               </div>
             ) : null}
 
-            <InviteForm
-              jobId={job.id}
-              onInvited={(invitation) => {
-                refreshCandidates();
-                setLink(invitation.accept_url);
-              }}
-            />
+            {canManage ? (
+              <InviteForm
+                jobId={job.id}
+                onInvited={(invitation) => {
+                  refreshCandidates();
+                  setLink(invitation.accept_url);
+                }}
+              />
+            ) : null}
 
             <div>
               {invitationsLoading && !invitations ? (
@@ -402,6 +543,7 @@ function JobDetail() {
                     <InvitationRow
                       key={invitation.id}
                       invitation={invitation}
+                      canManage={canManage}
                       onChanged={refreshCandidates}
                       onLink={setLink}
                     />
@@ -418,6 +560,18 @@ function JobDetail() {
             </div>
           </CardContent>
         </Card>
+
+        {canManage ? (
+          <Card className="lg:col-span-2">
+            <CardHeader
+              title="Reviewers"
+              description="Assigned reviewers can read this role's pipeline and record decisions; they cannot edit the job or invite candidates."
+            />
+            <CardContent>
+              <ReviewersPanel job={job} onSaved={reload} />
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card className="lg:col-span-2">
           <CardHeader
@@ -588,11 +742,12 @@ function InviteForm({ jobId, onInvited }: InviteFormProps) {
 
 interface InvitationRowProps {
   invitation: Invitation;
+  canManage: boolean;
   onChanged: () => void;
   onLink: (url: string) => void;
 }
 
-function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
+function InvitationRow({ invitation, canManage, onChanged, onLink }: InvitationRowProps) {
   const [busy, setBusy] = useState<"remind" | "revoke" | "extend" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [extendMinutes, setExtendMinutes] = useState("15");
@@ -730,7 +885,7 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
             Scorecard
           </Button>
         ) : null}
-        {extendable ? (
+        {canManage && extendable ? (
           <div className="flex items-center gap-1.5">
             <select
               aria-label="Extra time to add"
@@ -755,7 +910,7 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
           </div>
         ) : null}
         <div className="flex items-center gap-1.5">
-          {revocable ? (
+          {canManage && revocable ? (
             <>
               <Button
                 variant="ghost"

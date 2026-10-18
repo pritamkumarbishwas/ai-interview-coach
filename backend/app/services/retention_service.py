@@ -27,8 +27,10 @@ from app.repositories.job_description_repository import (
     JobDescriptionRepository,
     job_description_repository,
 )
+from app.repositories.job_repository import JobRepository, job_repository
 from app.schemas.retention import ErasureResult
 from app.services.audit_service import audit_service
+from app.services.job_access import find_accessible_job
 from app.services.recording_service import RecordingService, recording_service
 
 logger = logging.getLogger(__name__)
@@ -47,19 +49,30 @@ class RetentionService:
         interviews: InterviewRepository,
         recordings: RecordingService,
         job_descriptions: JobDescriptionRepository,
+        jobs: JobRepository,
     ) -> None:
         self._invitations = invitations
         self._interviews = interviews
         self._recordings = recordings
         self._job_descriptions = job_descriptions
+        self._jobs = jobs
+
+    async def _require_job_access(
+        self, db: AsyncIOMotorDatabase, actor: User, doc: dict
+    ) -> None:
+        """Gate an invitation's PII on access to its requisition (see access rules)."""
+        job = await find_accessible_job(db, self._jobs, doc.get("job_id", ""), actor)
+        if job is None:
+            raise NotFoundError("Invitation not found")
 
     async def erase_candidate(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
     ) -> ErasureResult:
         """Recruiter-triggered erasure of one candidate's session data."""
-        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
+        doc = await self._invitations.get_by_id(db, invitation_id)
         if doc is None:
             raise NotFoundError("Invitation not found")
+        await self._require_job_access(db, recruiter, doc)
         result = await self.erase_invitation_data(db, doc)
         await audit_service.record(
             db,
@@ -135,9 +148,10 @@ class RetentionService:
         manifest of the stored recordings. The magic-link ``token_hash`` and the
         guest identity are deliberately excluded.
         """
-        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
+        doc = await self._invitations.get_by_id(db, invitation_id)
         if doc is None:
             raise NotFoundError("Invitation not found")
+        await self._require_job_access(db, recruiter, doc)
 
         payload: dict = {
             "generated_at": datetime.now(UTC),
@@ -271,4 +285,5 @@ retention_service = RetentionService(
     interview_repository,
     recording_service,
     job_description_repository,
+    job_repository,
 )

@@ -47,6 +47,11 @@ class JobOut(BaseModel):
     description: str
     status: JobStatus
     template_id: str | None = None
+    # Staff assigned to review this requisition (read/decide access).
+    reviewer_ids: list[str] = Field(default_factory=list)
+    # The requisition's owner. Surfaced so an admin's cross-owner list/detail
+    # can show who created it.
+    owner_id: str | None = None
     webhook_url: str = ""
     webhook_provider: WebhookProvider = "generic"
     webhook_enabled: bool = False
@@ -64,4 +69,12 @@ class JobSummary(BaseModel):
     company: str
     status: JobStatus
     template_id: str | None = None
+    reviewer_ids: list[str] = Field(default_factory=list)
+    owner_id: str | None = None
     created_at: ISTDateTime
+
+
+class ReviewerAssignment(BaseModel):
+    """Replace the reviewer list on a requisition."""
+
+    reviewer_ids: list[str] = Field(default_factory=list)

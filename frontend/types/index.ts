@@ -256,6 +256,8 @@ export interface JobSummary {
   company: string;
   status: JobStatus;
   template_id: string | null;
+  reviewer_ids: string[];
+  owner_id: string | null;
   created_at: string;
 }
 
@@ -267,6 +269,8 @@ export interface Job {
   description: string;
   status: JobStatus;
   template_id: string | null;
+  reviewer_ids: string[];
+  owner_id: string | null;
   created_at: string;
   updated_at: string;
 }

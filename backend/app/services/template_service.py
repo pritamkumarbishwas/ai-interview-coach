@@ -7,6 +7,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.exceptions import ConflictError, NotFoundError, ServiceUnavailableError
 from app.models.template import BankQuestion, InterviewTemplate
 from app.models.template_config import RoundConfig
+from app.models.user import User
 from app.prompts.templates import GENERATE_QUESTION_PROMPT
 from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
@@ -21,6 +22,7 @@ from app.schemas.template import (
     TemplateSummary,
     TemplateUpdate,
 )
+from app.services.audit_service import audit_service
 from app.services.llm_service import llm_service
 from app.services.rag_service import rag_service
 
@@ -37,10 +39,10 @@ class TemplateService:
         self._jobs = jobs
 
     async def create(
-        self, db: AsyncIOMotorDatabase, user_id: str, payload: TemplateCreate
+        self, db: AsyncIOMotorDatabase, actor: User, payload: TemplateCreate
     ) -> TemplateOut:
         template = InterviewTemplate(
-            user_id=user_id,
+            user_id=actor.id or "",
             name=payload.name.strip(),
             description=payload.description,
             config=payload.config,
@@ -50,9 +52,12 @@ class TemplateService:
         return self._to_out(template)
 
     async def list(
-        self, db: AsyncIOMotorDatabase, user_id: str, limit: int
+        self, db: AsyncIOMotorDatabase, actor: User, limit: int
     ) -> list[TemplateSummary]:
-        docs = await self._templates.list_for_user(db, user_id, limit)
+        if actor.role == "admin":
+            docs = await self._templates.list_all(db, limit)
+        else:
+            docs = await self._templates.list_for_user(db, actor.id or "", limit)
         return [
             TemplateSummary(
                 id=doc["_id"],
@@ -66,44 +71,57 @@ class TemplateService:
             for doc in docs
         ]
 
-    async def get(self, db: AsyncIOMotorDatabase, user_id: str, template_id: str) -> TemplateOut:
-        return self._to_out(InterviewTemplate(**await self._require(db, user_id, template_id)))
+    async def get(self, db: AsyncIOMotorDatabase, actor: User, template_id: str) -> TemplateOut:
+        return self._to_out(InterviewTemplate(**await self._require(db, actor, template_id)))
 
     async def update(
         self,
         db: AsyncIOMotorDatabase,
-        user_id: str,
+        actor: User,
         template_id: str,
         payload: TemplateUpdate,
     ) -> TemplateOut:
-        await self._require(db, user_id, template_id)
+        current = await self._require(db, actor, template_id)
         fields = self._update_fields(payload)
         if not fields:
-            return self._to_out(
-                InterviewTemplate(**await self._require(db, user_id, template_id))
-            )
+            return self._to_out(InterviewTemplate(**current))
 
-        doc = await self._templates.update(db, template_id, user_id, fields)
+        if actor.role == "admin" and current.get("user_id") != actor.id:
+            doc = await self._templates.update_any(db, template_id, fields)
+            await self._audit_admin(db, actor, template_id, "template.updated")
+        else:
+            doc = await self._templates.update(db, template_id, actor.id or "", fields)
         if doc is None:  # pragma: no cover - the row existed a moment ago
             raise NotFoundError("Interview template not found")
         return self._to_out(InterviewTemplate(**doc))
 
-    async def delete(self, db: AsyncIOMotorDatabase, user_id: str, template_id: str) -> None:
-        await self._require(db, user_id, template_id)
+    async def delete(self, db: AsyncIOMotorDatabase, actor: User, template_id: str) -> None:
+        current = await self._require(db, actor, template_id)
+        cross_owner = actor.role == "admin" and current.get("user_id") != actor.id
         # Keep requisitions from pointing at a template that no longer exists.
-        if await self._jobs.count_for_template(db, user_id, template_id):
+        if cross_owner:
+            referenced = await self._jobs.count_for_template_any(db, template_id)
+        else:
+            referenced = await self._jobs.count_for_template(
+                db, actor.id or "", template_id
+            )
+        if referenced:
             raise ConflictError("Template is attached to one or more jobs")
-        await self._templates.delete(db, template_id, user_id)
+        if cross_owner:
+            await self._templates.delete_any(db, template_id)
+            await self._audit_admin(db, actor, template_id, "template.deleted")
+        else:
+            await self._templates.delete(db, template_id, actor.id or "")
 
     async def preview_question(
         self,
         db: AsyncIOMotorDatabase,
-        user_id: str,
+        actor: User,
         template_id: str,
         payload: TemplatePreviewRequest,
     ) -> TemplatePreviewOut:
         """Generate one question from the template, for the builder's preview pane."""
-        template = InterviewTemplate(**await self._require(db, user_id, template_id))
+        template = InterviewTemplate(**await self._require(db, actor, template_id))
         round_ = self._select_round(template, payload.round_key)
 
         interview_type = (
@@ -209,9 +227,23 @@ class TemplateService:
         )
 
     async def _require(
-        self, db: AsyncIOMotorDatabase, user_id: str, template_id: str
+        self, db: AsyncIOMotorDatabase, actor: User, template_id: str
     ) -> dict:
-        doc = await self._templates.find_owned(db, template_id, user_id)
+        doc = await self._templates.find_owned(db, template_id, actor.id or "")
+        if doc is None and actor.role == "admin":
+            doc = await self._templates.get_by_id(db, template_id)
         if doc is None:
             raise NotFoundError("Interview template not found")
         return doc
+
+    async def _audit_admin(
+        self, db: AsyncIOMotorDatabase, actor: User, template_id: str, action: str
+    ) -> None:
+        await audit_service.record(
+            db,
+            action=action,
+            actor_id=actor.id,
+            target_type="template",
+            target_id=template_id,
+            metadata={"cross_owner": True},
+        )

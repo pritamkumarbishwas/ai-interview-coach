@@ -15,6 +15,7 @@ import { Field, Input, Textarea, inputClasses } from "@/components/ui/input";
 import { SkeletonList } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
+import { useAuth } from "@/hooks/use-auth";
 import { toApiError } from "@/lib/api";
 import { JOB_STATUS_LABELS, JOB_STATUS_TONES, STAFF_ROLES } from "@/lib/recruiting";
 import { formatDate } from "@/lib/utils";
@@ -31,13 +32,18 @@ export default function JobsPage() {
 }
 
 function Jobs() {
+  const { user } = useAuth();
+  const canManage = user?.role === "admin" || user?.role === "recruiter";
   const {
     data: jobs,
     loading,
     error,
     reload,
   } = useAsync(() => jobService.listJobs(), []);
-  const { data: templates } = useAsync(() => templateService.listTemplates(), []);
+  const { data: templates } = useAsync(
+    () => (canManage ? templateService.listTemplates() : Promise.resolve([])),
+    [canManage],
+  );
 
   const [createOpen, setCreateOpen] = useState(false);
 
@@ -52,17 +58,20 @@ function Jobs() {
             Job requisitions
           </h2>
           <p className="mt-1 text-sm text-ink-2">
-            Openings you&apos;re hiring for. Attach an interview template and
-            invite candidates.
+            {canManage
+              ? "Openings you're hiring for. Attach an interview template and invite candidates."
+              : "Requisitions you've been asked to review."}
           </p>
         </div>
-        <Button
-          className="ml-auto"
-          icon={<Plus className="h-4 w-4" aria-hidden />}
-          onClick={() => setCreateOpen(true)}
-        >
-          New job
-        </Button>
+        {canManage ? (
+          <Button
+            className="ml-auto"
+            icon={<Plus className="h-4 w-4" aria-hidden />}
+            onClick={() => setCreateOpen(true)}
+          >
+            New job
+          </Button>
+        ) : null}
       </header>
 
       {error ? (
@@ -115,21 +124,27 @@ function Jobs() {
       ) : (
         <EmptyState
           icon={<Briefcase className="h-6 w-6" aria-hidden />}
-          title="No jobs yet"
-          description="Create your first requisition to attach an interview template and start inviting candidates."
+          title={canManage ? "No jobs yet" : "No jobs assigned to you"}
+          description={
+            canManage
+              ? "Create your first requisition to attach an interview template and start inviting candidates."
+              : "A recruiter hasn't assigned you to review any requisitions yet."
+          }
           action={
-            <Button
-              icon={<Plus className="h-4 w-4" aria-hidden />}
-              onClick={() => setCreateOpen(true)}
-            >
-              New job
-            </Button>
+            canManage ? (
+              <Button
+                icon={<Plus className="h-4 w-4" aria-hidden />}
+                onClick={() => setCreateOpen(true)}
+              >
+                New job
+              </Button>
+            ) : undefined
           }
         />
       )}
 
       <NewJobModal
-        open={createOpen}
+        open={canManage && createOpen}
         onClose={() => setCreateOpen(false)}
         templates={templates ?? []}
         onCreated={() => {

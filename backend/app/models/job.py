@@ -31,6 +31,9 @@ class Job(BaseModel):
     # The interview template candidates are screened with; optional until the
     # recruiter picks one.
     template_id: str | None = None
+    # Reviewers assigned to this requisition. A reviewer may read the job's
+    # pipeline and record decisions, but cannot manage the job or templates.
+    reviewer_ids: list[str] = Field(default_factory=list)
     # --- Outbound ATS webhook (Phase 8) ------------------------------------
     # When enabled, a signed `candidate.decided` event is POSTed here whenever a
     # recruiter records a decision. The secret signs every request and is never

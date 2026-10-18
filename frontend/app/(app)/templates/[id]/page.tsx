@@ -27,9 +27,9 @@ import {
   INTEGRITY_LABELS,
   INTERVIEW_TYPES,
   PROCTORING_LABELS,
+  RECRUITING_ROLES,
   RESPONSE_MODES,
   RESPONSE_MODE_LABELS,
-  STAFF_ROLES,
   newRound,
 } from "@/lib/recruiting";
 import { DIFFICULTY_LABELS, TYPE_LABELS } from "@/lib/interview";
@@ -57,7 +57,7 @@ interface Draft {
 
 export default function TemplateBuilderPage() {
   return (
-    <RequireRole roles={STAFF_ROLES}>
+    <RequireRole roles={RECRUITING_ROLES}>
       <TemplateBuilder />
     </RequireRole>
   );

@@ -52,6 +52,7 @@ from app.services.analytics_service import analytics_service
 from app.services.audit_service import audit_service
 from app.services.integrity_service import integrity_service
 from app.services.interview_service import InterviewService
+from app.services.job_access import find_accessible_job
 from app.services.normalization_service import normalize
 from app.services.pdf_service import pdf_service
 from app.services.recording_service import RecordingService
@@ -118,8 +119,9 @@ class ScreeningService:
     async def create_invitation(
         self, db: AsyncIOMotorDatabase, recruiter: User, payload: InvitationCreate
     ) -> InvitationOut:
-        job = Job(**await self._require_job(db, recruiter.id or "", payload.job_id))
-        template = await self._load_template(db, recruiter.id or "", job.template_id)
+        job = Job(**await self._require_job(db, recruiter, payload.job_id))
+        # The template belongs to the requisition's owner, not the acting admin.
+        template = await self._load_template(db, job.user_id, job.template_id)
         round_config = self._select_round(template, payload.round_key)
 
         # The guest identity is internal: no User record, and the prefix keeps it
@@ -166,9 +168,9 @@ class ScreeningService:
         return self._to_out(invitation, accept_url=url)
 
     async def list_invitations(
-        self, db: AsyncIOMotorDatabase, recruiter_id: str, job_id: str, limit: int
+        self, db: AsyncIOMotorDatabase, actor: User, job_id: str, limit: int
     ) -> list[InvitationOut]:
-        await self._require_job(db, recruiter_id, job_id)
+        await self._require_job(db, actor, job_id)
         docs = await self._invitations.list_for_job(db, job_id, limit)
         return [
             InvitationOut(
@@ -193,9 +195,7 @@ class ScreeningService:
     async def revoke(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
     ) -> None:
-        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
-        if doc is None:
-            raise NotFoundError("Invitation not found")
+        await self._require_invitation(db, recruiter, invitation_id)
         await self._invitations.set_status(db, invitation_id, "revoked")
         await audit_service.record(
             db,
@@ -208,10 +208,9 @@ class ScreeningService:
     async def remind(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
     ) -> InvitationOut:
-        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
-        if doc is None:
-            raise NotFoundError("Invitation not found")
-        invitation = ScreeningInvitation(**doc)
+        invitation = ScreeningInvitation(
+            **await self._require_invitation(db, recruiter, invitation_id)
+        )
         if invitation.status != "pending":
             raise ConflictError("Only pending invitations can be reminded.")
 
@@ -239,9 +238,7 @@ class ScreeningService:
         unchanged — the deadline lives on the invitation, so the extension
         applies to the candidate's remaining time.
         """
-        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
-        if doc is None:
-            raise NotFoundError("Invitation not found")
+        doc = await self._require_invitation(db, recruiter, invitation_id)
         invitation = ScreeningInvitation(**doc)
         if invitation.status in ("revoked", "completed"):
             raise ConflictError("This invitation can no longer be extended.")
@@ -307,13 +304,11 @@ class ScreeningService:
 
         ``pending`` clears a previous decision so a reviewer can undo a call.
         """
-        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
-        if doc is None:
-            raise NotFoundError("Invitation not found")
+        await self._require_invitation(db, recruiter, invitation_id)
         await self._invitations.set_decision(
             db, invitation_id, decision, note, recruiter.id or ""
         )
-        updated = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
+        updated = await self._invitations.get_by_id(db, invitation_id)
         assert updated is not None
         await audit_service.record(
             db,
@@ -356,7 +351,7 @@ class ScreeningService:
         recruiter sees the whole pipeline. Ranking is advisory — a human makes
         every decision (``decision`` is surfaced, never set here).
         """
-        await self._require_job(db, recruiter.id or "", job_id)
+        await self._require_job(db, recruiter, job_id)
         # `list_for_job` returns a projection (not full documents), so read the
         # fields the shortlist needs straight from the dicts.
         docs = await self._invitations.list_for_job(db, job_id, SHORTLIST_LIMIT)
@@ -465,7 +460,7 @@ class ScreeningService:
         self, db: AsyncIOMotorDatabase, recruiter: User, job_id: str
     ) -> bytes:
         """One-page PDF summary of a job's screening pipeline (recruiter-gated)."""
-        job = await self._require_job(db, recruiter.id or "", job_id)
+        job = await self._require_job(db, recruiter, job_id)
         entries = await self.shortlist(db, recruiter, job_id)
         analytics = analytics_service.build(job_id, entries)
         return pdf_service.render_job_summary(
@@ -475,9 +470,7 @@ class ScreeningService:
     async def _require_interview(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
     ) -> Interview:
-        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
-        if doc is None:
-            raise NotFoundError("Invitation not found")
+        doc = await self._require_invitation(db, recruiter, invitation_id)
         invitation = ScreeningInvitation(**doc)
         if not invitation.interview_id:
             raise ConflictError("This candidate has not started the interview yet.")
@@ -485,6 +478,22 @@ class ScreeningService:
         if interview_doc is None:
             raise NotFoundError("Interview not found")
         return Interview(**interview_doc)
+
+    async def _require_invitation(
+        self, db: AsyncIOMotorDatabase, actor: User, invitation_id: str
+    ) -> dict:
+        """Load an invitation, gated by access to its requisition.
+
+        Access is derived from the *job* (owner, admin override, or assigned
+        reviewer) rather than the invitation's ``created_by``, so an admin who
+        creates an invitation on another recruiter's requisition does not strand
+        it.
+        """
+        doc = await self._invitations.get_by_id(db, invitation_id)
+        if doc is None:
+            raise NotFoundError("Invitation not found")
+        await self._require_job(db, actor, doc.get("job_id", ""))
+        return doc
 
     # --- Candidate-facing (token) ------------------------------------------
     async def session(self, db: AsyncIOMotorDatabase, token: str) -> InvitationSessionOut:
@@ -674,19 +683,19 @@ class ScreeningService:
             raise ConflictError("The interview window has closed.")
 
     async def _require_job(
-        self, db: AsyncIOMotorDatabase, user_id: str, job_id: str
+        self, db: AsyncIOMotorDatabase, actor: User, job_id: str
     ) -> dict:
-        doc = await self._jobs.find_owned(db, job_id, user_id)
+        doc = await find_accessible_job(db, self._jobs, job_id, actor)
         if doc is None:
             raise NotFoundError("Job not found")
         return doc
 
     async def _load_template(
-        self, db: AsyncIOMotorDatabase, user_id: str, template_id: str | None
+        self, db: AsyncIOMotorDatabase, owner_id: str, template_id: str | None
     ) -> InterviewTemplate | None:
         if not template_id:
             return None
-        doc = await self._templates.find_owned(db, template_id, user_id)
+        doc = await self._templates.find_owned(db, template_id, owner_id)
         return InterviewTemplate(**doc) if doc else None
 
     @staticmethod

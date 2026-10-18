@@ -47,6 +47,36 @@ class TemplateRepository:
     ) -> dict | None:
         return await find_owned_document(db, self.collection_name, template_id, user_id)
 
+    async def list_all(self, db: AsyncIOMotorDatabase, limit: int) -> list[dict]:
+        """Every template summary, newest first (admin cross-owner view)."""
+        cursor = db[self.collection_name].aggregate(
+            [
+                {"$sort": {"created_at": -1}},
+                {"$limit": limit},
+                {
+                    "$project": {
+                        "name": 1,
+                        "description": 1,
+                        "created_at": 1,
+                        "proctoring_mode": "$config.proctoring_mode",
+                        "round_count": {"$size": {"$ifNull": ["$config.rounds", []]}},
+                        "question_count": {"$size": {"$ifNull": ["$question_bank", []]}},
+                    }
+                },
+            ]
+        )
+        return [stringify_id(doc) async for doc in cursor]
+
+    async def get_by_id(
+        self, db: AsyncIOMotorDatabase, template_id: str
+    ) -> dict | None:
+        """Fetch a template regardless of owner (admin override/background)."""
+        object_id = to_object_id(template_id)
+        if object_id is None:
+            return None
+        doc = await db[self.collection_name].find_one({"_id": object_id})
+        return stringify_id(doc) if doc else None
+
     async def update(
         self, db: AsyncIOMotorDatabase, template_id: str, user_id: str, fields: dict
     ) -> dict | None:
@@ -66,6 +96,29 @@ class TemplateRepository:
         if object_id is None:
             return
         await db[self.collection_name].delete_one({"_id": object_id, "user_id": user_id})
+
+    async def update_any(
+        self, db: AsyncIOMotorDatabase, template_id: str, fields: dict
+    ) -> dict | None:
+        """Update a template regardless of owner (admin override)."""
+        object_id = to_object_id(template_id)
+        if object_id is None:
+            return None
+        fields["updated_at"] = datetime.now(UTC)
+        doc = await db[self.collection_name].find_one_and_update(
+            {"_id": object_id},
+            {"$set": fields},
+            return_document=ReturnDocument.AFTER,
+        )
+        return stringify_id(doc) if doc else None
+
+    async def delete_any(self, db: AsyncIOMotorDatabase, template_id: str) -> bool:
+        """Delete a template regardless of owner (admin override)."""
+        object_id = to_object_id(template_id)
+        if object_id is None:
+            return False
+        result = await db[self.collection_name].delete_one({"_id": object_id})
+        return result.deleted_count > 0
 
 
 template_repository = TemplateRepository()

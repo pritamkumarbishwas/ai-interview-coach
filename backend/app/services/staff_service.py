@@ -159,6 +159,11 @@ class StaffService:
         users = await self._users.list_staff(db, limit)
         return [UserOut.model_validate(user) for user in users]
 
+    async def list_reviewers(self, db: AsyncIOMotorDatabase, limit: int) -> list[UserOut]:
+        """Reviewer accounts a recruiter may assign to a requisition."""
+        users = await self._users.list_by_role(db, "reviewer", limit)
+        return [UserOut.model_validate(user) for user in users]
+
     async def update_role(
         self, db: AsyncIOMotorDatabase, admin: User, user_id: str, payload: RoleUpdateRequest
     ) -> UserOut:
