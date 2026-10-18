@@ -128,6 +128,20 @@ export async function downloadJobCandidatesCsv(jobId: string): Promise<Blob> {
   }
 }
 
+/** Download a one-page PDF summary of a job's pipeline (caller revokes URL). */
+export async function downloadJobCandidatesPdf(jobId: string): Promise<Blob> {
+  try {
+    const { data } = await api.get<Blob>("/invitations/export.pdf", {
+      params: { job_id: jobId },
+      responseType: "blob",
+      timeout: LARGE_RESPONSE_TIMEOUT_MS,
+    });
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
 /** Record the human decision for a candidate (never set by the AI). */
 export async function setInvitationDecision(
   id: string,

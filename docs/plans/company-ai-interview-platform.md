@@ -222,10 +222,19 @@ the workspace.
 ### Phase 8 — Analytics, exports & integrations (L) — *post-MVP*
 Funnel/pass-rate/score distributions, CSV/PDF export, ATS webhooks
 (Greenhouse/Lever first), public API keys.
+> **Status: implemented.** `GET /api/invitations/analytics` and `/export` (CSV),
+> `/export.pdf`; `api_keys` collection + `X-API-Key` auth and read-only
+> `/api/public/*` surface; per-job signed outbound ATS webhooks delivered via the
+> background queue. Provider payload blocks need validation against each
+> partner's live API before go-live.
 
 ### Phase 9 — Compliance, security & billing (L) — *post-MVP*
 Retention & erasure, DPA/data-processing, region residency, encryption at rest,
 SSO/SAML, per-role limits, LLM cost tracking, seats/credits billing.
+> **Status: retention & erasure done** (`POST /api/invitations/{id}/erase`,
+> `POST /api/invitations/retention/purge`, `retention.purge` job). Remaining:
+> DPA, residency, encryption at rest, SSO/SAML, per-role limits, LLM cost
+> tracking, seats/credits billing.
 
 ### Phase 10 — Advanced AI (ongoing) — *post-MVP*
 Shadow mode (AI vs human panel agreement), explain-answer assist, cheating ML,

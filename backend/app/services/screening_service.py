@@ -18,8 +18,10 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError
+from app.core.jobs import job_queue
 from app.core.mailer import EmailMessage, get_mailer
 from app.core.transcription import get_transcriber
+from app.core.webhooks import ATS_WEBHOOK_JOB
 from app.emails.templates import invitation_email, reminder_email
 from app.models.analytics import JobAnalytics
 from app.models.integrity import IntegrityReport
@@ -50,6 +52,7 @@ from app.services.audit_service import audit_service
 from app.services.integrity_service import integrity_service
 from app.services.interview_service import InterviewService
 from app.services.normalization_service import normalize
+from app.services.pdf_service import pdf_service
 from app.services.recording_service import RecordingService
 from app.services.review_service import review_service
 from app.services.scorecard_service import scorecard_service
@@ -318,7 +321,29 @@ class ScreeningService:
             target_id=invitation_id,
             metadata={"decision": decision},
         )
-        return self._to_out(ScreeningInvitation(**updated))
+        invitation = ScreeningInvitation(**updated)
+        await self._enqueue_decision_webhook(db, invitation)
+        return self._to_out(invitation)
+
+    async def _enqueue_decision_webhook(
+        self, db: AsyncIOMotorDatabase, invitation: ScreeningInvitation
+    ) -> None:
+        """Queue an outbound ATS webhook when the job has one enabled.
+
+        Delivery is asynchronous (best-effort, retried by the queue), so a
+        partner outage never blocks the recruiter's decision.
+        """
+        job_doc = await self._jobs.get_by_id(db, invitation.job_id)
+        if not job_doc or not job_doc.get("webhook_enabled") or not job_doc.get("webhook_url"):
+            return
+        try:
+            await job_queue.enqueue(
+                db,
+                ATS_WEBHOOK_JOB,
+                {"invitation_id": invitation.id, "job_id": invitation.job_id},
+            )
+        except Exception as exc:  # notification is a side channel
+            logger.warning("Could not enqueue ATS webhook: %s", exc)
 
     async def shortlist(
         self, db: AsyncIOMotorDatabase, recruiter: User, job_id: str
@@ -422,6 +447,17 @@ class ScreeningService:
         """Row-level CSV of a job's candidates (recruiter-gated, defanged)."""
         entries = await self.shortlist(db, recruiter, job_id)
         return analytics_service.to_csv(entries)
+
+    async def export_pdf(
+        self, db: AsyncIOMotorDatabase, recruiter: User, job_id: str
+    ) -> bytes:
+        """One-page PDF summary of a job's screening pipeline (recruiter-gated)."""
+        job = await self._require_job(db, recruiter.id or "", job_id)
+        entries = await self.shortlist(db, recruiter, job_id)
+        analytics = analytics_service.build(job_id, entries)
+        return pdf_service.render_job_summary(
+            job.get("title", ""), job.get("company", ""), analytics, entries
+        )
 
     async def _require_interview(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str

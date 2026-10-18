@@ -16,6 +16,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 JobStatus = Literal["draft", "open", "closed"]
+# Outbound ATS integration flavour; "generic" is a plain JSON envelope.
+WebhookProvider = Literal["generic", "greenhouse", "lever"]
 
 
 class Job(BaseModel):
@@ -29,6 +31,14 @@ class Job(BaseModel):
     # The interview template candidates are screened with; optional until the
     # recruiter picks one.
     template_id: str | None = None
+    # --- Outbound ATS webhook (Phase 8) ------------------------------------
+    # When enabled, a signed `candidate.decided` event is POSTed here whenever a
+    # recruiter records a decision. The secret signs every request and is never
+    # returned by the API.
+    webhook_url: str = ""
+    webhook_provider: WebhookProvider = "generic"
+    webhook_secret: str = ""
+    webhook_enabled: bool = False
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

@@ -285,6 +285,14 @@ class InterviewRepository:
         )
         return result.matched_count > 0
 
+    async def delete_by_id(self, db: AsyncIOMotorDatabase, interview_id: str) -> bool:
+        """Hard-delete an interview (used by candidate erasure/retention)."""
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return False
+        result = await db[self.collection_name].delete_one({"_id": object_id})
+        return result.deleted_count > 0
+
     @staticmethod
     def _shape(doc: dict[str, Any]) -> dict:
         """Expose `_id` as a string for the Pydantic model."""

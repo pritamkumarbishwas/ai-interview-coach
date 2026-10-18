@@ -71,6 +71,8 @@ class Settings(BaseSettings):
         "screening_transcribe": (60, 60),
         # Recruiter playback of a finalized session (occasional, not bulk).
         "recording_download": (30, 60),
+        # Programmatic API clients poll; give them a generous budget.
+        "public_api": (300, 60),
     }
     trust_proxy_headers: bool = False
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "https://resume-builder-rho-woad.vercel.app"]
@@ -128,6 +130,16 @@ class Settings(BaseSettings):
     # --- Candidate invitations ---------------------------------------------
     # Default magic-link lifetime; can be overridden per invitation.
     invitation_ttl_days: int = Field(default=7, ge=1, le=30)
+
+    # --- Data retention & erasure (Phase 9) --------------------------------
+    # Candidate session data (interview + recording + proctoring) older than
+    # this is destroyed by the retention purge. The invitation record is
+    # anonymized, not deleted, so aggregate analytics survive.
+    data_retention_days: int = Field(default=365, ge=30)
+    # The purge only runs when explicitly triggered (admin endpoint or the
+    # `retention.purge` background job); it is never destructive by accident.
+    retention_purge_enabled: bool = False
+    retention_batch_limit: int = Field(default=100, ge=1, le=1000)
 
     @field_validator("log_format", mode="before")
     @classmethod

@@ -4,7 +4,7 @@ import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import InvalidInputError, NotFoundError
 from app.models.job import Job
 from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
@@ -61,12 +61,17 @@ class JobService:
     async def update(
         self, db: AsyncIOMotorDatabase, user_id: str, job_id: str, payload: JobUpdate
     ) -> JobOut:
-        await self._require(db, user_id, job_id)
+        current = await self._require(db, user_id, job_id)
         fields = self._update_fields(payload)
         if "template_id" in fields and fields["template_id"] is not None:
             await self._require_template(db, user_id, fields["template_id"])
+        # A webhook cannot be enabled without somewhere to send it.
+        enabled = fields.get("webhook_enabled", current.get("webhook_enabled", False))
+        url = fields.get("webhook_url", current.get("webhook_url", ""))
+        if enabled and not url:
+            raise InvalidInputError("A webhook URL is required before enabling the integration.")
         if not fields:
-            return self._to_out(Job(**await self._require(db, user_id, job_id)))
+            return self._to_out(Job(**current))
 
         doc = await self._jobs.update(db, job_id, user_id, fields)
         if doc is None:  # pragma: no cover - the row existed a moment ago
@@ -91,6 +96,15 @@ class JobService:
         # An explicit `null` detaches the template (validated by the caller).
         if "template_id" in raw:
             fields["template_id"] = raw["template_id"]
+        if raw.get("webhook_url") is not None:
+            fields["webhook_url"] = raw["webhook_url"].strip()
+        if raw.get("webhook_provider") is not None:
+            fields["webhook_provider"] = raw["webhook_provider"]
+        # An empty string clears the secret; `None`/omitted leaves it unchanged.
+        if raw.get("webhook_secret") is not None:
+            fields["webhook_secret"] = raw["webhook_secret"]
+        if raw.get("webhook_enabled") is not None:
+            fields["webhook_enabled"] = raw["webhook_enabled"]
         return fields
 
     @staticmethod
@@ -103,6 +117,10 @@ class JobService:
             description=job.description,
             status=job.status,
             template_id=job.template_id,
+            webhook_url=job.webhook_url,
+            webhook_provider=job.webhook_provider,
+            webhook_enabled=job.webhook_enabled,
+            webhook_configured=bool(job.webhook_secret),
             created_at=job.created_at,
             updated_at=job.updated_at,
         )

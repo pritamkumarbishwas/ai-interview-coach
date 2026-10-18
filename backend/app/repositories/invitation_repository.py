@@ -44,6 +44,16 @@ class InvitationRepository:
             db, self.collection_name, invitation_id, user_id, owner_field="created_by"
         )
 
+    async def get_by_id(
+        self, db: AsyncIOMotorDatabase, invitation_id: str
+    ) -> dict | None:
+        """Fetch an invitation regardless of owner (background handlers)."""
+        object_id = to_object_id(invitation_id)
+        if object_id is None:
+            return None
+        doc = await db[self.collection_name].find_one({"_id": object_id})
+        return stringify_id(doc) if doc else None
+
     async def list_for_job(
         self, db: AsyncIOMotorDatabase, job_id: str, limit: int
     ) -> list[dict]:
@@ -144,6 +154,36 @@ class InvitationRepository:
         await db[self.collection_name].delete_one(
             {"_id": object_id, "created_by": user_id}
         )
+
+    async def mark_erased(
+        self, db: AsyncIOMotorDatabase, invitation_id: str, fields: dict
+    ) -> None:
+        """Anonymize an invitation and stamp `erased_at` (idempotent)."""
+        object_id = to_object_id(invitation_id)
+        if object_id is None:
+            return
+        await db[self.collection_name].update_one({"_id": object_id}, {"$set": fields})
+
+    async def list_erasable(
+        self, db: AsyncIOMotorDatabase, cutoff: datetime, limit: int
+    ) -> list[dict]:
+        """Invitations whose session data is past the retention window.
+
+        Completed/expired/revoked rows with no `erased_at` whose completion (or,
+        for rows with no completion timestamp, creation) predates `cutoff`.
+        """
+        query = {
+            "erased_at": None,
+            "status": {"$in": ["completed", "expired", "revoked"]},
+            "$or": [
+                {"completed_at": {"$lt": cutoff}},
+                {"completed_at": None, "created_at": {"$lt": cutoff}},
+            ],
+        }
+        cursor = (
+            db[self.collection_name].find(query).sort("completed_at", 1).limit(limit)
+        )
+        return [stringify_id(doc) async for doc in cursor]
 
 
 invitation_repository = InvitationRepository()

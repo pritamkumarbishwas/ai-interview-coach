@@ -36,6 +36,14 @@ class JobRepository:
     async def find_owned(self, db: AsyncIOMotorDatabase, job_id: str, user_id: str) -> dict | None:
         return await find_owned_document(db, self.collection_name, job_id, user_id)
 
+    async def get_by_id(self, db: AsyncIOMotorDatabase, job_id: str) -> dict | None:
+        """Fetch a job regardless of owner (used by background handlers)."""
+        object_id = to_object_id(job_id)
+        if object_id is None:
+            return None
+        doc = await db[self.collection_name].find_one({"_id": object_id})
+        return stringify_id(doc) if doc else None
+
     async def update(
         self, db: AsyncIOMotorDatabase, job_id: str, user_id: str, fields: dict
     ) -> dict | None:

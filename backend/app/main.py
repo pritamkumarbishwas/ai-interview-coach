@@ -12,12 +12,14 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.api_keys import router as api_keys_router
 from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
 from app.api.dashboard import router as dashboard_router
 from app.api.interviews import router as interviews_router
 from app.api.job_descriptions import router as job_descriptions_router
 from app.api.jobs import router as jobs_router
+from app.api.public import router as public_router
 from app.api.questions import router as questions_router
 from app.api.resumes import router as resumes_router
 from app.api.screening import public_router as screening_public_router
@@ -68,6 +70,9 @@ async def lifespan(app: FastAPI):
 
     # Background jobs are opt-in; the worker polls the persistent queue.
     worker_task: asyncio.Task | None = None
+    from app.core.handlers import register_default_handlers
+
+    register_default_handlers()
     if settings.jobs_enabled:
         from app.core.jobs import job_worker
 
@@ -194,7 +199,7 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
 
@@ -270,6 +275,12 @@ app.include_router(
 )
 app.include_router(
     screening_public_router, prefix=f"{settings.api_prefix}/screening", tags=["screening"]
+)
+app.include_router(
+    api_keys_router, prefix=f"{settings.api_prefix}/api-keys", tags=["api keys"]
+)
+app.include_router(
+    public_router, prefix=f"{settings.api_prefix}/public", tags=["public api"]
 )
 app.include_router(
     interviews_router, prefix=f"{settings.api_prefix}/interviews", tags=["interviews"]

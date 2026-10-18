@@ -1048,15 +1048,18 @@ function AnalyticsPanel({ jobId, reloadSignal }: AnalyticsPanelProps) {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  const onExport = async () => {
+  const runExport = async (
+    fetcher: () => Promise<Blob>,
+    filename: string,
+  ) => {
     setExporting(true);
     setExportError(null);
     try {
-      const blob = await invitationService.downloadJobCandidatesCsv(jobId);
+      const blob = await fetcher();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = "candidates.csv";
+      anchor.download = filename;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
@@ -1097,13 +1100,32 @@ function AnalyticsPanel({ jobId, reloadSignal }: AnalyticsPanelProps) {
     <div className="space-y-5">
       {exportError ? <Alert tone="error">{exportError}</Alert> : null}
 
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
         <Button
           variant="outline"
           size="sm"
           loading={exporting}
           icon={<Download className="h-3.5 w-3.5" aria-hidden />}
-          onClick={() => void onExport()}
+          onClick={() =>
+            void runExport(
+              () => invitationService.downloadJobCandidatesPdf(jobId),
+              "screening-summary.pdf",
+            )
+          }
+        >
+          Export PDF
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          loading={exporting}
+          icon={<Download className="h-3.5 w-3.5" aria-hidden />}
+          onClick={() =>
+            void runExport(
+              () => invitationService.downloadJobCandidatesCsv(jobId),
+              "candidates.csv",
+            )
+          }
         >
           Export CSV
         </Button>

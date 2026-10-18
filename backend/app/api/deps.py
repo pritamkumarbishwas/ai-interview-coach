@@ -1,13 +1,15 @@
 from collections.abc import Awaitable, Callable
 
-from fastapi import Depends
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, Security
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.database import get_db
 from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.core.security import decode_access_token
+from app.models.api_key import ApiKey
 from app.models.user import STAFF_ROLES, User
+from app.repositories.api_key_repository import api_key_repository
 from app.repositories.interview_repository import interview_repository
 from app.repositories.invitation_repository import invitation_repository
 from app.repositories.job_description_repository import job_description_repository
@@ -16,6 +18,7 @@ from app.repositories.resume_repository import resume_repository
 from app.repositories.staff_invitation_repository import staff_invitation_repository
 from app.repositories.template_repository import template_repository
 from app.repositories.user_repository import UserRepository, user_repository
+from app.services.api_key_service import ApiKeyService
 from app.services.audit_service import AuditService, audit_service
 from app.services.auth_service import AuthService
 from app.services.dashboard_service import DashboardService
@@ -24,11 +27,14 @@ from app.services.job_description_service import JobDescriptionService
 from app.services.job_service import JobService
 from app.services.recording_service import RecordingService, recording_service
 from app.services.resume_service import ResumeService
+from app.services.retention_service import RetentionService, retention_service
 from app.services.screening_service import ScreeningService
 from app.services.staff_service import StaffService
 from app.services.template_service import TemplateService
 
 bearer_scheme = HTTPBearer(auto_error=False)
+# Public API auth: a long-lived key sent in `X-API-Key` (never a bearer token).
+api_key_scheme = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 def get_user_repository() -> UserRepository:
@@ -86,6 +92,14 @@ def get_staff_service() -> StaffService:
     return StaffService(user_repository, staff_invitation_repository)
 
 
+def get_api_key_service() -> ApiKeyService:
+    return ApiKeyService(api_key_repository)
+
+
+def get_retention_service() -> RetentionService:
+    return retention_service
+
+
 def get_audit_service() -> AuditService:
     return audit_service
 
@@ -119,3 +133,12 @@ def require_roles(*allowed: str) -> Callable[..., Awaitable[User]]:
 require_staff = require_roles(*STAFF_ROLES)
 require_admin = require_roles("admin")
 require_recruiter = require_roles("admin", "recruiter")
+
+
+async def require_api_key(
+    api_key: str | None = Security(api_key_scheme),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ApiKeyService = Depends(get_api_key_service),
+) -> ApiKey:
+    """Authenticate a public-API request via its `X-API-Key` header."""
+    return await service.authenticate(db, api_key)

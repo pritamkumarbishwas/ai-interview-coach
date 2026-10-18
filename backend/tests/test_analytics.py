@@ -3,6 +3,7 @@
 import csv
 import io
 
+import fitz
 from fastapi.testclient import TestClient
 
 from app.schemas.invitation import ShortlistEntry
@@ -161,6 +162,36 @@ def test_analytics_and_export_access_control(
     job_id = _job_with_rubric(client, staff_headers)
     unknown = {"job_id": "64b000000000000000000000"}
 
-    for path in ("/api/invitations/analytics", "/api/invitations/export"):
+    for path in (
+        "/api/invitations/analytics",
+        "/api/invitations/export",
+        "/api/invitations/export.pdf",
+    ):
         assert client.get(path, headers=auth_headers, params={"job_id": job_id}).status_code == 403
         assert client.get(path, headers=staff_headers, params=unknown).status_code == 404
+
+
+def test_pdf_export_returns_a_pdf(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    _patch_llm(monkeypatch, [])
+    job_id = _job_with_rubric(client, staff_headers)
+    finished = _invite(client, staff_headers, job_id, "done@example.com")
+    _run_candidate_flow(client, _token(finished))
+
+    response = client.get(
+        "/api/invitations/export.pdf", headers=staff_headers, params={"job_id": job_id}
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/pdf"
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "private, no-store"
+    # A real PDF starts with the %PDF- header.
+    assert response.content.startswith(b"%PDF")
+
+    with fitz.open(stream=response.content, filetype="pdf") as doc:
+        text = "\n".join(page.get_text() for page in doc)
+    assert "Screening summary" in text
+    assert "Backend Engineer" in text
+    assert "done@example.com" not in text  # names only, no PII leakage in summary
+    assert "done" in text

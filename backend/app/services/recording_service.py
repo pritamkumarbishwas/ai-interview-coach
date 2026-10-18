@@ -233,6 +233,25 @@ class RecordingService:
                 best_meta = grid_out.metadata or {}
         return best_meta
 
+    async def purge_interview_recordings(
+        self, db: AsyncIOMotorDatabase, interview_id: str
+    ) -> int:
+        """Delete every GridFS chunk for an interview, any kind (erasure).
+
+        Owner-agnostic on purpose: it is only called by the retention/erasure
+        path after access has already been authorized. Returns chunks deleted.
+        """
+        bucket = self._bucket(db)
+        cursor = bucket.find({"filename": {"$regex": f"^{interview_id}:"}})
+        deleted = 0
+        async for grid_out in cursor:
+            try:
+                await bucket.delete(grid_out._id)
+                deleted += 1
+            except Exception as exc:
+                logger.warning("Failed to erase recording chunk: %s", exc)
+        return deleted
+
     async def cleanup_stale_chunks(
         self, db: AsyncIOMotorDatabase, older_than: datetime
     ) -> int:

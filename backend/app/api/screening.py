@@ -11,7 +11,12 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.api.deps import get_screening_service, require_recruiter
+from app.api.deps import (
+    get_retention_service,
+    get_screening_service,
+    require_admin,
+    require_recruiter,
+)
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import rate_limit
@@ -31,7 +36,9 @@ from app.schemas.invitation import (
     ShortlistEntry,
     StartInterviewRequest,
 )
+from app.schemas.retention import ErasureResult, PurgeResult
 from app.schemas.transcript import TranscriptionOut
+from app.services.retention_service import RetentionService
 from app.services.screening_service import ScreeningService
 
 router = APIRouter()
@@ -104,6 +111,26 @@ async def export_job_candidates(
     )
 
 
+@router.get("/export.pdf")
+async def export_job_candidates_pdf(
+    job_id: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+    _: None = Depends(rate_limit("candidate_export")),
+) -> Response:
+    """Download a one-page PDF summary of a job's pipeline (recruiter-gated)."""
+    data = await service.export_pdf(db, recruiter, job_id)
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="screening-summary.pdf"',
+            "Cache-Control": NO_STORE,
+        },
+    )
+
+
 @router.delete("/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_invitation(
     invitation_id: str,
@@ -112,6 +139,28 @@ async def revoke_invitation(
     service: ScreeningService = Depends(get_screening_service),
 ) -> None:
     await service.revoke(db, recruiter, invitation_id)
+
+
+@router.post("/retention/purge", response_model=PurgeResult)
+async def purge_expired_candidates(
+    admin: User = Depends(require_admin),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    retention: RetentionService = Depends(get_retention_service),
+) -> PurgeResult:
+    """Erase session data past the retention window (admin-triggered)."""
+    return PurgeResult(erased=await retention.purge_expired(db))
+
+
+@router.post("/{invitation_id}/erase", response_model=ErasureResult)
+async def erase_candidate_data(
+    invitation_id: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    retention: RetentionService = Depends(get_retention_service),
+    _: None = Depends(rate_limit("candidate_erase")),
+) -> ErasureResult:
+    """Destroy one candidate's interview + recording (right to erasure)."""
+    return await retention.erase_candidate(db, recruiter, invitation_id)
 
 
 @router.post("/{invitation_id}/remind", response_model=InvitationOut)

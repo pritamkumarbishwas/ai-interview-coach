@@ -67,6 +67,14 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
             [("email", 1), ("status", 1)], name="ix_staff_invitations_email_status"
         )
         await db.audit_logs.create_index([("created_at", -1)], name="ix_audit_logs_created")
+        # API keys are looked up by their non-secret prefix; the prefix is
+        # unique because it embeds random bytes.
+        await db.api_keys.create_index(
+            "prefix", unique=True, name="ux_api_keys_prefix"
+        )
+        await db.api_keys.create_index(
+            [("created_by", 1), ("created_at", -1)], name="ix_api_keys_owner_created"
+        )
         # Background job queue: the claim query filters by status and due time.
         await db[settings.jobs_collection_name].create_index(
             [("status", 1), ("run_at", 1)], name="ix_jobs_status_run_at"
