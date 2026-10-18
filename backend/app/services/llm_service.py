@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from typing import TypeVar
@@ -23,8 +24,11 @@ RETRY_BACKOFF_SECONDS = 1.0
 SPEND_CACHE_SECONDS = 30.0
 _spend_cache: tuple[float, float] | None = None
 # Provider rate limits (tokens-per-minute windows) need a much longer pause
-# than transient errors, or the retry just hits the same 429 again.
+# than transient errors, or the retry just hits the same 429 again. The server
+# usually states how long to wait ("try again in 26.6s"); that hint is honoured
+# and only bounded by this ceiling.
 RATE_LIMIT_BACKOFF_SECONDS = 12.0
+MAX_RATE_LIMIT_BACKOFF_SECONDS = 90.0
 # Failures worth trying again: timeouts, rate limits, server errors and
 # unusable model output. Bad keys or bad requests fail identically every time.
 RETRYABLE_STATUS_CODES = {408, 409, 429}
@@ -32,6 +36,10 @@ RETRYABLE_STATUS_CODES = {408, 409, 429}
 
 class LLMConfigurationError(RuntimeError):
     """Raised when the LLM provider is missing or misconfigured."""
+
+
+class EmptyCompletionError(RuntimeError):
+    """Raised when the model returns no content at all (e.g. reasoning only)."""
 
 
 async def _record_usage(provider: str, model: str, response: object) -> None:
@@ -98,14 +106,54 @@ def _provider_rejected_json(error: Exception) -> bool:
 
 
 def _is_retryable(error: Exception) -> bool:
-    if isinstance(error, ValidationError):
-        return True  # the model answered, just not in the shape we asked for
+    if isinstance(error, (ValidationError, EmptyCompletionError)):
+        return True  # the model answered (or not at all), just not usable JSON
     if _provider_rejected_json(error):
         return True  # the model produced invalid JSON; resample
     status_code = getattr(error, "status_code", None)
     if isinstance(status_code, int):
         return status_code in RETRYABLE_STATUS_CODES or status_code >= 500
     return isinstance(error, APIError)  # connection-level failure, no status
+
+
+_RETRY_HINT_PATTERN = re.compile(r"try again in ([\d.]+)\s*s", re.IGNORECASE)
+
+
+def _server_retry_hint(error: Exception) -> float | None:
+    """Seconds the provider explicitly asked us to wait before retrying."""
+    response = getattr(error, "response", None)
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        raw = headers.get("retry-after")
+        if raw:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                pass
+    text = f"{error} {getattr(error, 'body', '')}"
+    match = _RETRY_HINT_PATTERN.search(text)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def _retry_delay(error: Exception | None, attempt: int) -> float:
+    """How long to wait before the next attempt.
+
+    A fixed backoff is provably too short for token-per-minute windows (the
+    server may ask for 27s while we would have waited 12s, re-tripping the same
+    429), so a 429 honours the server's own hint, bounded so a buggy header
+    cannot park the request forever. Other failures back off linearly.
+    """
+    if getattr(error, "status_code", None) == 429:
+        hint = _server_retry_hint(error)
+        if hint is not None:
+            return min(max(hint, 1.0), MAX_RATE_LIMIT_BACKOFF_SECONDS)
+        return RATE_LIMIT_BACKOFF_SECONDS
+    return RETRY_BACKOFF_SECONDS * attempt
 
 
 def _correction_hint(error: Exception) -> str:
@@ -130,6 +178,11 @@ def _correction_hint(error: Exception) -> str:
             f"{detail} Return ONLY valid JSON matching the schema exactly, "
             "including every required key (use an empty list for any section "
             "with no data)."
+        )
+    if isinstance(error, EmptyCompletionError):
+        return (
+            "Your previous response was empty. Return ONLY a single valid JSON "
+            "object matching the schema, with every required key present."
         )
     return (
         "Your previous response was not valid JSON. Return ONLY a single valid "
@@ -234,6 +287,10 @@ class LLMService:
 
                 # Strip markdown code blocks if the LLM includes them
                 raw_json = raw_json.strip()
+                if not raw_json:
+                    raise EmptyCompletionError(
+                        "model returned no content for a JSON-mode request"
+                    )
                 if raw_json.startswith("```json"):
                     raw_json = raw_json[7:]
                 elif raw_json.startswith("```"):
@@ -259,10 +316,7 @@ class LLMService:
                     raise
 
             if attempt < max_retries:
-                if getattr(last_error, "status_code", None) == 429:
-                    await asyncio.sleep(RATE_LIMIT_BACKOFF_SECONDS)
-                else:
-                    await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
+                await asyncio.sleep(_retry_delay(last_error, attempt))
 
         assert last_error is not None
         raise last_error

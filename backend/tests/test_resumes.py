@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from tests.conftest import RESUME_SERVICE_LLM, insert_job_description, make_pdf
 
 JD_SERVICE_LLM = "app.services.job_description_service.llm_service.generate_structured"
+RESUME_SERVICE_TEXT = "app.services.resume_service._extract_text"
 
 
 async def fake_resume_extraction(prompt: str, schema, **kwargs):
@@ -103,6 +104,35 @@ def test_upload_valid_pdf_is_listed_fetched_and_deleted(
 
     assert client.delete(f"/api/resumes/{resume_id}", headers=auth_headers).status_code == 204
     assert client.get(f"/api/resumes/{resume_id}", headers=auth_headers).status_code == 404
+
+
+def test_extraction_prompt_is_bounded_for_large_resumes(
+    client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A long document is truncated so one request fits the provider token budget."""
+    from app.prompts.templates import MAX_PROMPT_CHARS
+
+    captured: dict[str, object] = {}
+
+    async def huge_text(extension: str, file_bytes: bytes) -> str:
+        return "Experience: backend services.\n" * 5000
+
+    async def capturing_extraction(prompt: str, schema, **kwargs):
+        captured["prompt_chars"] = len(prompt)
+        return schema(skills=[], experience=[], projects=[], education=[])
+
+    monkeypatch.setattr(RESUME_SERVICE_TEXT, huge_text)
+    monkeypatch.setattr(RESUME_SERVICE_LLM, capturing_extraction)
+
+    created = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={"file": ("resume.pdf", make_pdf(), "application/pdf")},
+    )
+    assert created.status_code == 201, created.text
+    assert isinstance(captured["prompt_chars"], int)
+    assert captured["prompt_chars"] < MAX_PROMPT_CHARS + 1000
+
 
 
 def test_upload_returns_service_unavailable_when_llm_is_down(

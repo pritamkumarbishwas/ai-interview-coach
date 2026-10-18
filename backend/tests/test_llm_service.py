@@ -145,6 +145,95 @@ async def test_generate_structured_retries_provider_json_rejection() -> None:
     assert mock_client.call_count == 3
 
 
+class RecordingClient:
+    """Raises `errors[i]` (when set), else returns `contents[i]`, per call."""
+
+    def __init__(
+        self,
+        contents: list[str],
+        errors: list[Exception | None] | None = None,
+    ) -> None:
+        self.contents = contents
+        self.errors = errors or [None] * len(contents)
+        self.calls: list[dict] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kwargs):
+        index = len(self.calls)
+        self.calls.append(kwargs)
+        error = self.errors[index] if index < len(self.errors) else None
+        if error is not None:
+            raise error
+        content = self.contents[min(index, len(self.contents) - 1)]
+        message = SimpleNamespace(content=content)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+@pytest.mark.asyncio
+async def test_retry_keeps_json_mode_and_adds_correction_hint() -> None:
+    """After a `json_validate_failed` 400, retry keeps JSON mode with a hint."""
+    service = LLMService()
+    error = FakeStatusError(
+        400,
+        body={"error": {"code": "json_validate_failed", "failed_generation": ""}},
+    )
+    client = RecordingClient(
+        ['{"score": 7, "feedback": "ok"}'],
+        errors=[error],
+    )
+    service.client = client
+
+    result = await service.generate_structured("Evaluate this", MockResponseSchema)
+
+    assert result.score == 7
+    assert len(client.calls) == 2
+    # Both attempts force JSON mode: dropping it made the model return an empty
+    # completion, so the retry instead adds a short correction turn.
+    for call in client.calls:
+        assert call["response_format"] == {"type": "json_object"}
+    assert "JSON" in client.calls[1]["messages"][-1]["content"]
+
+
+def test_retry_delay_honours_server_hint() -> None:
+    """A 429 sleeps as long as the server asked, not a fixed short backoff."""
+    from app.services.llm_service import _retry_delay
+
+    error = FakeStatusError(
+        429,
+        body={"error": {"message": "Please try again in 26.625s."}},
+    )
+    assert _retry_delay(error, 1) == 26.625
+
+    header_error = FakeStatusError(429)
+    header_error.response = SimpleNamespace(headers={"retry-after": "30"})
+    assert _retry_delay(header_error, 1) == 30
+
+    # A hint longer than the ceiling is clamped; a 429 without a hint falls back.
+    capped = FakeStatusError(429, body={"error": {"message": "try again in 999s"}})
+    assert _retry_delay(capped, 1) == llm_module.MAX_RATE_LIMIT_BACKOFF_SECONDS
+    assert _retry_delay(FakeStatusError(429), 1) == llm_module.RATE_LIMIT_BACKOFF_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_empty_completion_is_retried_then_succeeds() -> None:
+    """An empty generation is retried rather than surfaced as a parse error."""
+    service = LLMService()
+    client = RecordingClient(["", '{"score": 5, "feedback": "fine"}'])
+    service.client = client
+
+    result = await service.generate_structured("Evaluate this", MockResponseSchema)
+
+    assert result.score == 5
+    assert len(client.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_empty_completion_error_is_retryable() -> None:
+    from app.services.llm_service import EmptyCompletionError, _is_retryable
+
+    assert _is_retryable(EmptyCompletionError("no output"))
+
+
 @pytest.mark.asyncio
 async def test_correction_hint_names_missing_keys_without_dumping_the_error() -> None:
     """The retry instruction is concise and JSON-oriented (safe for JSON mode)."""
