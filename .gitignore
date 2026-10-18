@@ -28,6 +28,7 @@ data/resumes/
 node_modules/
 .next/
 out/
+*.tsbuildinfo
 npm-debug.log*
 yarn-error.log*
 .pnpm-debug.log*

@@ -60,7 +60,14 @@ class RetentionService:
     async def _require_job_access(
         self, db: AsyncIOMotorDatabase, actor: User, doc: dict
     ) -> None:
-        """Gate an invitation's PII on access to its requisition (see access rules)."""
+        """Gate an invitation's PII on access to its requisition (see access rules).
+
+        The invitation's creator keeps access even if the requisition was since
+        deleted, so candidate data is never permanently stranded from erasure or
+        export.
+        """
+        if doc.get("created_by") == actor.id:
+            return
         job = await find_accessible_job(db, self._jobs, doc.get("job_id", ""), actor)
         if job is None:
             raise NotFoundError("Invitation not found")

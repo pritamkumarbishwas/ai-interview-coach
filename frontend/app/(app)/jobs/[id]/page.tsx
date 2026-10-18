@@ -553,7 +553,11 @@ function JobDetail() {
                 <EmptyState
                   icon={<UserPlus className="h-6 w-6" aria-hidden />}
                   title="No candidates yet"
-                  description="Invite someone above and share the magic link."
+                  description={
+                    canManage
+                      ? "Invite someone above and share the magic link."
+                      : "No candidates have been invited to this role yet."
+                  }
                   className="py-10"
                 />
               )}

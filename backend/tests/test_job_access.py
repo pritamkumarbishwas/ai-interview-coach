@@ -161,3 +161,38 @@ def test_recruiter_can_list_assignable_reviewers(
 
     # Practice candidates cannot enumerate staff.
     assert client.get("/api/staff/reviewers", headers=auth_headers).status_code == 403
+
+
+def test_invitation_survives_job_deletion_for_its_creator(
+    client: TestClient, staff_headers: dict
+) -> None:
+    job = _create_job(client, staff_headers)
+    invitation = client.post(
+        "/api/invitations",
+        headers=staff_headers,
+        json={"job_id": job["id"], "candidate_email": "stranded@example.com"},
+    ).json()
+
+    assert (
+        client.delete(f"/api/jobs/{job['id']}", headers=staff_headers).status_code
+        == 204
+    )
+    assert client.get(f"/api/jobs/{job['id']}", headers=staff_headers).status_code == 404
+
+    # Another recruiter still cannot reach the stranded candidate...
+    other = login(
+        client, make_user(f"other.{uuid4().hex[:10]}@example.com", role="recruiter")
+    )
+    assert (
+        client.post(
+            f"/api/invitations/{invitation['id']}/erase", headers=other
+        ).status_code
+        == 404
+    )
+
+    # ...but the invitation's creator can still erase it (right to erasure).
+    erased = client.post(
+        f"/api/invitations/{invitation['id']}/erase", headers=staff_headers
+    )
+    assert erased.status_code == 200, erased.text
+    assert erased.json()["invitation_id"] == invitation["id"]

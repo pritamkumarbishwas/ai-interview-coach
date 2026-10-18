@@ -109,8 +109,12 @@ function Jobs() {
                     </div>
                     <p className="mt-0.5 truncate text-[13px] text-ink-2">
                       {job.company || "No company set"}
-                      {" · "}
-                      {templateName(job.template_id) ?? "No template attached"}
+                      {canManage ? (
+                        <>
+                          {" · "}
+                          {templateName(job.template_id) ?? "No template attached"}
+                        </>
+                      ) : null}
                       {" · "}
                       {formatDate(job.created_at)}
                     </p>

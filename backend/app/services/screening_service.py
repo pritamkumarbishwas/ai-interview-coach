@@ -487,11 +487,15 @@ class ScreeningService:
         Access is derived from the *job* (owner, admin override, or assigned
         reviewer) rather than the invitation's ``created_by``, so an admin who
         creates an invitation on another recruiter's requisition does not strand
-        it.
+        it. The creator keeps access too, so an invitation whose requisition was
+        since deleted is never permanently orphaned — it can still be revoked,
+        extended, decided, erased, or exported.
         """
         doc = await self._invitations.get_by_id(db, invitation_id)
         if doc is None:
             raise NotFoundError("Invitation not found")
+        if doc.get("created_by") == actor.id:
+            return doc
         await self._require_job(db, actor, doc.get("job_id", ""))
         return doc
 
