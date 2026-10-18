@@ -19,6 +19,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.mailer import EmailMessage, get_mailer
+from app.core.transcription import get_transcriber
 from app.emails.templates import invitation_email, reminder_email
 from app.models.interview import Interview
 from app.models.invitation import ScreeningInvitation
@@ -41,6 +42,7 @@ from app.schemas.invitation import (
 )
 from app.services.audit_service import audit_service
 from app.services.interview_service import InterviewService
+from app.services.recording_service import RecordingService
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,7 @@ class ScreeningService:
         job_descriptions: JobDescriptionRepository,
         interviews: InterviewRepository,
         interview_service: InterviewService,
+        recordings: RecordingService,
     ) -> None:
         self._invitations = invitations
         self._jobs = jobs
@@ -92,6 +95,7 @@ class ScreeningService:
         self._job_descriptions = job_descriptions
         self._interviews = interviews
         self._interview_service = interview_service
+        self._recordings = recordings
 
     # --- Recruiter-facing --------------------------------------------------
     async def create_invitation(
@@ -122,7 +126,7 @@ class ScreeningService:
             difficulty=round_config.difficulty,
             target_questions=round_config.target_questions,
             proctoring_mode=template.config.proctoring_mode if template else "strict",
-            round_minutes=round_config.duration_minutes,
+            round_minutes=round_config.duration_minutes + payload.extra_minutes,
             expires_at=_now() + timedelta(days=ttl_days),
             start_window_start=payload.start_window_start,
             start_window_end=payload.start_window_end,
@@ -156,6 +160,8 @@ class ScreeningService:
                 role=doc.get("role", ""),
                 status=doc["status"],
                 expires_at=doc["expires_at"],
+                round_minutes=doc.get("round_minutes", 30),
+                round_deadline=doc.get("round_deadline"),
                 interview_id=doc.get("interview_id"),
                 created_at=doc["created_at"],
             )
@@ -201,6 +207,42 @@ class ScreeningService:
             target_id=invitation_id,
         )
         return self._to_out(invitation, accept_url=url)
+
+    async def extend(
+        self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str, minutes: int
+    ) -> InvitationOut:
+        """Grant extra time (accommodation) by pushing the round deadline out.
+
+        Works on pending and started invitations; the interview itself is
+        unchanged — the deadline lives on the invitation, so the extension
+        applies to the candidate's remaining time.
+        """
+        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
+        if doc is None:
+            raise NotFoundError("Invitation not found")
+        invitation = ScreeningInvitation(**doc)
+        if invitation.status in ("revoked", "completed"):
+            raise ConflictError("This invitation can no longer be extended.")
+
+        base = invitation.round_deadline or _now()
+        new_deadline = _naive_utc(base) + timedelta(minutes=minutes)
+        await self._invitations.set_deadline(db, invitation_id, new_deadline)
+        # Enforcing an expired deadline flips the status to "expired"; an
+        # extension must reopen the invitation so the candidate can continue.
+        if invitation.status == "expired":
+            restored = "started" if invitation.interview_id else "pending"
+            await self._invitations.set_status(db, invitation_id, restored)
+            invitation.status = restored
+        await audit_service.record(
+            db,
+            action="invitation.extended",
+            actor_id=recruiter.id,
+            target_type="screening_invitation",
+            target_id=invitation_id,
+            metadata={"minutes": minutes},
+        )
+        invitation.round_deadline = new_deadline
+        return self._to_out(invitation)
 
     # --- Candidate-facing (token) ------------------------------------------
     async def session(self, db: AsyncIOMotorDatabase, token: str) -> InvitationSessionOut:
@@ -293,6 +335,66 @@ class ScreeningService:
         if result.status == "completed":
             await self._invitations.set_status(db, invitation.id or "", "completed")
         return result
+
+    async def append_recording(
+        self,
+        db: AsyncIOMotorDatabase,
+        token: str,
+        kind: str,
+        seq: int,
+        data: bytes,
+        content_type: str,
+        finalize: bool,
+    ) -> None:
+        """Store one recorded chunk for the guest's interview (token-addressed).
+
+        Recording is a diagnostic side channel, so the round deadline is not
+        enforced here: a chunk that arrives just as time expires must still be
+        kept rather than discarded.
+        """
+        invitation = await self._require_token(db, token)
+        if not invitation.interview_id:
+            raise ConflictError("The interview has not been started yet.")
+        await self._recordings.append_chunk(
+            db,
+            invitation.guest_user_id,
+            invitation.interview_id,
+            kind,
+            seq,
+            data,
+            content_type,
+            finalize,
+        )
+
+    async def record_event(
+        self,
+        db: AsyncIOMotorDatabase,
+        token: str,
+        event_type: str,
+        details: dict,
+    ) -> None:
+        """Record one advisory integrity signal (camera_off, tab_blur, ...)."""
+        invitation = await self._require_token(db, token)
+        if not invitation.interview_id:
+            raise ConflictError("The interview has not been started yet.")
+        await self._interview_service.record_proctoring_event(
+            db, invitation.guest_user_id, invitation.interview_id, event_type, details
+        )
+
+    async def transcribe(
+        self,
+        db: AsyncIOMotorDatabase,
+        token: str,
+        data: bytes,
+        filename: str,
+        content_type: str,
+    ) -> str:
+        """Server-side STT for one recorded answer (portable alternative to Web Speech)."""
+        invitation = await self._require_token(db, token)
+        if not invitation.interview_id:
+            raise ConflictError("The interview has not been started yet.")
+        await self._enforce_deadline(db, invitation)
+        return await get_transcriber().transcribe(data, filename, content_type)
 
     # --- Helpers -----------------------------------------------------------
     async def _require_token(
@@ -416,6 +518,8 @@ class ScreeningService:
             role=invitation.role,
             status=invitation.status,
             expires_at=invitation.expires_at,
+            round_minutes=invitation.round_minutes,
+            round_deadline=invitation.round_deadline,
             interview_id=invitation.interview_id,
             created_at=invitation.created_at,
             accept_url=accept_url,

@@ -40,3 +40,18 @@ export async function remindInvitation(id: string): Promise<Invitation> {
     throw toApiError(error);
   }
 }
+
+/** Grants extra round time (accessibility accommodation) on an invitation. */
+export async function extendInvitation(
+  id: string,
+  minutes: number,
+): Promise<Invitation> {
+  try {
+    const { data } = await api.post<Invitation>(`/invitations/${id}/extend`, {
+      minutes,
+    });
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}

@@ -30,7 +30,16 @@ const MAX_RECORDING_MS = 25 * 60 * 1000; // hard cap
 const PER_QUESTION_MS = 4 * 60 * 1000; // budget per question
 
 interface UseInterviewRecorderOptions {
-  interviewId: string;
+  /**
+   * Authenticated interview id. Required unless `upload` is supplied (guest
+   * token sessions upload through `/screening/{token}/...` instead).
+   */
+  interviewId?: string;
+  /**
+   * Overrides the default uploader. Guest sessions pass a token-addressed
+   * uploader so the recorder never hits the authenticated endpoint.
+   */
+  upload?: (blob: Blob, seq: number, finalize: boolean) => Promise<void>;
   targetQuestions: number;
   /** Whether the interview is actively in progress (drives auto-start). */
   active: boolean;
@@ -52,6 +61,7 @@ interface UseInterviewRecorderResult {
 
 export function useInterviewRecorder({
   interviewId,
+  upload,
   targetQuestions,
   active,
   cameraStream,
@@ -98,6 +108,13 @@ export function useInterviewRecorder({
 
   const uploadChunk = useCallback(
     async (blob: Blob, seq: number, finalize: boolean) => {
+      if (upload) {
+        await upload(blob, seq, finalize);
+        return;
+      }
+      if (!interviewId) {
+        throw new Error("Recorder needs either an interviewId or an upload handler.");
+      }
       await uploadRecordingChunk(
         interviewId,
         seq,
@@ -106,7 +123,7 @@ export function useInterviewRecorder({
         blob.type || "video/webm",
       );
     },
-    [interviewId],
+    [interviewId, upload],
   );
 
   const handleData = useCallback(

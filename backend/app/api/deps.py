@@ -78,6 +78,7 @@ def get_screening_service() -> ScreeningService:
         job_description_repository,
         interview_repository,
         get_interview_service(),
+        get_recording_service(),
     )
 
 

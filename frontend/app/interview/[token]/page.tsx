@@ -28,7 +28,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { FullScreenLoader } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
-import { MediaProvider } from "@/hooks/use-media";
+import { MediaProvider, useMedia } from "@/hooks/use-media";
+import { useIntegritySignals } from "@/hooks/use-integrity-signals";
+import { useInterviewRecorder } from "@/hooks/use-interview-recorder";
 import { toApiError, type ApiError } from "@/lib/api";
 import { DIFFICULTY_LABELS, TYPE_LABELS } from "@/lib/interview";
 import { PROCTORING_LABELS } from "@/lib/recruiting";
@@ -78,6 +80,53 @@ function ScreeningInterview() {
   const [leaveOpen, setLeaveOpen] = useState(false);
 
   const startedAtRef = useRef<number>(Date.now());
+  const [announcement, setAnnouncement] = useState("");
+  const warnedRef = useRef<Set<number>>(new Set());
+
+  const { cameraStream, screenStream } = useMedia();
+
+  const proctored = session ? session.proctoring_mode !== "off" : false;
+  const total = session?.total_questions ?? 5;
+  const sessionActive = stage === "session" && !completed;
+
+  const uploadChunk = useCallback(
+    (blob: Blob, seq: number, finalize: boolean) =>
+      screening.uploadRecordingChunk(
+        token,
+        seq,
+        blob,
+        finalize,
+        blob.type || "video/webm",
+      ),
+    [token],
+  );
+
+  const recorder = useInterviewRecorder({
+    upload: uploadChunk,
+    targetQuestions: total,
+    active: sessionActive && proctored,
+    cameraStream,
+    screenStream,
+  });
+  const { stopAndUpload } = recorder;
+  const stoppedRef = useRef(false);
+
+  useEffect(() => {
+    if (stage === "done" && !stoppedRef.current) {
+      stoppedRef.current = true;
+      void stopAndUpload();
+    }
+  }, [stage, stopAndUpload]);
+
+  const reportSignal = useCallback(
+    (type: string, details?: Record<string, unknown>) => {
+      if (!proctored) return;
+      void screening.recordEvent(token, type, details);
+    },
+    [proctored, token],
+  );
+
+  useIntegritySignals({ enabled: sessionActive && proctored, onSignal: reportSignal });
 
   const timeLabel = () => formatTime((Date.now() - startedAtRef.current) / 1000);
 
@@ -153,6 +202,26 @@ function ScreeningInterview() {
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, [deadline, completed]);
+
+  // Screen-reader announcements: the current question, then time warnings.
+  useEffect(() => {
+    if (!question) return;
+    setAnnouncement(
+      `Question ${Math.min(questionNumber, total)} of ${total}: ${question.text}`,
+    );
+  }, [question, questionNumber, total]);
+
+  useEffect(() => {
+    if (remaining === null) return;
+    for (const mark of [300, 60]) {
+      if (remaining <= mark && !warnedRef.current.has(mark)) {
+        warnedRef.current.add(mark);
+        setAnnouncement(
+          mark >= 300 ? "Five minutes remaining." : "One minute remaining.",
+        );
+      }
+    }
+  }, [remaining]);
 
   const doStart = async (consentValue: boolean) => {
     setStarting(true);
@@ -237,11 +306,17 @@ function ScreeningInterview() {
                 "This invitation is no longer available."
               : loadError?.message || "We couldn't load your interview."}
         </Alert>
+        {status !== 404 && status !== 409 ? (
+          <div className="mt-5">
+            <Button variant="outline" onClick={() => void load()} loading={loading}>
+              Try again
+            </Button>
+          </div>
+        ) : null}
       </div>
     );
   }
 
-  const proctored = session.proctoring_mode !== "off";
   const canStart = !session.consent_required || consent;
 
   if (stage === "done") {
@@ -416,9 +491,11 @@ function ScreeningInterview() {
   }
 
   // Session
-  const total = session.total_questions;
   return (
     <div className="mx-auto min-h-screen w-full max-w-[1200px] px-4 py-5 lg:px-6 lg:py-8">
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </div>
       <header className="flex flex-wrap items-center gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2.5">
@@ -459,11 +536,23 @@ function ScreeningInterview() {
         </div>
       </header>
 
+      {recorder.error ? (
+        <div className="mt-4">
+          <Alert tone="info">
+            Recording issue: {recorder.error}. You can keep answering — your
+            answers are still being saved.
+          </Alert>
+        </div>
+      ) : null}
+
       <section className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
         <CandidatePanel
           candidateName="You"
-          recording={false}
-          elapsedSec={0}
+          recording={recorder.state === "recording"}
+          elapsedSec={recorder.elapsedSec}
+          onDeviceChange={(kind, on) =>
+            reportSignal(`${kind}_${on ? "on" : "off"}`, { device: kind })
+          }
           onLeave={() => setLeaveOpen(true)}
           className="order-3 lg:order-none"
         />
@@ -503,6 +592,7 @@ function ScreeningInterview() {
             onSubmit={submitAnswer}
             disabled={aiStatus === "thinking" || completed}
             busy={aiStatus === "thinking"}
+            onTranscribe={(audio) => screening.transcribeAnswer(token, audio)}
           />
         </div>
       </section>

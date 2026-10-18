@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   BellRing,
   Check,
+  Clock,
   Copy,
   Save,
   Trash,
@@ -26,8 +27,7 @@ import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
 import { toApiError } from "@/lib/api";
 import { JOB_STATUS_LABELS, JOB_STATUS_TONES, STAFF_ROLES } from "@/lib/recruiting";
-import { formatDate } from "@/lib/utils";
-import * as invitationService from "@/services/invitations";
+import { cx, formatDate } from "@/lib/utils";import * as invitationService from "@/services/invitations";
 import * as jobService from "@/services/jobs";
 import * as templateService from "@/services/templates";
 import type { Invitation, InvitationStatus, JobStatus } from "@/types";
@@ -422,6 +422,7 @@ function InviteForm({ jobId, onInvited }: InviteFormProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [expiresDays, setExpiresDays] = useState("");
+  const [extraMinutes, setExtraMinutes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -439,10 +440,12 @@ function InviteForm({ jobId, onInvited }: InviteFormProps) {
         candidate_email: email.trim(),
         candidate_name: name.trim(),
         expires_in_days: expiresDays ? Number(expiresDays) : undefined,
+        extra_minutes: extraMinutes ? Number(extraMinutes) : undefined,
       });
       setName("");
       setEmail("");
       setExpiresDays("");
+      setExtraMinutes("");
       onInvited(invitation);
     } catch (caught) {
       setError(toApiError(caught).message);
@@ -495,6 +498,22 @@ function InviteForm({ jobId, onInvited }: InviteFormProps) {
             </select>
           </Field>
         </div>
+        <div className="w-40">
+          <Field label="Extra time" htmlFor="invite-extra" optional>
+            <select
+              id="invite-extra"
+              className={inputClasses}
+              value={extraMinutes}
+              onChange={(event) => setExtraMinutes(event.target.value)}
+            >
+              <option value="">None</option>
+              <option value="5">+5 min</option>
+              <option value="10">+10 min</option>
+              <option value="15">+15 min</option>
+              <option value="30">+30 min</option>
+            </select>
+          </Field>
+        </div>
         <Button type="submit" loading={submitting} className="mb-0.5">
           Send invite
         </Button>
@@ -510,8 +529,9 @@ interface InvitationRowProps {
 }
 
 function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
-  const [busy, setBusy] = useState<"remind" | "revoke" | null>(null);
+  const [busy, setBusy] = useState<"remind" | "revoke" | "extend" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [extendMinutes, setExtendMinutes] = useState("15");
 
   const remind = async () => {
     setBusy("remind");
@@ -519,6 +539,22 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
     try {
       const updated = await invitationService.remindInvitation(invitation.id);
       if (updated.accept_url) onLink(updated.accept_url);
+      onChanged();
+    } catch (caught) {
+      setError(toApiError(caught).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const extend = async () => {
+    setBusy("extend");
+    setError(null);
+    try {
+      await invitationService.extendInvitation(
+        invitation.id,
+        Number(extendMinutes),
+      );
       onChanged();
     } catch (caught) {
       setError(toApiError(caught).message);
@@ -541,6 +577,10 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
   };
 
   const revocable = invitation.status === "pending";
+  const extendable =
+    invitation.status === "pending" ||
+    invitation.status === "started" ||
+    invitation.status === "expired";
 
   return (
     <li className="rounded-btn border border-line px-3.5 py-3">
@@ -550,12 +590,37 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
             {invitation.candidate_name || invitation.candidate_email}
           </p>
           <p className="truncate text-xs text-ink-2">
-            {invitation.candidate_email} · expires {formatDate(invitation.expires_at)}
+            {invitation.candidate_email} · {invitation.round_minutes} min · expires{" "}
+            {formatDate(invitation.expires_at)}
           </p>
         </div>
         <Badge tone={INVITATION_TONES[invitation.status]}>
           {INVITATION_LABELS[invitation.status]}
         </Badge>
+        {extendable ? (
+          <div className="flex items-center gap-1.5">
+            <select
+              aria-label="Extra time to add"
+              className={cx(inputClasses, "h-8 w-24 px-2 py-0 text-xs")}
+              value={extendMinutes}
+              onChange={(event) => setExtendMinutes(event.target.value)}
+            >
+              <option value="5">+5 min</option>
+              <option value="10">+10 min</option>
+              <option value="15">+15 min</option>
+              <option value="30">+30 min</option>
+            </select>
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Clock className="h-3.5 w-3.5" aria-hidden />}
+              loading={busy === "extend"}
+              onClick={() => void extend()}
+            >
+              Extend
+            </Button>
+          </div>
+        ) : null}
         <div className="flex items-center gap-1.5">
           {revocable ? (
             <>

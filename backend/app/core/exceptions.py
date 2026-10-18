@@ -58,3 +58,10 @@ class InvalidInputError(AppError):
 class ServiceUnavailableError(AppError):
     def __init__(self, message: str = "Service temporarily unavailable") -> None:
         super().__init__(message, status_code=503, code="service_unavailable")
+
+
+class FeatureUnavailableError(AppError):
+    """A feature that is valid but not configured on this deployment (HTTP 501)."""
+
+    def __init__(self, message: str = "Feature not available") -> None:
+        super().__init__(message, status_code=501, code="feature_unavailable")

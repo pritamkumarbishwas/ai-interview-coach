@@ -335,6 +335,9 @@ class InterviewService:
             raise ConflictError("Interview was already started.")
 
         started = Interview(**doc)
+        if started.proctoring_mode != "off":
+            await self.start_proctoring_session(db, user_id, interview_id)
+            started = await self._require(db, user_id, interview_id)
         question = started.current_question
         assert question is not None  # start() just pushed it
         return CurrentQuestionOut(
@@ -428,6 +431,8 @@ class InterviewService:
 
         updated = Interview(**updated_doc)
         if updated.status == "completed":
+            if updated.proctoring_mode != "off":
+                await self.end_proctoring_session(db, user_id, interview.id or "")
             self._spawn_evaluation_task(db, updated)
         return AnswerResultOut(
             question_id=question_id,
@@ -764,3 +769,35 @@ class InterviewService:
         )
         if not pushed:
             raise NotFoundError("Interview not found")
+
+    async def start_proctoring_session(
+        self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str
+    ) -> None:
+        """Mark the proctoring session active (called when the interview starts).
+
+        No-op for ``proctoring_mode == "off"``; this keeps the practice flow
+        (which never consents) untouched.
+        """
+        interview = await self._require(db, user_id, interview_id)
+        if interview.proctoring_mode == "off":
+            return
+        session = interview.proctoring_session or ProctoringSession()
+        session.started_at = datetime.now(UTC)
+        session.status = "active"
+        await self._interviews.update_proctoring_session(
+            db, interview_id, user_id, session.model_dump()
+        )
+
+    async def end_proctoring_session(
+        self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str
+    ) -> None:
+        """Seal the proctoring session (called when the interview completes)."""
+        interview = await self._require(db, user_id, interview_id)
+        if interview.proctoring_mode == "off" or interview.proctoring_session is None:
+            return
+        session = interview.proctoring_session
+        session.ended_at = datetime.now(UTC)
+        session.status = "completed"
+        await self._interviews.update_proctoring_session(
+            db, interview_id, user_id, session.model_dump()
+        )

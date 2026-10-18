@@ -18,6 +18,14 @@ class InvitationCreate(BaseModel):
     start_window_end: datetime | None = None
     # Overrides the configured default link lifetime (1-30 days).
     expires_in_days: int | None = Field(default=None, ge=1, le=30)
+    # Extra time added to the round (accessibility accommodation), in minutes.
+    extra_minutes: int = Field(default=0, ge=0, le=180)
+
+
+class InvitationExtend(BaseModel):
+    """Grant extra time on an already-started (or pending) invitation."""
+
+    minutes: int = Field(ge=1, le=180)
 
 
 class InvitationOut(BaseModel):
@@ -28,6 +36,8 @@ class InvitationOut(BaseModel):
     role: str
     status: InvitationStatus
     expires_at: datetime
+    round_minutes: int = 30
+    round_deadline: datetime | None = None
     interview_id: str | None = None
     created_at: datetime
     # Returned to the recruiter so the link can be shared if email is not

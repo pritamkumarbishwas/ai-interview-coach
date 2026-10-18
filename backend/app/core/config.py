@@ -11,6 +11,9 @@ SUPPORTED_LLM_PROVIDERS = ("openai", "groq")
 # Only the console provider ships today; real transport providers (e.g. smtp)
 # slot in here without touching call sites.
 SUPPORTED_MAIL_PROVIDERS = ("console",)
+# Server-side speech-to-text ("none" disables it; the browser Web Speech API is
+# then the only transcription path). openai/groq share the LLM provider keys.
+SUPPORTED_TRANSCRIPTION_PROVIDERS = ("none", "openai", "groq")
 
 # <repo>/backend — the directory that owns the `app` package.
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -62,6 +65,10 @@ class Settings(BaseSettings):
     # plus headroom for retries).
     rate_limit_overrides: Annotated[dict[str, tuple[int, int]], NoDecode] = {
         "recording_upload": (60, 60),
+        # Guest (token) screening uploads/transcription: same steady-state
+        # profile as authenticated recording, so the same headroom applies.
+        "screening_recording": (60, 60),
+        "screening_transcribe": (60, 60),
     }
     trust_proxy_headers: bool = False
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "https://resume-builder-rho-woad.vercel.app"]
@@ -71,6 +78,12 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     groq_api_key: str | None = None
     groq_model: str = "openai/gpt-oss-20b"
+
+    # --- Server-side transcription (speech-to-text) ------------------------
+    # "none" disables server STT; candidates then rely on the browser Web
+    # Speech API (Chromium only). openai/groq reuse the LLM API keys above.
+    transcription_provider: str = "none"
+    transcription_model: str = "whisper-1"
 
     rag_enabled: bool = True
     qdrant_url: str = "http://localhost:6333"
@@ -149,6 +162,19 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"MAIL_PROVIDER={value!r} is not supported. "
                 f"Valid options: {', '.join(SUPPORTED_MAIL_PROVIDERS)}."
+            )
+        return provider
+
+    @field_validator("transcription_provider", mode="before")
+    @classmethod
+    def _validate_transcription_provider(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        provider = value.strip().lower()
+        if provider not in SUPPORTED_TRANSCRIPTION_PROVIDERS:
+            raise ValueError(
+                f"TRANSCRIPTION_PROVIDER={value!r} is not supported. "
+                f"Valid options: {', '.join(SUPPORTED_TRANSCRIPTION_PROVIDERS)}."
             )
         return provider
 

@@ -376,6 +376,8 @@ export interface Invitation {
   role: string;
   status: InvitationStatus;
   expires_at: string;
+  round_minutes: number;
+  round_deadline: string | null;
   interview_id: string | null;
   created_at: string;
   accept_url: string | null;
@@ -389,6 +391,8 @@ export interface CreateInvitationInput {
   start_window_start?: string | null;
   start_window_end?: string | null;
   expires_in_days?: number;
+  /** Extra round time for an accessibility accommodation (minutes). */
+  extra_minutes?: number;
 }
 
 /** Pre-check payload for a magic-link candidate (no account, no scores). */

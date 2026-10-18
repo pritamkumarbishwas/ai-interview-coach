@@ -14,6 +14,8 @@ LIST_PROJECTION = {
     "expires_at": 1,
     "interview_id": 1,
     "created_at": 1,
+    "round_minutes": 1,
+    "round_deadline": 1,
 }
 
 
@@ -92,6 +94,20 @@ class InvitationRepository:
         if status == "completed":
             fields["completed_at"] = datetime.now(UTC)
         await db[self.collection_name].update_one({"_id": object_id}, {"$set": fields})
+
+    async def set_deadline(
+        self,
+        db: AsyncIOMotorDatabase,
+        invitation_id: str,
+        round_deadline: datetime,
+    ) -> None:
+        """Move the server-authoritative round deadline (time accommodation)."""
+        object_id = to_object_id(invitation_id)
+        if object_id is None:
+            return
+        await db[self.collection_name].update_one(
+            {"_id": object_id}, {"$set": {"round_deadline": round_deadline}}
+        )
 
     async def delete(self, db: AsyncIOMotorDatabase, invitation_id: str, user_id: str) -> None:
         object_id = to_object_id(invitation_id)
