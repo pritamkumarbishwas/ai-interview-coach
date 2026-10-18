@@ -150,8 +150,8 @@ def test_timeline_endpoint_requires_started_interview(
 def test_recording_download_is_recruiter_only_and_404_when_missing(
     client: TestClient, staff_headers: dict, auth_headers: dict, monkeypatch
 ) -> None:
-    from tests.test_shortlist import _invite
     from tests.test_scorecard import _job_with_rubric, _patch_llm, _run_candidate_flow
+    from tests.test_shortlist import _invite
 
     _patch_llm(monkeypatch, [])
     job_id = _job_with_rubric(client, staff_headers)
