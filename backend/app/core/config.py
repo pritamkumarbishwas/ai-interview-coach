@@ -32,7 +32,6 @@ class Settings(BaseSettings):
     # (staff invitations now; candidate magic links in a later phase).
     frontend_url: str = "http://localhost:5173"
     environment: str = Field(default="development")
-    debug: bool = False
     api_prefix: str = "/api"
     log_level: str = "INFO"
     # auto -> json in production, human-readable text elsewhere.
