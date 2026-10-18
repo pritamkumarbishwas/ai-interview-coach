@@ -31,6 +31,7 @@ from app.models.job import Job
 from app.models.job_description import JobDescription
 from app.models.review import ReviewTimeline
 from app.models.scorecard import Scorecard
+from app.models.shadow import ShadowReport
 from app.models.template import InterviewTemplate
 from app.models.template_config import RoundConfig
 from app.models.user import User
@@ -56,6 +57,7 @@ from app.services.pdf_service import pdf_service
 from app.services.recording_service import RecordingService
 from app.services.review_service import review_service
 from app.services.scorecard_service import scorecard_service
+from app.services.shadow_service import shadow_service
 
 logger = logging.getLogger(__name__)
 
@@ -440,6 +442,17 @@ class ScreeningService:
         """
         entries = await self.shortlist(db, recruiter, job_id)
         return analytics_service.build(job_id, entries)
+
+    async def shadow(
+        self, db: AsyncIOMotorDatabase, recruiter: User, job_id: str
+    ) -> ShadowReport:
+        """AI-vs-human agreement for a job's decided candidates (advisory).
+
+        Reuses the shortlist pipeline (ownership gate, score backfill, cohort
+        normalization) so shadow mode measures exactly the scores a reviewer saw.
+        """
+        entries = await self.shortlist(db, recruiter, job_id)
+        return shadow_service.build(job_id, entries)
 
     async def export_csv(
         self, db: AsyncIOMotorDatabase, recruiter: User, job_id: str

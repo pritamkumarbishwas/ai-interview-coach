@@ -553,6 +553,47 @@ export interface JobAnalytics {
   generated_at: string;
 }
 
+/* ---- Shadow mode (AI vs. human decision agreement) ---------------------- */
+
+/** Which side the advisory AI landed on. */
+export type ShadowSide = "advance" | "review";
+/** Which way a disagreement leans; "ai_lenient" = AI advanced, the panel did not. */
+export type DisagreementDirection = "ai_lenient" | "ai_strict";
+export type BiasVerdict = "aligned" | "lenient" | "strict";
+
+export interface ShadowDisagreement {
+  invitation_id: string;
+  candidate_name: string;
+  ai_recommendation: ShadowSide;
+  human_decision: Decision;
+  overall_score: number;
+  threshold: number;
+  direction: DisagreementDirection;
+  integrity_level: IntegrityLevel | null;
+}
+
+export interface ShadowReport {
+  job_id: string;
+  advisory: boolean;
+  compared: number;
+  agreed: number;
+  agreement_rate: number;
+  agreed_advance: number;
+  agreed_review: number;
+  ai_lenient: number;
+  ai_strict: number;
+  advanced_rate_ai: number;
+  advanced_rate_human: number;
+  leniency_gap: number;
+  bias: BiasVerdict;
+  sufficient_sample: boolean;
+  excluded_no_threshold: number;
+  excluded_awaiting_decision: number;
+  excluded_not_completed: number;
+  disagreements: ShadowDisagreement[];
+  generated_at: string;
+}
+
 /* ---- Staff & roles ------------------------------------------------------ */
 
 export type StaffInvitationStatus = "pending" | "accepted" | "revoked";

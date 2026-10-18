@@ -45,12 +45,14 @@ import { cx, formatDate } from "@/lib/utils";import * as invitationService from 
 import * as jobService from "@/services/jobs";
 import * as templateService from "@/services/templates";
 import type {
+  BiasVerdict,
   Decision,
   IntegrityReport,
   Invitation,
   InvitationStatus,
   JobStatus,
   Scorecard,
+  ShadowReport,
   ShortlistEntry,
 } from "@/types";
 
@@ -438,6 +440,16 @@ function JobDetail() {
           />
           <CardContent>
             <AnalyticsPanel jobId={job.id} reloadSignal={reviewSignal} />
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader
+            title="Shadow mode"
+            description="How often the advisory AI would have matched the decisions your team recorded. AI screening stays advisory — it never changes an outcome."
+          />
+          <CardContent>
+            <ShadowPanel jobId={job.id} reloadSignal={reviewSignal} />
           </CardContent>
         </Card>
       </div>
@@ -1192,6 +1204,171 @@ function AnalyticsPanel({ jobId, reloadSignal }: AnalyticsPanelProps) {
             ))}
         </span>
       </div>
+    </div>
+  );
+}
+
+const BIAS_TONES: Record<BiasVerdict, BadgeTone> = {
+  aligned: "success",
+  lenient: "warning",
+  strict: "warning",
+};
+
+const BIAS_LABELS: Record<BiasVerdict, string> = {
+  aligned: "Aligned with the panel",
+  lenient: "The AI leans lenient",
+  strict: "The AI leans strict",
+};
+
+const DISAGREEMENT_LABELS: Record<string, string> = {
+  ai_lenient: "AI advanced, held by you",
+  ai_strict: "AI held, advanced by you",
+};
+
+interface ShadowPanelProps {
+  jobId: string;
+  reloadSignal: number;
+}
+
+function ShadowPanel({ jobId, reloadSignal }: ShadowPanelProps) {
+  const { data, loading, error } = useAsync<ShadowReport>(
+    () => invitationService.getJobShadow(jobId),
+    [jobId, reloadSignal],
+  );
+
+  if (loading && !data) return <SkeletonList rows={2} />;
+  if (error) return <Alert tone="error">{error.message}</Alert>;
+  if (!data) return null;
+
+  if (data.compared === 0) {
+    const waiting = [
+      data.excluded_awaiting_decision
+        ? `${data.excluded_awaiting_decision} awaiting a decision`
+        : null,
+      data.excluded_no_threshold
+        ? `${data.excluded_no_threshold} without a pass threshold`
+        : null,
+      data.excluded_not_completed
+        ? `${data.excluded_not_completed} not completed`
+        : null,
+    ].filter(Boolean);
+    return (
+      <p className="text-sm text-ink-2">
+        No decided candidates to compare yet
+        {waiting.length ? ` (${waiting.join(", ")})` : ""}. Record decisions on
+        the shortlist to see how the advisory AI lines up with your team.
+      </p>
+    );
+  }
+
+  const quadrants: { label: string; value: number; agree: boolean }[] = [
+    { label: "Both advanced", value: data.agreed_advance, agree: true },
+    { label: "AI advanced, you held", value: data.ai_lenient, agree: false },
+    { label: "AI held, you advanced", value: data.ai_strict, agree: false },
+    { label: "Both held", value: data.agreed_review, agree: true },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-3xl font-semibold tabular-nums text-ink">
+          {data.agreement_rate.toFixed(1)}%
+        </span>
+        <span className="text-sm text-ink-2">
+          agreement across {data.compared} decided candidate
+          {data.compared === 1 ? "" : "s"}
+        </span>
+        <Badge tone={BIAS_TONES[data.bias]}>{BIAS_LABELS[data.bias]}</Badge>
+      </div>
+
+      {!data.sufficient_sample ? (
+        <p className="text-xs text-ink-2">
+          Fewer than 10 decided candidates — read this rate as indicative, not
+          conclusive.
+        </p>
+      ) : null}
+
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: "AI advance rate", value: `${data.advanced_rate_ai}%` },
+          { label: "Human advance rate", value: `${data.advanced_rate_human}%` },
+          { label: "Agreed", value: data.agreed },
+          { label: "Disagreed", value: data.ai_lenient + data.ai_strict },
+        ].map((stat) => (
+          <div
+            key={stat.label}
+            className="rounded-btn border border-line px-3 py-2.5"
+          >
+            <dt className="text-xs text-ink-2">{stat.label}</dt>
+            <dd className="mt-0.5 text-lg font-semibold tabular-nums text-ink">
+              {stat.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <div>
+        <h5 className="text-[13px] font-semibold text-ink">Agreement grid</h5>
+        <ul className="mt-2 grid grid-cols-2 gap-2">
+          {quadrants.map((quadrant) => (
+            <li
+              key={quadrant.label}
+              className="flex items-center justify-between rounded-btn border border-line px-3 py-2 text-xs"
+            >
+              <span className="text-ink-2">{quadrant.label}</span>
+              <span
+                className={cx(
+                  "tabular-nums font-semibold",
+                  quadrant.agree ? "text-ink" : "text-warning",
+                )}
+              >
+                {quadrant.value}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {data.disagreements.length ? (
+        <div>
+          <h5 className="text-[13px] font-semibold text-ink">
+            Disagreements
+          </h5>
+          <ul className="mt-2 divide-y divide-line">
+            {data.disagreements.map((item) => (
+              <li
+                key={item.invitation_id}
+                className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs"
+              >
+                <span className="font-medium text-ink">
+                  {item.candidate_name || "Candidate"}
+                </span>
+                <span className="text-ink-2">
+                  {DISAGREEMENT_LABELS[item.direction] ?? item.direction}
+                </span>
+                <span className="tabular-nums text-ink-2">
+                  score {item.overall_score.toFixed(0)} vs threshold{" "}
+                  {item.threshold.toFixed(0)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="text-xs text-ink-2">
+          Every decided candidate so far matches the advisory recommendation.
+        </p>
+      )}
+
+      <p className="text-xs text-ink-2">
+        Excluded from the comparison:{" "}
+        {[
+          `${data.excluded_awaiting_decision} awaiting a decision`,
+          `${data.excluded_no_threshold} without a threshold`,
+          `${data.excluded_not_completed} not completed`,
+        ].join(", ")}
+        .
+      </p>
     </div>
   );
 }

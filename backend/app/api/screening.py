@@ -25,6 +25,7 @@ from app.models.analytics import JobAnalytics
 from app.models.integrity import IntegrityReport
 from app.models.review import ReviewTimeline
 from app.models.scorecard import Scorecard
+from app.models.shadow import ShadowReport
 from app.models.user import User
 from app.schemas.answer import AnswerInput, AnswerResultOut
 from app.schemas.interview import CurrentQuestionOut, ProctoringEventCreate
@@ -91,6 +92,17 @@ async def get_job_analytics(
 ) -> JobAnalytics:
     """Aggregate funnel + score/integrity distributions for a job (advisory)."""
     return await service.analytics(db, recruiter, job_id)
+
+
+@router.get("/shadow", response_model=ShadowReport)
+async def get_shadow_report(
+    job_id: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+) -> ShadowReport:
+    """How often the advisory AI recommended the decision humans recorded (advisory)."""
+    return await service.shadow(db, recruiter, job_id)
 
 
 @router.get("/export")

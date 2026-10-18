@@ -247,6 +247,18 @@ SSO/SAML, per-role limits, LLM cost tracking, seats/credits billing.
 Shadow mode (AI vs human panel agreement), explain-answer assist, cheating ML,
 sentiment/communication analytics, role simulations, model routing/cost
 optimization, code execution sandbox, whiteboard.
+> **Status: first slice shipped — shadow mode.**
+> `GET /api/invitations/shadow?job_id=` compares the advisory AI recommendation
+> (`meets_threshold`) against the human decision actually recorded (`advance` vs
+> `hold`/`decline`) and reports the agreement rate, a 2×2 agreement grid, each
+> side's advance rate and a leniency verdict — plus the bounded disagreements
+> and the exclusion counts (no threshold / no decision / not completed), so a
+> small sample is never read as agreement. It is a pure function over the
+> shortlist pipeline (`app/services/shadow_service.py`, `app/models/shadow.py`)
+> and is surfaced in the job page's "Shadow mode" panel. Remaining: explain-answer
+> assist, sentiment/communication analytics, model routing/cost optimization,
+> role simulations, and the not-yet-started big-ticket items (cheating ML, code
+> execution sandbox, whiteboard).
 
 ---
 

@@ -7,6 +7,7 @@ import type {
   JobAnalytics,
   ReviewTimeline,
   Scorecard,
+  ShadowReport,
   ShortlistEntry,
 } from "@/types";
 
@@ -106,6 +107,18 @@ export async function getJobShortlist(jobId: string): Promise<ShortlistEntry[]> 
 export async function getJobAnalytics(jobId: string): Promise<JobAnalytics> {
   try {
     const { data } = await api.get<JobAnalytics>("/invitations/analytics", {
+      params: { job_id: jobId },
+    });
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/** How often the advisory AI matched the decisions humans recorded (advisory). */
+export async function getJobShadow(jobId: string): Promise<ShadowReport> {
+  try {
+    const { data } = await api.get<ShadowReport>("/invitations/shadow", {
       params: { job_id: jobId },
     });
     return data;
