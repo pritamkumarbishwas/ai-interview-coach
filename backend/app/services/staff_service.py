@@ -8,7 +8,12 @@ from datetime import UTC, datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.config import settings
-from app.core.exceptions import ConflictError, InvalidInputError, NotFoundError
+from app.core.exceptions import (
+    ConflictError,
+    InvalidInputError,
+    NotFoundError,
+    QuotaExceededError,
+)
 from app.core.mailer import EmailMessage, get_mailer
 from app.core.security import create_access_token, hash_password
 from app.emails.templates import staff_invitation_email
@@ -57,6 +62,15 @@ class StaffService:
         email = payload.email.strip().lower()
         if await self._users.get_by_email(db, email) is not None:
             raise ConflictError("A user with this email already exists")
+
+        # Seat cap: refuse to provision beyond the configured number of accounts.
+        if settings.max_staff_seats:
+            seats_used = await self._users.count_staff(db)
+            pending = await self._invitations.count_pending(db)
+            if seats_used + pending >= settings.max_staff_seats:
+                raise QuotaExceededError(
+                    f"All {settings.max_staff_seats} staff seats are in use"
+                )
 
         # A fresh invite supersedes any earlier pending one for the same email.
         await self._invitations.revoke_pending_for_email(db, email)

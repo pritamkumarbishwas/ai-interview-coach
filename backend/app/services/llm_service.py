@@ -1,13 +1,17 @@
 import asyncio
 import json
 import logging
+import time
+from datetime import UTC, datetime
 from typing import TypeVar
 
 from openai import APIError, AsyncOpenAI
 from pydantic import BaseModel, ValidationError
 
 from app.core.config import settings
-from app.core.usage import record_llm_usage
+from app.core.exceptions import QuotaExceededError
+from app.core.usage import record_llm_usage, usage_db
+from app.repositories.llm_usage_repository import llm_usage_repository
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +19,9 @@ T = TypeVar("T", bound=BaseModel)
 
 REQUEST_TIMEOUT_SECONDS = 90.0
 RETRY_BACKOFF_SECONDS = 1.0
+# Cached monthly spend for the budget check (seconds).
+SPEND_CACHE_SECONDS = 30.0
+_spend_cache: tuple[float, float] | None = None
 # Provider rate limits (tokens-per-minute windows) need a much longer pause
 # than transient errors, or the retry just hits the same 429 again.
 RATE_LIMIT_BACKOFF_SECONDS = 12.0
@@ -40,6 +47,39 @@ async def _record_usage(provider: str, model: str, response: object) -> None:
         await record_llm_usage(provider, model, prompt_tokens, completion_tokens)
     except Exception as exc:  # never let metering break a completion
         logger.warning("LLM usage recording failed: %s", exc)
+
+
+async def _enforce_budget() -> None:
+    """Block LLM calls once the month's estimated spend passes the ceiling.
+
+    Best-effort and cheap: the spend rollup is cached for a short window so a
+    burst of calls does not hammer the aggregation. With no budget configured,
+    no usage context, or tracking disabled, this is a no-op.
+    """
+    budget = settings.monthly_llm_budget_usd
+    if budget <= 0 or not settings.llm_cost_tracking_enabled:
+        return
+    db = usage_db.get()
+    if db is None:
+        return
+    global _spend_cache
+    now = time.monotonic()
+    if _spend_cache is None or now - _spend_cache[1] > SPEND_CACHE_SECONDS:
+        since = datetime.now(UTC).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None
+        )
+        try:
+            totals = await llm_usage_repository.totals(db, since)
+        except Exception as exc:  # a metering failure must not block AI
+            logger.warning("Could not read LLM spend for budget check: %s", exc)
+            return
+        _spend_cache = (totals["cost_usd"], now)
+    spend = _spend_cache[0]
+    if spend >= budget:
+        raise QuotaExceededError(
+            f"Monthly AI budget of ${budget:.2f} is exhausted "
+            f"(estimated spend ${spend:.2f})"
+        )
 
 
 def _is_retryable(error: Exception) -> bool:
@@ -106,6 +146,9 @@ class LLMService:
         API failures are retried with a short backoff. After `max_retries`
         attempts the last error is raised.
         """
+        # Refuse to spend past the configured monthly ceiling (Phase 9).
+        await _enforce_budget()
+
         system_prompt = (
             "You are a helpful AI assistant. You must respond in ONLY valid JSON.\n"
             f"The JSON must strictly match the following schema:\n"

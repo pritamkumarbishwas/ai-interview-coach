@@ -1,5 +1,7 @@
 """Staff invitations, acceptance, role changes, bootstrap admin, and audit trail."""
 
+from uuid import uuid4
+
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
@@ -153,3 +155,20 @@ def test_bootstrap_admin_is_created_and_idempotent(monkeypatch) -> None:
     _with_mongo(run)
     assert seen["doc"]["role"] == "admin"
     assert seen["doc"]["name"] == "Seed Admin"
+
+
+def test_seat_cap_blocks_new_invites(
+    client: TestClient, admin_headers: dict, monkeypatch
+) -> None:
+    payload = {"email": f"seat.{uuid4().hex[:8]}@example.com", "role": "reviewer"}
+
+    # The inviting admin already occupies a seat, so a cap of 1 is full.
+    monkeypatch.setattr(settings, "max_staff_seats", 1)
+    blocked = client.post("/api/staff/invitations", headers=admin_headers, json=payload)
+    assert blocked.status_code == 429, blocked.text
+    assert blocked.json()["code"] == "quota_exceeded"
+
+    # 0 means unlimited again.
+    monkeypatch.setattr(settings, "max_staff_seats", 0)
+    ok = client.post("/api/staff/invitations", headers=admin_headers, json=payload)
+    assert ok.status_code == 201, ok.text

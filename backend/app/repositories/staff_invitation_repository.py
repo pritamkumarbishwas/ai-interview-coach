@@ -23,6 +23,10 @@ class StaffInvitationRepository:
         result = await db[self.collection_name].insert_one(doc)
         return str(result.inserted_id)
 
+    async def count_pending(self, db: AsyncIOMotorDatabase) -> int:
+        """Pending (unaccepted, unrevoked) invitations; they count against seats."""
+        return await db[self.collection_name].count_documents({"status": "pending"})
+
     async def list_recent(self, db: AsyncIOMotorDatabase, limit: int) -> list[dict]:
         cursor = (
             db[self.collection_name]

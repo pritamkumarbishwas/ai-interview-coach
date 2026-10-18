@@ -60,6 +60,13 @@ class ServiceUnavailableError(AppError):
         super().__init__(message, status_code=503, code="service_unavailable")
 
 
+class QuotaExceededError(AppError):
+    """A per-role quota, seat, or spend cap has been reached (HTTP 429)."""
+
+    def __init__(self, message: str = "Quota exceeded") -> None:
+        super().__init__(message, status_code=429, code="quota_exceeded")
+
+
 class FeatureUnavailableError(AppError):
     """A feature that is valid but not configured on this deployment (HTTP 501)."""
 

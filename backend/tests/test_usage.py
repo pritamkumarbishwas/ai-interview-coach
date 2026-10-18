@@ -3,10 +3,13 @@
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
+import app.services.llm_service as llm_service_module
 from app.core.config import settings
+from app.core.exceptions import QuotaExceededError
 from app.core.pricing import estimate_cost
 from app.services.llm_service import LLMService
 from tests.conftest import _with_mongo
@@ -148,3 +151,43 @@ def test_usage_summary_endpoint_rolls_up_llm_cost(
         "gpt-4o",
         "openai/gpt-oss-20b",
     ]
+
+
+def test_monthly_budget_blocks_further_llm_calls(monkeypatch) -> None:
+    _run(lambda db: db.llm_usage.delete_many({}))
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+
+    async def seed(db) -> None:
+        await db.llm_usage.insert_one(
+            {
+                "provider": "openai",
+                "model": "gpt-4o",
+                "prompt_tokens": 2_000_000,
+                "completion_tokens": 0,
+                "total_tokens": 2_000_000,
+                "cost_usd": 5.0,
+                "actor_id": None,
+                "created_at": now,
+            }
+        )
+
+    _run(seed)
+
+    monkeypatch.setattr(settings, "monthly_llm_budget_usd", 1.0)
+    monkeypatch.setattr(llm_service_module, "_spend_cache", None)
+
+    service = LLMService()
+    service.client = MockClient()  # must never be reached
+
+    async def call(db) -> None:
+        from app.core.usage import usage_db
+
+        token = usage_db.set(db)
+        try:
+            with pytest.raises(QuotaExceededError):
+                await service.generate_structured("Evaluate", Score)
+        finally:
+            usage_db.reset(token)
+
+    _run(call)

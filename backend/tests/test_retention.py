@@ -97,6 +97,50 @@ def test_erase_candidate_destroys_session_data(
     assert _run(lambda db: db.job_descriptions.count_documents({"_id": ObjectId(jd_id)})) == 0
 
 
+def test_export_candidate_data_returns_held_personal_data(
+    client: TestClient, staff_headers: dict, auth_headers: dict, monkeypatch
+) -> None:
+    invitation_id, interview_id = _completed_candidate(
+        client, staff_headers, monkeypatch, "access@example.com"
+    )
+    _add_recording_chunk(interview_id)
+    url = f"/api/invitations/{invitation_id}/data"
+
+    # Right-of-access data is recruiter-gated.
+    assert client.get(url, headers=auth_headers).status_code == 403
+
+    response = client.get(url, headers=staff_headers)
+    assert response.status_code == 200, response.text
+    assert "no-store" in response.headers["cache-control"]
+    body = response.json()
+
+    assert body["invitation"]["candidate_email"] == "access@example.com"
+    # The magic-link secret and guest identity are never exported.
+    assert "token_hash" not in response.text
+    assert "guest_user_id" not in response.text
+
+    assert body["interview"]["id"] == interview_id
+    assert len(body["interview"]["answers"]) >= 1
+    assert body["interview"]["answers"][0]["text"]
+    assert [row["kind"] for row in body["recordings"]] and body["recordings"][0][
+        "chunk_count"
+    ] >= 1
+
+    # Exporting is audited but changes nothing.
+    assert _snapshot(invitation_id, interview_id)["interviews"] == 1
+
+
+def test_export_candidate_data_missing_invitation_is_404(
+    client: TestClient, staff_headers: dict
+) -> None:
+    assert (
+        client.get(
+            "/api/invitations/64b000000000000000000000/data", headers=staff_headers
+        ).status_code
+        == 404
+    )
+
+
 async def _jd_for(db, interview_id: str) -> str:
     doc = await db.interviews.find_one({"_id": ObjectId(interview_id)})
     return doc["jd_id"]

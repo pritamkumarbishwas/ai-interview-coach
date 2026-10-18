@@ -15,6 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.api_keys import router as api_keys_router
 from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
+from app.api.compliance import router as compliance_router
 from app.api.dashboard import router as dashboard_router
 from app.api.interviews import router as interviews_router
 from app.api.job_descriptions import router as job_descriptions_router
@@ -304,6 +305,9 @@ app.include_router(
     public_router, prefix=f"{settings.api_prefix}/public", tags=["public api"]
 )
 app.include_router(usage_router, prefix=f"{settings.api_prefix}/usage", tags=["usage"])
+app.include_router(
+    compliance_router, prefix=f"{settings.api_prefix}/compliance", tags=["compliance"]
+)
 app.include_router(
     interviews_router, prefix=f"{settings.api_prefix}/interviews", tags=["interviews"]
 )

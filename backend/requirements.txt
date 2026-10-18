@@ -7,6 +7,7 @@ motor>=3.6,<4.0
 pymongo>=4.9,<5.0
 pyjwt>=2.9,<3.0
 argon2-cffi>=23.1,<27.0
+cryptography>=44,<51
 python-multipart>=0.0.9,<1.0
 python-dotenv>=1.0,<2.0
 openai>=1.40,<4.0

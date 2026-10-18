@@ -15,6 +15,7 @@ from app.api.deps import (
     get_retention_service,
     get_screening_service,
     require_admin,
+    require_quota,
     require_recruiter,
 )
 from app.core.config import settings
@@ -36,6 +37,7 @@ from app.schemas.invitation import (
     ShortlistEntry,
     StartInterviewRequest,
 )
+from app.schemas.privacy import CandidateDataExport
 from app.schemas.retention import ErasureResult, PurgeResult
 from app.schemas.transcript import TranscriptionOut
 from app.services.retention_service import RetentionService
@@ -50,7 +52,7 @@ NO_STORE = "private, no-store"
 @router.post("", response_model=InvitationOut, status_code=status.HTTP_201_CREATED)
 async def create_invitation(
     payload: InvitationCreate,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_quota("invitations", require_recruiter)),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
     _: None = Depends(rate_limit("invitation_create")),
@@ -94,7 +96,7 @@ async def get_job_analytics(
 @router.get("/export")
 async def export_job_candidates(
     job_id: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_quota("exports", require_recruiter)),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
     _: None = Depends(rate_limit("candidate_export")),
@@ -114,7 +116,7 @@ async def export_job_candidates(
 @router.get("/export.pdf")
 async def export_job_candidates_pdf(
     job_id: str,
-    recruiter: User = Depends(require_recruiter),
+    recruiter: User = Depends(require_quota("exports", require_recruiter)),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
     _: None = Depends(rate_limit("candidate_export")),
@@ -161,6 +163,21 @@ async def erase_candidate_data(
 ) -> ErasureResult:
     """Destroy one candidate's interview + recording (right to erasure)."""
     return await retention.erase_candidate(db, recruiter, invitation_id)
+
+
+@router.get("/{invitation_id}/data", response_model=CandidateDataExport)
+async def export_candidate_data(
+    invitation_id: str,
+    response: Response,
+    recruiter: User = Depends(require_quota("exports", require_recruiter)),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    retention: RetentionService = Depends(get_retention_service),
+    _: None = Depends(rate_limit("candidate_export")),
+) -> CandidateDataExport:
+    """Export all data held about a candidate (right of access, GDPR Art. 15)."""
+    response.headers["Cache-Control"] = NO_STORE
+    data = await retention.export_candidate_data(db, recruiter, invitation_id)
+    return CandidateDataExport.model_validate(data)
 
 
 @router.post("/{invitation_id}/remind", response_model=InvitationOut)

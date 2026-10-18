@@ -147,6 +147,32 @@ class Settings(BaseSettings):
     retention_purge_enabled: bool = False
     retention_batch_limit: int = Field(default=100, ge=1, le=1000)
 
+    # --- Per-role limits (Phase 9) -----------------------------------------
+    # Daily quotas per role and action, as "role:action=max" pairs separated by
+    # semicolons, e.g. ROLE_LIMITS="recruiter:invitations=200;reviewer:exports=20".
+    # `*` matches any role/action; a missing or 0 limit means unlimited.
+    role_limits: Annotated[dict[str, int], NoDecode] = {}
+
+    # --- Encryption at rest (Phase 9) --------------------------------------
+    # Key used to encrypt app-managed secrets at rest (the ATS webhook signing
+    # secret). Accepts a Fernet key (urlsafe base64) or any passphrase, which is
+    # stretched to a key. When unset, secrets are stored in plaintext — only
+    # acceptable for local development.
+    field_encryption_key: str | None = None
+
+    # --- Deployment residency & data-processing (Phase 9) ------------------
+    # Region label surfaced in the compliance record (e.g. "eu-central-1"); the
+    # platform makes no cross-region calls of its own besides the LLM provider.
+    deployment_region: str = ""
+    dpa_contact_email: str = ""
+
+    # --- Seats & spend caps (Phase 9) --------------------------------------
+    # Maximum provisioned staff accounts (0 = unlimited).
+    max_staff_seats: int = Field(default=0, ge=0)
+    # Monthly LLM spend ceiling in USD, checked before each LLM call
+    # (0 = unlimited). Exceeding it blocks AI-backed endpoints.
+    monthly_llm_budget_usd: float = Field(default=0.0, ge=0.0)
+
     @field_validator("log_format", mode="before")
     @classmethod
     def _validate_log_format(cls, value: object) -> object:
@@ -246,6 +272,34 @@ class Settings(BaseSettings):
                     f"RATE_LIMIT_OVERRIDES entry {pair!r} has non-integer limits"
                 ) from exc
         return overrides
+
+    @field_validator("role_limits", mode="before")
+    @classmethod
+    def _parse_role_limits(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return {}
+        limits: dict[str, int] = {}
+        for pair in text.split(";"):
+            pair = pair.strip()
+            if not pair:
+                continue
+            if "=" not in pair:
+                raise ValueError(
+                    "ROLE_LIMITS entries must look like 'role:action=max_per_day'"
+                )
+            key, _, raw_max = pair.partition("=")
+            if ":" not in key:
+                raise ValueError(f"ROLE_LIMITS entry {pair!r} must name a 'role:action'")
+            try:
+                limits[key.strip().lower()] = int(raw_max)
+            except ValueError as exc:
+                raise ValueError(
+                    f"ROLE_LIMITS entry {pair!r} has a non-integer limit"
+                ) from exc
+        return limits
 
     @field_validator("llm_pricing_overrides", mode="before")
     @classmethod

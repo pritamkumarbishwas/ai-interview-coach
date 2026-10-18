@@ -1,8 +1,9 @@
-"""LLM cost visibility (Phase 9).
+"""LLM cost visibility and per-role quota status (Phase 9).
 
-Admin-only aggregate of recorded token usage and estimated spend. The per-call
-records themselves are never exposed (they carry actor ids); this is a rollup
-for budgeting.
+The cost summary is an admin-only aggregate of recorded token usage and
+estimated spend; the per-call records themselves are never exposed (they carry
+actor ids). The quota view lets any staff member see their own daily usage
+against the limits configured for their role.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -10,11 +11,13 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.api.deps import require_admin
+from app.api.deps import get_quota_service, require_admin, require_staff
 from app.core.database import get_db
 from app.models.user import User
 from app.repositories.llm_usage_repository import llm_usage_repository
+from app.schemas.quota import QuotaSummary
 from app.schemas.usage import ModelUsage, UsageSummary
+from app.services.quota_service import QuotaService
 
 router = APIRouter()
 
@@ -37,3 +40,14 @@ async def get_usage_summary(
         cost_usd=totals["cost_usd"],
         by_model=[ModelUsage(**row) for row in by_model],
     )
+
+
+@router.get("/quotas", response_model=QuotaSummary)
+async def get_my_quotas(
+    user: User = Depends(require_staff),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: QuotaService = Depends(get_quota_service),
+) -> QuotaSummary:
+    """The caller's daily usage against each per-role quota."""
+    return await service.usage(db, user)
+

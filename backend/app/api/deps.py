@@ -26,6 +26,7 @@ from app.services.dashboard_service import DashboardService
 from app.services.interview_service import InterviewService
 from app.services.job_description_service import JobDescriptionService
 from app.services.job_service import JobService
+from app.services.quota_service import QuotaService, quota_service
 from app.services.recording_service import RecordingService, recording_service
 from app.services.resume_service import ResumeService
 from app.services.retention_service import RetentionService, retention_service
@@ -136,6 +137,31 @@ def require_roles(*allowed: str) -> Callable[..., Awaitable[User]]:
 require_staff = require_roles(*STAFF_ROLES)
 require_admin = require_roles("admin")
 require_recruiter = require_roles("admin", "recruiter")
+
+
+def get_quota_service() -> QuotaService:
+    return quota_service
+
+
+def require_quota(
+    action: str, guard: Callable[..., Awaitable[User]] = require_staff
+) -> Callable[..., Awaitable[User]]:
+    """Dependency factory: run `guard`, then consume one unit of `action`.
+
+    Raises 429 when the caller's role has exhausted its daily quota. The guarded
+    user is returned so the handler can reuse it (``get_current_user`` is cached
+    per request).
+    """
+
+    async def dependency(
+        user: User = Depends(guard),
+        db: AsyncIOMotorDatabase = Depends(get_db),
+        service: QuotaService = Depends(get_quota_service),
+    ) -> User:
+        await service.enforce(db, user, action)
+        return user
+
+    return dependency
 
 
 async def require_api_key(

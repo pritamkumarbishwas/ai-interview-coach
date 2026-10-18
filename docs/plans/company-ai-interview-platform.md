@@ -231,12 +231,17 @@ Funnel/pass-rate/score distributions, CSV/PDF export, ATS webhooks
 ### Phase 9 — Compliance, security & billing (L) — *post-MVP*
 Retention & erasure, DPA/data-processing, region residency, encryption at rest,
 SSO/SAML, per-role limits, LLM cost tracking, seats/credits billing.
-> **Status: retention & erasure and LLM cost tracking done**
-> (`POST /api/invitations/{id}/erase`,
-> `POST /api/invitations/retention/purge`, `retention.purge` job;
-> per-call `llm_usage` records + admin `GET /api/usage/summary`). Remaining:
-> DPA, residency, encryption at rest, SSO/SAML, per-role limits, seats/credits
-> billing.
+> **Status: all code-implementable items done.**
+> Retention & erasure (`POST /api/invitations/{id}/erase`,
+> `POST /api/invitations/retention/purge`, `retention.purge` job); data-subject
+> access (`GET /api/invitations/{id}/data`); encryption at rest for app-managed
+> secrets (`FIELD_ENCRYPTION_KEY`); per-role daily quotas (`ROLE_LIMITS`,
+> 429 + `GET /api/usage/quotas`); seats and spend caps (`MAX_STAFF_SEATS`,
+> `MONTHLY_LLM_BUDGET_USD`); LLM cost tracking (`llm_usage` +
+> `GET /api/usage/summary`); residency/data-processing record
+> (`GET /api/compliance` + `docs/compliance/data-processing.md`). Remaining and
+> **deliberately not stubbed**: SSO/SAML (needs an external IdP) and paid billing
+> (needs a payment vendor); see the data-processing doc's "Not yet shipped".
 
 ### Phase 10 — Advanced AI (ongoing) — *post-MVP*
 Shadow mode (AI vs human panel agreement), explain-answer assist, cheating ML,

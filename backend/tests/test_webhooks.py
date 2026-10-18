@@ -5,6 +5,7 @@ import hmac
 import json
 from datetime import UTC, datetime
 
+from bson import ObjectId
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
@@ -244,3 +245,57 @@ def test_delivery_payload_is_signed_with_the_job_secret() -> None:
     assert sign("s3cr3t", body, "1700000000") == hmac.new(
         b"s3cr3t", b"1700000000." + body, hashlib.sha256
     ).hexdigest()
+
+
+def test_webhook_secret_is_encrypted_at_rest(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    """With a key configured, the signing secret is ciphertext on disk."""
+    import app.core.handlers as handlers_module
+    import app.services.job_service as job_service_module
+    from app.core.crypto import PREFIX, FieldCipher
+
+    cipher = FieldCipher("unit-test-key")
+    monkeypatch.setattr(job_service_module, "field_cipher", cipher)
+    monkeypatch.setattr(handlers_module, "field_cipher", cipher)
+
+    _patch_llm(monkeypatch, [])
+    job_id = _job_with_rubric(client, staff_headers)
+    invitation = _invite(client, staff_headers, job_id, "sealed@example.com")
+    _run_candidate_flow(client, _token(invitation))
+
+    client.patch(
+        f"/api/jobs/{job_id}",
+        headers=staff_headers,
+        json={
+            "webhook_url": "https://partner.example/hook",
+            "webhook_provider": "generic",
+            "webhook_secret": "s3cr3t",
+            "webhook_enabled": True,
+        },
+    )
+
+    stored = _run(lambda db: db.jobs.find_one({"_id": ObjectId(job_id)}))
+    assert stored["webhook_secret"].startswith(PREFIX)
+    assert "s3cr3t" not in stored["webhook_secret"]
+
+    client.patch(
+        f"/api/invitations/{invitation['id']}/decision",
+        headers=staff_headers,
+        json={"decision": "advance"},
+    )
+
+    sent: list[WebhookDelivery] = []
+
+    async def fake_send(delivery: WebhookDelivery) -> int:
+        sent.append(delivery)
+        return 200
+
+    monkeypatch.setattr("app.core.webhooks.webhook_sender.send", fake_send)
+
+    worker = JobWorker(JobQueue())
+    register_default_handlers(worker)
+    assert _run(lambda db: worker.run_once(db)) is True
+
+    # The delivered signature uses the decrypted secret, not the ciphertext.
+    assert sent and sent[0].secret == "s3cr3t"

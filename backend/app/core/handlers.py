@@ -10,6 +10,7 @@ import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.core.crypto import field_cipher
 from app.core.jobs import JobWorker, job_worker
 from app.core.webhooks import ATS_WEBHOOK_JOB, WebhookDelivery, webhook_sender
 from app.integrations import ats
@@ -74,7 +75,7 @@ async def deliver_ats_webhook(db: AsyncIOMotorDatabase, payload: dict) -> None:
             url=job.webhook_url,
             event=ats.CANDIDATE_DECIDED,
             payload=body,
-            secret=job.webhook_secret,
+            secret=field_cipher.decrypt(job.webhook_secret),
         )
     )
     logger.info(

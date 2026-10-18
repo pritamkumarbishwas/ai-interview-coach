@@ -83,6 +83,16 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         await db.llm_usage.create_index(
             [("created_at", -1)], name="ix_llm_usage_created"
         )
+        # Per-role quota counters: one document per actor/action/day. The unique
+        # index makes the increment upsert safe; the TTL index retires old days.
+        await db.quota_usage.create_index(
+            [("actor_id", 1), ("action", 1), ("window_start", 1)],
+            unique=True,
+            name="ux_quota_actor_action_window",
+        )
+        await db.quota_usage.create_index(
+            "window_start", expireAfterSeconds=90 * 24 * 3600, name="ttl_quota_window"
+        )
     except Exception as exc:
         # If this fails, the application cannot safely enforce uniqueness constraints.
         logger.critical("Could not create MongoDB indexes: %s", exc)

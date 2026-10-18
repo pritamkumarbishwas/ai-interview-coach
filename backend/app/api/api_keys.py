@@ -8,7 +8,7 @@ creation, and never again.
 from fastapi import APIRouter, Depends, Query, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.api.deps import get_api_key_service, require_recruiter
+from app.api.deps import get_api_key_service, require_quota, require_recruiter
 from app.core.database import get_db
 from app.core.rate_limit import rate_limit
 from app.models.user import User
@@ -21,7 +21,7 @@ router = APIRouter()
 @router.post("", response_model=ApiKeyCreated, status_code=status.HTTP_201_CREATED)
 async def create_api_key(
     payload: ApiKeyCreate,
-    current_user: User = Depends(require_recruiter),
+    current_user: User = Depends(require_quota("api_keys", require_recruiter)),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ApiKeyService = Depends(get_api_key_service),
     _: None = Depends(rate_limit("api_key_create")),

@@ -14,6 +14,7 @@ import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 
+from fastapi.encoders import jsonable_encoder
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.config import settings
@@ -124,6 +125,43 @@ class RetentionService:
             erased_at=now,
         )
 
+    async def export_candidate_data(
+        self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
+    ) -> dict:
+        """Return everything stored about one candidate (right of access).
+
+        Produces a JSON-safe document covering the invitation, the interview
+        session (questions, answers, evaluations, report, proctoring) and a
+        manifest of the stored recordings. The magic-link ``token_hash`` and the
+        guest identity are deliberately excluded.
+        """
+        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
+        if doc is None:
+            raise NotFoundError("Invitation not found")
+
+        payload: dict = {
+            "generated_at": datetime.now(UTC),
+            "invitation": _invitation_data(doc),
+            "interview": None,
+            "recordings": [],
+        }
+        interview_id = doc.get("interview_id")
+        if interview_id:
+            raw = await self._interviews.get_by_id(db, interview_id)
+            if raw:
+                payload["interview"] = _interview_data(raw)
+                manifest = await self._recordings.recording_manifest(db, interview_id)
+                payload["recordings"] = _recording_data(manifest, raw.get("recordings") or {})
+
+        await audit_service.record(
+            db,
+            action="candidate.data_exported",
+            actor_id=recruiter.id,
+            target_type="screening_invitation",
+            target_id=invitation_id,
+        )
+        return jsonable_encoder(payload)
+
     async def purge_expired(
         self, db: AsyncIOMotorDatabase, now: datetime | None = None
     ) -> int:
@@ -151,6 +189,75 @@ class RetentionService:
                 metadata={"erased": erased},
             )
         return erased
+
+
+def _invitation_data(doc: dict) -> dict:
+    """Project the candidate-facing fields of an invitation (no token hash)."""
+    return {
+        "id": str(doc.get("_id", "")),
+        "job_id": doc.get("job_id", ""),
+        "template_id": doc.get("template_id"),
+        "candidate_name": doc.get("candidate_name", ""),
+        "candidate_email": doc.get("candidate_email", ""),
+        "role": doc.get("role", ""),
+        "company": doc.get("company", ""),
+        "interview_type": doc.get("interview_type", ""),
+        "difficulty": doc.get("difficulty", ""),
+        "target_questions": doc.get("target_questions", 0),
+        "proctoring_mode": doc.get("proctoring_mode", ""),
+        "round_minutes": doc.get("round_minutes", 0),
+        "rubric": doc.get("rubric", []),
+        "pass_threshold": doc.get("pass_threshold", 0.0),
+        "status": doc.get("status", ""),
+        "decision": doc.get("decision", ""),
+        "decision_note": doc.get("decision_note", ""),
+        "expires_at": doc.get("expires_at"),
+        "created_at": doc.get("created_at"),
+        "started_at": doc.get("started_at"),
+        "completed_at": doc.get("completed_at"),
+        "erased_at": doc.get("erased_at"),
+    }
+
+
+def _interview_data(raw: dict) -> dict:
+    """Project the candidate's interview session (answers, report, proctoring)."""
+    return {
+        "id": str(raw.get("_id", "")),
+        "status": raw.get("status", ""),
+        "type": raw.get("type", ""),
+        "difficulty": raw.get("difficulty", ""),
+        "proctoring_mode": raw.get("proctoring_mode", ""),
+        "rubric": raw.get("rubric", []),
+        "pass_threshold": raw.get("pass_threshold", 0.0),
+        "target_questions": raw.get("target_questions", 0),
+        "created_at": raw.get("created_at"),
+        "started_at": raw.get("started_at"),
+        "completed_at": raw.get("completed_at"),
+        "questions": raw.get("questions", []),
+        "answers": raw.get("answers", []),
+        "report": raw.get("report"),
+        "proctoring_session": raw.get("proctoring_session"),
+    }
+
+
+def _recording_data(manifest: list[dict], doc_meta: dict) -> list[dict]:
+    """A manifest of stored recordings (metadata only, never the bytes)."""
+    rows = []
+    for entry in manifest:
+        kind = entry["kind"]
+        meta = doc_meta.get(kind, {})
+        rows.append(
+            {
+                "kind": kind,
+                "file_id": meta.get("file_id", entry.get("file_id", "")),
+                "content_type": meta.get("content_type", entry.get("content_type", "")),
+                "size_bytes": entry.get("size_bytes", 0),
+                "chunk_count": entry.get("chunk_count", 0),
+                "finalized": meta.get("finalized", False),
+                "created_at": meta.get("created_at", entry.get("created_at")),
+            }
+        )
+    return rows
 
 
 def _anonymized_email(invitation_id: str) -> str:

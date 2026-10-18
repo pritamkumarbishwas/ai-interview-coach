@@ -69,6 +69,12 @@ class UserRepository:
         )
         return [_to_user(doc) async for doc in cursor]
 
+    async def count_staff(self, db: AsyncIOMotorDatabase) -> int:
+        """Number of provisioned staff accounts (admin/recruiter/reviewer)."""
+        return await db[self.collection_name].count_documents(
+            {"role": {"$in": list(STAFF_ROLES)}}
+        )
+
     async def update_role(
         self, db: AsyncIOMotorDatabase, user_id: str, role: Role
     ) -> User | None:

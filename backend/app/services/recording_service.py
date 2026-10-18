@@ -252,6 +252,38 @@ class RecordingService:
                 logger.warning("Failed to erase recording chunk: %s", exc)
         return deleted
 
+    async def recording_manifest(
+        self, db: AsyncIOMotorDatabase, interview_id: str
+    ) -> list[dict]:
+        """Summarize the GridFS chunks stored for an interview, by kind.
+
+        Owner-agnostic (metadata only, no bytes): used by the right-of-access
+        export to report what recordings exist without reading them out.
+        """
+        bucket = self._bucket(db)
+        cursor = bucket.find({"filename": {"$regex": f"^{interview_id}:"}})
+        kinds: dict[str, dict] = {}
+        async for grid_out in cursor:
+            name = grid_out.filename or ""
+            kind = name.split(":", 1)[1].split("#", 1)[0] if ":" in name else name
+            row = kinds.setdefault(
+                kind,
+                {
+                    "kind": kind,
+                    "file_id": str(grid_out._id),
+                    "content_type": "video/webm",
+                    "size_bytes": 0,
+                    "chunk_count": 0,
+                    "created_at": grid_out.upload_date,
+                },
+            )
+            row["size_bytes"] += grid_out.length or 0
+            row["chunk_count"] += 1
+            metadata = grid_out.metadata or {}
+            if metadata.get("content_type"):
+                row["content_type"] = metadata["content_type"]
+        return list(kinds.values())
+
     async def cleanup_stale_chunks(
         self, db: AsyncIOMotorDatabase, older_than: datetime
     ) -> int:

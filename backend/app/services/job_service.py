@@ -4,6 +4,7 @@ import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.core.crypto import field_cipher
 from app.core.exceptions import InvalidInputError, NotFoundError
 from app.models.job import Job
 from app.repositories.job_repository import JobRepository
@@ -102,7 +103,8 @@ class JobService:
             fields["webhook_provider"] = raw["webhook_provider"]
         # An empty string clears the secret; `None`/omitted leaves it unchanged.
         if raw.get("webhook_secret") is not None:
-            fields["webhook_secret"] = raw["webhook_secret"]
+            # The signing secret is encrypted at rest (Phase 9).
+            fields["webhook_secret"] = field_cipher.encrypt(raw["webhook_secret"])
         if raw.get("webhook_enabled") is not None:
             fields["webhook_enabled"] = raw["webhook_enabled"]
         return fields
