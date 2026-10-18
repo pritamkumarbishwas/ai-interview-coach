@@ -1,6 +1,6 @@
 """Phase 7: transcript ↔ recording timeline and recorder-anchored offsets."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -173,9 +173,9 @@ def test_recording_download_and_anchored_timeline_end_to_end(
         _invite,
         _job_with_template,
         _patch_llm,
-        _start,
         _token,
     )
+    from tests.test_screening_phase4 import _start
 
     _patch_llm(monkeypatch)
     job_id = _job_with_template(client, staff_headers, proctoring_mode="strict", target=2)
