@@ -3,6 +3,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.timeutil import ISTDateTime
+
 
 class JobDescription(BaseModel):
     id: str | None = Field(default=None, alias="_id")
@@ -12,6 +14,6 @@ class JobDescription(BaseModel):
     raw_text: str
     snippet: str = ""
     structured_data: dict[str, Any]
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))
 
     model_config = ConfigDict(populate_by_name=True)

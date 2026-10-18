@@ -1,6 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from app.core.timeutil import ISTDateTime
 
 
 class AuditLogOut(BaseModel):
@@ -10,4 +10,4 @@ class AuditLogOut(BaseModel):
     target_type: str = ""
     target_id: str = ""
     metadata: dict = {}
-    created_at: datetime
+    created_at: ISTDateTime

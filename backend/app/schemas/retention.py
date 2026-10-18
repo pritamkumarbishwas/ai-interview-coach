@@ -1,6 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from app.core.timeutil import ISTDateTime
 
 
 class ErasureResult(BaseModel):
@@ -9,7 +9,7 @@ class ErasureResult(BaseModel):
     invitation_id: str
     interview_deleted: bool
     recording_chunks_deleted: int
-    erased_at: datetime
+    erased_at: ISTDateTime
 
 
 class PurgeResult(BaseModel):

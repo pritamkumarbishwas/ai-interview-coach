@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.core.timeutil import ISTDateTime
 from app.models.user import Role
 
 
@@ -12,7 +11,7 @@ class UserOut(BaseModel):
     name: str
     email: EmailStr
     role: Role = "candidate"
-    created_at: datetime
+    created_at: ISTDateTime
 
 
 class _NameValidationMixin(BaseModel):

@@ -1,6 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
+
+from app.core.timeutil import ISTDateTime
 
 
 class DashboardInterview(BaseModel):
@@ -14,7 +14,7 @@ class DashboardInterview(BaseModel):
     target_questions: int
     answered_count: int
     score: float | None = None
-    created_at: datetime
+    created_at: ISTDateTime
 
 
 class DashboardStats(BaseModel):

@@ -46,8 +46,8 @@ def test_invitation_email_mentions_expiry_when_provided() -> None:
         interview_url="https://example.com/i/abc123",
         expires_at=expires,
     )
-    assert "2026-01-02 15:30 UTC" in content.text
-    assert "2026-01-02 15:30 UTC" in content.html
+    assert "2026-01-02 21:00 IST" in content.text
+    assert "2026-01-02 21:00 IST" in content.html
 
 
 def test_invitation_email_without_name_still_greets() -> None:
@@ -71,7 +71,7 @@ def test_reminder_email_renders_link_and_deadline() -> None:
     )
     assert "Reminder" in content.subject
     assert "https://example.com/i/xyz" in content.text
-    assert "2026-03-04 09:00 UTC" in content.text
+    assert "2026-03-04 14:30 IST" in content.text
 
 
 def test_resolved_sender_uses_settings_defaults() -> None:

@@ -68,6 +68,16 @@ transactional email provider. Both are listed at `GET /api/compliance`.
 not copied across regions by the platform itself; the AI provider's own region
 handling applies to inference requests.
 
+## Time zone handling
+
+Instants are stored and compared in **UTC** (MongoDB stores UTC; naive values
+returned by the driver are treated as UTC). Everything a person reads is
+rendered in **Asia/Kolkata (IST, +05:30, no DST)** — email and PDF copy,
+structured log lines, API JSON responses (`backend/app/core/timeutil.py`), and
+the frontend (`frontend/lib/datetime.ts`). This is a display convention only: it
+does not change what is stored, how long it is retained, or any retention/erasure
+deadline.
+
 ## Not yet shipped
 
 - **SSO/SAML:** authentication is email + password today. Federated sign-in

@@ -32,6 +32,7 @@ import { MediaProvider, useMedia } from "@/hooks/use-media";
 import { useIntegritySignals } from "@/hooks/use-integrity-signals";
 import { useInterviewRecorder } from "@/hooks/use-interview-recorder";
 import { toApiError, type ApiError } from "@/lib/api";
+import { formatDate, parseApiDate } from "@/lib/datetime";
 import { DIFFICULTY_LABELS, TYPE_LABELS } from "@/lib/interview";
 import { PROCTORING_LABELS } from "@/lib/recruiting";
 import * as screening from "@/services/screening";
@@ -158,7 +159,8 @@ function ScreeningInterview() {
         return;
       }
       if (current.round_deadline) {
-        setDeadline(new Date(current.round_deadline).getTime());
+        const deadline = parseApiDate(current.round_deadline);
+        if (deadline) setDeadline(deadline.getTime());
       }
       if (current.started) {
         // Resuming a started interview — pick up the unanswered question.
@@ -236,7 +238,8 @@ function ScreeningInterview() {
       const refreshed = await screening.getSession(token);
       setSession(refreshed);
       if (refreshed.round_deadline) {
-        setDeadline(new Date(refreshed.round_deadline).getTime());
+        const deadline = parseApiDate(refreshed.round_deadline);
+        if (deadline) setDeadline(deadline.getTime());
       }
       setStage("session");
     } catch (caught) {
@@ -481,7 +484,7 @@ function ScreeningInterview() {
                   ))}
                 </ul>
                 <p className="mt-6 text-xs text-ink-3">
-                  This link expires {new Date(session.expires_at).toLocaleDateString()}.
+                  This link expires {formatDate(session.expires_at)}.
                 </p>
               </aside>
             </div>

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 import fitz
 
+from app.core.timeutil import to_ist
 from app.models.analytics import JobAnalytics
 from app.schemas.invitation import ShortlistEntry
 
@@ -68,7 +69,7 @@ class PdfService:
         analytics: JobAnalytics,
         entries: list[ShortlistEntry],
     ) -> list[str]:
-        generated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        generated = to_ist(datetime.now(UTC)).strftime("%Y-%m-%d %H:%M IST")
         lines = [
             f"Screening summary — {job_title or 'Untitled role'}",
             f"{company}".strip() or "—",

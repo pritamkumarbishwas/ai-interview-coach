@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.timeutil import ISTDateTime
 from app.models.job import JobStatus, WebhookProvider
 
 
@@ -53,8 +52,8 @@ class JobOut(BaseModel):
     webhook_enabled: bool = False
     # Whether a signing secret is stored; the secret itself is never returned.
     webhook_configured: bool = False
-    created_at: datetime
-    updated_at: datetime
+    created_at: ISTDateTime
+    updated_at: ISTDateTime
 
 
 class JobSummary(BaseModel):
@@ -65,4 +64,4 @@ class JobSummary(BaseModel):
     company: str
     status: JobStatus
     template_id: str | None = None
-    created_at: datetime
+    created_at: ISTDateTime

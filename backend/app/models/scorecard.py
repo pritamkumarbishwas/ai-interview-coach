@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
+
 STRONG_COMPETENCY_MIN = 70.0
 CONCERN_COMPETENCY_MAX = 50.0
 
@@ -46,7 +48,7 @@ class Scorecard(BaseModel):
     meets_threshold: bool = False
     # Scores are rubric-only; the candidate's identity is never an input.
     identity_hidden: bool = True
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    generated_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 def recommendation_for(overall: float, threshold: float) -> tuple[str, bool]:

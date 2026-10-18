@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, EmailStr, Field
 
+from app.core.timeutil import ISTDateTime
 from app.models.staff_invitation import StaffInvitationStatus
 from app.models.user import Role
 
@@ -24,8 +23,8 @@ class InvitationOut(BaseModel):
     email: EmailStr
     role: Role
     status: StaffInvitationStatus
-    expires_at: datetime
-    created_at: datetime
+    expires_at: ISTDateTime
+    created_at: ISTDateTime
     # Returned to the inviting admin so the link can be copied if email is not
     # configured; never derivable from the stored record.
     accept_url: str | None = None

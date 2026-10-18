@@ -53,7 +53,7 @@ class TestJsonFormatter:
         assert payload["level"] == "INFO"
         assert payload["logger"] == "app.test"
         assert payload["message"] == "GET /api/health -> 200 (1.5ms)"
-        assert payload["ts"].endswith("+00:00")  # UTC ISO timestamp
+        assert payload["ts"].endswith("+05:30")  # IST ISO timestamp
         assert payload["request_id"] == "abc123"
         assert payload["status_code"] == 200
         assert payload["duration_ms"] == 1.5

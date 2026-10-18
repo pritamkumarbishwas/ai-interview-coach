@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.timeutil import ISTDateTime
 from app.models.answer import Answer
 from app.models.report import Report
 
@@ -37,20 +38,20 @@ class Question(BaseModel):
     # Topic label (e.g. "database indexing") so later questions can avoid
     # repeats; empty on documents written before topic tracking existed.
     topic: str = ""
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ProctoringEvent(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     type: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))
     details: dict = Field(default_factory=dict)
 
 
 class ProctoringSession(BaseModel):
-    consent_given_at: datetime | None = None
-    started_at: datetime | None = None
-    ended_at: datetime | None = None
+    consent_given_at: ISTDateTime | None = None
+    started_at: ISTDateTime | None = None
+    ended_at: ISTDateTime | None = None
     status: ProctoringStatus = "pending"
     events: list[ProctoringEvent] = Field(default_factory=list)
 
@@ -66,9 +67,9 @@ class RecordingMeta(BaseModel):
     # Wall-clock instant the client's MediaRecorder started, i.e. media time 0.
     # Reported by the client on the first chunk so a reviewer's jump-to-moment
     # can map an answer's timestamp onto a position in the recording.
-    capture_started_at: datetime | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    capture_started_at: ISTDateTime | None = None
+    created_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class Interview(BaseModel):
@@ -99,9 +100,9 @@ class Interview(BaseModel):
     # Session recording (keyed by kind: "camera" composite); bytes live in GridFS.
     recordings: dict[str, RecordingMeta] = Field(default_factory=dict)
     current_question_id: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
+    created_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))
+    started_at: ISTDateTime | None = None
+    completed_at: ISTDateTime | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 

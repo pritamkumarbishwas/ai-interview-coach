@@ -1,6 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
+
+from app.core.timeutil import ISTDateTime
 
 
 class QuotaStatus(BaseModel):
@@ -13,5 +13,5 @@ class QuotaStatus(BaseModel):
 
 class QuotaSummary(BaseModel):
     role: str
-    window_start: datetime
+    window_start: ISTDateTime
     quotas: list[QuotaStatus] = Field(default_factory=list)

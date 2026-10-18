@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
 from app.models.api_key import ApiKeyRole
 
 
@@ -17,10 +16,10 @@ class ApiKeyOut(BaseModel):
     name: str
     prefix: str
     role: ApiKeyRole
-    created_at: datetime
-    last_used_at: datetime | None = None
-    revoked_at: datetime | None = None
-    expires_at: datetime | None = None
+    created_at: ISTDateTime
+    last_used_at: ISTDateTime | None = None
+    revoked_at: ISTDateTime | None = None
+    expires_at: ISTDateTime | None = None
 
 
 class ApiKeyCreated(ApiKeyOut):

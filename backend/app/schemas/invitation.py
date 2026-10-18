@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
+from app.core.timeutil import ISTDateTime
 from app.models.interview import Difficulty, InterviewType, ProctoringMode
 from app.models.invitation import Decision, InvitationStatus
 
@@ -42,14 +43,14 @@ class InvitationOut(BaseModel):
     candidate_email: EmailStr
     role: str
     status: InvitationStatus
-    expires_at: datetime
+    expires_at: ISTDateTime
     round_minutes: int = 30
-    round_deadline: datetime | None = None
+    round_deadline: ISTDateTime | None = None
     interview_id: str | None = None
     decision: Decision = "pending"
     decision_note: str = ""
-    decided_at: datetime | None = None
-    created_at: datetime
+    decided_at: ISTDateTime | None = None
+    created_at: ISTDateTime
     # Returned to the recruiter so the link can be shared if email is not
     # configured; never derivable from the stored record.
     accept_url: str | None = None
@@ -76,7 +77,7 @@ class ShortlistEntry(BaseModel):
     competency_count: int = 0
     integrity_level: str | None = None
     integrity_score: int | None = None
-    generated_at: datetime | None = None
+    generated_at: ISTDateTime | None = None
 
 
 class InvitationSessionOut(BaseModel):
@@ -92,10 +93,10 @@ class InvitationSessionOut(BaseModel):
     # Total number of questions the candidate will be asked (progress display).
     total_questions: int = 5
     started: bool
-    expires_at: datetime
-    start_window_start: datetime | None = None
-    start_window_end: datetime | None = None
-    round_deadline: datetime | None = None
+    expires_at: ISTDateTime
+    start_window_start: ISTDateTime | None = None
+    start_window_end: ISTDateTime | None = None
+    round_deadline: ISTDateTime | None = None
 
 
 class StartInterviewRequest(BaseModel):

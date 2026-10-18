@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
+
 
 class ScoreBucket(BaseModel):
     """One band of the advisory score distribution (e.g. "80-89")."""
@@ -40,4 +42,4 @@ class JobAnalytics(BaseModel):
     decisions: dict[str, int] = Field(default_factory=dict)
     # Advisory integrity level counts across completed sessions.
     integrity_distribution: dict[str, int] = Field(default_factory=dict)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    generated_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))

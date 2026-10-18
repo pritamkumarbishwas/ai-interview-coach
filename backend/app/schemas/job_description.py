@@ -1,6 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
+
+from app.core.timeutil import ISTDateTime
 
 
 class JobDescriptionStructuredData(BaseModel):
@@ -29,4 +29,4 @@ class JobDescriptionSummary(BaseModel):
     title: str
     company: str
     snippet: str = ""
-    created_at: datetime
+    created_at: ISTDateTime

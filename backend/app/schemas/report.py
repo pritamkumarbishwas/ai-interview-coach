@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
 from app.models.report import PreparationStep
 
 
@@ -25,4 +24,4 @@ class ReportOut(BaseModel):
     topics_to_study: list[str]
     narrative: str
     preparation_plan: list[PreparationStep]
-    generated_at: datetime
+    generated_at: ISTDateTime

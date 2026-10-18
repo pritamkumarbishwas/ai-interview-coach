@@ -15,6 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
 from app.models.invitation import Decision
 
 # The side the advisory AI lands on, in terms a reviewer recognises.
@@ -74,4 +75,4 @@ class ShadowReport(BaseModel):
     excluded_not_completed: int = 0
     # Bounded, most-notable-first, so the reviewer can inspect the disagreements.
     disagreements: list[ShadowDisagreement] = Field(default_factory=list)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    generated_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))

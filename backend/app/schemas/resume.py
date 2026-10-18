@@ -1,6 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
+
+from app.core.timeutil import ISTDateTime
 
 
 class Experience(BaseModel):
@@ -58,4 +58,4 @@ class ResumeSummary(BaseModel):
     filename: str
     file_size: int = 0
     skills: list[str] = Field(default_factory=list)
-    created_at: datetime
+    created_at: ISTDateTime

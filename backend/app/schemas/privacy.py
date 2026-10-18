@@ -5,9 +5,9 @@ about one screening candidate as a machine-readable JSON document. Internal
 secrets (the magic-link `token_hash`, the guest identity) are never included.
 """
 
-from datetime import datetime
-
 from pydantic import BaseModel, Field
+
+from app.core.timeutil import ISTDateTime
 
 
 class InvitationData(BaseModel):
@@ -28,11 +28,11 @@ class InvitationData(BaseModel):
     status: str
     decision: str
     decision_note: str
-    expires_at: datetime | None = None
-    created_at: datetime | None = None
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
-    erased_at: datetime | None = None
+    expires_at: ISTDateTime | None = None
+    created_at: ISTDateTime | None = None
+    started_at: ISTDateTime | None = None
+    completed_at: ISTDateTime | None = None
+    erased_at: ISTDateTime | None = None
 
 
 class RecordingData(BaseModel):
@@ -42,7 +42,7 @@ class RecordingData(BaseModel):
     size_bytes: int
     chunk_count: int
     finalized: bool
-    created_at: datetime | None = None
+    created_at: ISTDateTime | None = None
 
 
 class InterviewData(BaseModel):
@@ -56,9 +56,9 @@ class InterviewData(BaseModel):
     rubric: list[str] = Field(default_factory=list)
     pass_threshold: float
     target_questions: int
-    created_at: datetime | None = None
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
+    created_at: ISTDateTime | None = None
+    started_at: ISTDateTime | None = None
+    completed_at: ISTDateTime | None = None
     questions: list[dict] = Field(default_factory=list)
     answers: list[dict] = Field(default_factory=list)
     report: dict | None = None
@@ -68,7 +68,7 @@ class InterviewData(BaseModel):
 class CandidateDataExport(BaseModel):
     """Everything stored about one candidate, for a right-of-access request."""
 
-    generated_at: datetime
+    generated_at: ISTDateTime
     invitation: InvitationData
     interview: InterviewData | None = None
     recordings: list[RecordingData] = Field(default_factory=list)

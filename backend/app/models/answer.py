@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
+
 # How the evaluator wants the interview to proceed after this answer.
 NextStep = Literal["follow_up", "harder", "easier", "new_topic"]
 
@@ -43,7 +45,7 @@ class Evaluation(BaseModel):
     # Verbatim quotes lifted from the candidate's answer that justify the
     # score — the evidence a reviewer can jump back to.
     evidence: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class Answer(BaseModel):
@@ -53,4 +55,4 @@ class Answer(BaseModel):
     # Deferred evaluation: written as `None` when the answer is recorded, then
     # filled in by the end-of-exam background task (or the report backfill).
     evaluation: Evaluation | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))

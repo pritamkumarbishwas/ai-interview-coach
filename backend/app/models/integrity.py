@@ -12,6 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
+
 IntegrityLevel = Literal["low", "moderate", "elevated", "high"]
 
 
@@ -27,7 +29,7 @@ class IntegritySignalCount(BaseModel):
 class IntegrityMoment(BaseModel):
     """One flagged moment on the timeline (jump-to-moment evidence)."""
 
-    at: datetime | None = None
+    at: ISTDateTime | None = None
     type: str
     label: str
     severity: int
@@ -41,11 +43,11 @@ class IntegrityReport(BaseModel):
     # 0-100 confidence that the session ran clean; higher is cleaner.
     score: int = Field(ge=0, le=100)
     level: IntegrityLevel
-    session_started_at: datetime | None = None
-    session_ended_at: datetime | None = None
+    session_started_at: ISTDateTime | None = None
+    session_ended_at: ISTDateTime | None = None
     recording_available: bool = False
     recording_size_bytes: int = 0
     signals: list[IntegritySignalCount] = Field(default_factory=list)
     moments: list[IntegrityMoment] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    generated_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))

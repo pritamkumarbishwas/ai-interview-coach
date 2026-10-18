@@ -9,12 +9,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 
+from app.core.timeutil import to_ist
+
 
 @dataclass(frozen=True)
 class EmailContent:
     subject: str
     text: str
     html: str
+
+
+def _ist(value: datetime) -> str:
+    """Render an expiry time in IST (Asia/Kolkata) for human-facing copy."""
+    return to_ist(value).strftime("%Y-%m-%d %H:%M IST")
 
 
 def _row(label: str, value: str) -> str:
@@ -59,7 +66,7 @@ def invitation_email(
     """Invite a candidate to a first-round AI interview (magic link)."""
     greeting = candidate_name.strip() or "there"
     expiry_line = (
-        f"\nThis link expires on {expires_at:%Y-%m-%d %H:%M UTC}."
+        f"\nThis link expires on {_ist(expires_at)}."
         if expires_at is not None
         else ""
     )
@@ -73,7 +80,7 @@ def invitation_email(
     )
     rows = _row("Role", role) + _row("Company", company)
     if expires_at is not None:
-        rows += _row("Expires", f"{expires_at:%Y-%m-%d %H:%M UTC}")
+        rows += _row("Expires", _ist(expires_at))
     html = _shell(
         "Your interview invitation",
         f"Hi {greeting}, {company} has invited you to a first-round interview for "
@@ -100,7 +107,7 @@ def staff_invitation_email(
     """Invite an internal teammate to join with a staff role."""
     greeting = invitee_name.strip() or "there"
     expiry_line = (
-        f"\nThis invitation expires on {expires_at:%Y-%m-%d %H:%M UTC}."
+        f"\nThis invitation expires on {_ist(expires_at)}."
         if expires_at is not None
         else ""
     )
@@ -114,7 +121,7 @@ def staff_invitation_email(
     )
     rows = _row("Role", role) + _row("Company", company)
     if expires_at is not None:
-        rows += _row("Expires", f"{expires_at:%Y-%m-%d %H:%M UTC}")
+        rows += _row("Expires", _ist(expires_at))
     html = _shell(
         "You're invited",
         f"Hi {greeting}, you have been invited to join {company} on the interview "
@@ -141,7 +148,7 @@ def reminder_email(
     """Nudge a candidate who has not started/completed their interview yet."""
     greeting = candidate_name.strip() or "there"
     expiry_line = (
-        f"\nPlease complete it before {expires_at:%Y-%m-%d %H:%M UTC}."
+        f"\nPlease complete it before {_ist(expires_at)}."
         if expires_at is not None
         else ""
     )
@@ -155,7 +162,7 @@ def reminder_email(
     )
     rows = _row("Role", role) + _row("Company", company)
     if expires_at is not None:
-        rows += _row("Complete by", f"{expires_at:%Y-%m-%d %H:%M UTC}")
+        rows += _row("Complete by", _ist(expires_at))
     html = _shell(
         "Interview reminder",
         f"Hi {greeting}, this is a reminder to complete your first-round interview "

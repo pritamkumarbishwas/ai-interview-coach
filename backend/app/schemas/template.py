@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
 from app.models.interview import Difficulty, InterviewType, ProctoringMode
 from app.models.template_config import InterviewTemplateConfig
 
@@ -39,8 +38,8 @@ class TemplateOut(BaseModel):
     description: str
     config: InterviewTemplateConfig
     question_bank: list[BankQuestionOut]
-    created_at: datetime
-    updated_at: datetime
+    created_at: ISTDateTime
+    updated_at: ISTDateTime
 
 
 class TemplateSummary(BaseModel):
@@ -50,7 +49,7 @@ class TemplateSummary(BaseModel):
     proctoring_mode: ProctoringMode = "strict"
     round_count: int = 0
     question_count: int = 0
-    created_at: datetime
+    created_at: ISTDateTime
 
 
 class TemplatePreviewRequest(BaseModel):

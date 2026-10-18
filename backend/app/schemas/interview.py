@@ -1,7 +1,6 @@
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
 from app.models.answer import Answer
 from app.models.interview import (
     Difficulty,
@@ -48,7 +47,7 @@ class InterviewSummary(BaseModel):
     question_count: int = 0
     answered_count: int = 0
     target_questions: int = DEFAULT_TARGET_QUESTIONS
-    created_at: datetime
+    created_at: ISTDateTime
 
 
 class InterviewOut(BaseModel):
@@ -69,9 +68,9 @@ class InterviewOut(BaseModel):
     # Recording metadata by kind (bytes are in GridFS, never inline here).
     recordings: dict[str, RecordingMeta] = {}
     current_question_id: str | None = None
-    created_at: datetime
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
+    created_at: ISTDateTime
+    started_at: ISTDateTime | None = None
+    completed_at: ISTDateTime | None = None
 
 
 class ProctoringConsent(BaseModel):

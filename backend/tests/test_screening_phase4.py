@@ -229,7 +229,7 @@ def test_extra_minutes_lengthens_the_round(
     deadline = datetime.fromisoformat(
         client.get(f"/api/screening/{token}").json()["round_deadline"]
     )
-    remaining = deadline - datetime.now(UTC).replace(tzinfo=None)
+    remaining = deadline - datetime.now(UTC)
     assert timedelta(minutes=39) < remaining < timedelta(minutes=41)
 
 

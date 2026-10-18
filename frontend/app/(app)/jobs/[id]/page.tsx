@@ -41,7 +41,7 @@ import {
   JOB_STATUS_TONES,
   STAFF_ROLES,
 } from "@/lib/recruiting";
-import { cx, formatDate } from "@/lib/utils";import * as invitationService from "@/services/invitations";
+import { cx, formatDate, formatTime } from "@/lib/utils";import * as invitationService from "@/services/invitations";
 import * as jobService from "@/services/jobs";
 import * as templateService from "@/services/templates";
 import type {
@@ -842,7 +842,7 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
                     >
                       <span className="min-w-0 truncate">{moment.label}</span>
                       <span className="tabular-nums">
-                        {moment.at ? new Date(`${moment.at}Z`).toLocaleTimeString() : "—"}
+                        {moment.at ? formatTime(moment.at) : "—"}
                       </span>
                     </li>
                   ))}

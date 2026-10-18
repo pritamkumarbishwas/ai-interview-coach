@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.timeutil import ISTDateTime
+
 TimelineEntryKind = Literal["answer", "signal"]
 
 
@@ -18,7 +20,7 @@ class TimelineEntry(BaseModel):
     kind: TimelineEntryKind
     # Seconds from the start of the recording (media time 0).
     at_seconds: float = 0.0
-    at: datetime | None = None
+    at: ISTDateTime | None = None
     label: str = ""
     # Answer entries.
     question_id: str = ""
@@ -38,4 +40,4 @@ class ReviewTimeline(BaseModel):
     recording_available: bool = False
     duration_seconds: float = 0.0
     entries: list[TimelineEntry] = Field(default_factory=list)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    generated_at: ISTDateTime = Field(default_factory=lambda: datetime.now(UTC))
