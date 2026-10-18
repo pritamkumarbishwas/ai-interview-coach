@@ -10,6 +10,10 @@ from app.models.report import Report
 InterviewType = Literal["technical", "behavioral", "hr", "mixed", "system_design"]
 Difficulty = Literal["beginner", "intermediate", "advanced"]
 Level = Literal["junior", "mid", "senior"]
+# Discriminates the candidate's self-serve practice module from company-run
+# screening interviews that share this engine. Defaults to `practice` so every
+# existing document and flow keeps working unchanged.
+InterviewKind = Literal["practice", "screening"]
 InterviewStatus = Literal["created", "in_progress", "completed"]
 ProctoringMode = Literal["off", "camera_only", "strict"]
 ProctoringStatus = Literal["pending", "active", "paused", "completed", "failed"]
@@ -69,6 +73,7 @@ class Interview(BaseModel):
     resume_id: str
     jd_id: str
     role: str
+    kind: InterviewKind = "practice"
     level: Level = "mid"
     type: InterviewType = "technical"
     difficulty: Difficulty = "intermediate"

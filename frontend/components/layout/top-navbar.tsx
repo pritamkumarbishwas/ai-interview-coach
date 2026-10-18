@@ -15,6 +15,12 @@ const TITLES: Array<{ match: string; title: string }> = [
   { match: "/profile", title: "Profile" },
   { match: "/resumes", title: "Resumes" },
   { match: "/job-descriptions", title: "Job Descriptions" },
+  { match: "/jobs/", title: "Job" },
+  { match: "/jobs", title: "Jobs" },
+  { match: "/templates/", title: "Template" },
+  { match: "/templates", title: "Templates" },
+  { match: "/team", title: "Team" },
+  { match: "/audit", title: "Audit log" },
   { match: "/interviews/", title: "Interview Session" },
   { match: "/interviews", title: "My Interviews" },
 ];

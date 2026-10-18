@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "AI Interview Coach"
+    # Public base URL of the SPA — used to build links in outbound emails
+    # (staff invitations now; candidate magic links in a later phase).
+    frontend_url: str = "http://localhost:5173"
     environment: str = Field(default="development")
     debug: bool = False
     api_prefix: str = "/api"
@@ -89,7 +92,7 @@ class Settings(BaseSettings):
     # nothing polls for jobs unless this is enabled (or a worker is started in
     # code, as tests do).
     jobs_enabled: bool = False
-    jobs_collection_name: str = "jobs"
+    jobs_collection_name: str = "background_jobs"
     jobs_poll_interval_seconds: float = Field(default=5.0, gt=0)
     jobs_max_attempts: int = Field(default=3, ge=1)
     jobs_backoff_seconds: float = Field(default=30.0, gt=0)
@@ -98,6 +101,18 @@ class Settings(BaseSettings):
     feature_screening_enabled: bool = False
     feature_magic_links_enabled: bool = False
     feature_proctoring_integrity_enabled: bool = False
+
+    # --- Staff bootstrap ---------------------------------------------------
+    # Optional seed admin, created on startup when set. This is how a fresh
+    # single-company deployment gets its first privileged account (public
+    # registration is disabled once screening is enabled).
+    bootstrap_admin_email: str | None = None
+    bootstrap_admin_password: str | None = None
+    bootstrap_admin_name: str = "Admin"
+
+    # --- Candidate invitations ---------------------------------------------
+    # Default magic-link lifetime; can be overridden per invitation.
+    invitation_ttl_days: int = Field(default=7, ge=1, le=30)
 
     @field_validator("log_format", mode="before")
     @classmethod

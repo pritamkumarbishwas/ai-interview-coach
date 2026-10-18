@@ -25,7 +25,7 @@ def test_load_features_reflects_settings_defaults() -> None:
 
 
 def test_template_config_defaults() -> None:
-    config = InterviewTemplateConfig(name="Standard screen")
+    config = InterviewTemplateConfig()
     assert config.proctoring_mode == "strict"
     assert config.integrity_policy == "advisory"
     assert config.allow_pauses is False
@@ -35,7 +35,7 @@ def test_template_config_defaults() -> None:
 
 def test_template_config_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError):
-        InterviewTemplateConfig(name="x", unexpected=True)  # type: ignore[call-arg]
+        InterviewTemplateConfig(unexpected=True)  # type: ignore[call-arg]
 
 
 def test_round_config_enforces_bounds() -> None:

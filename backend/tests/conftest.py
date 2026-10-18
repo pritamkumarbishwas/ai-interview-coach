@@ -131,6 +131,18 @@ def auth_headers(client: TestClient, registered_user: dict) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+@pytest.fixture()
+def staff_headers(client: TestClient) -> dict[str, str]:
+    """Auth headers for a recruiter (can manage jobs and templates)."""
+    return login(client, make_user(f"staff.{uuid4().hex[:10]}@example.com", role="recruiter"))
+
+
+@pytest.fixture()
+def admin_headers(client: TestClient) -> dict[str, str]:
+    """Auth headers for an admin (can manage staff and read the audit log)."""
+    return login(client, make_user(f"admin.{uuid4().hex[:10]}@example.com", role="admin"))
+
+
 @dataclass
 class Env:
     """A schema-dispatching fake LLM shared by interview-flow tests."""
@@ -238,15 +250,31 @@ def env(client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch)
     return Env(setup=setup, prompts=prompts, dispatcher=dispatcher)
 
 
-def make_user(email: str, password: str = "password1234") -> dict:
+def make_user(
+    email: str,
+    password: str = "password1234",
+    role: str = "candidate",
+) -> dict:
     """Insert a user directly in the database (no HTTP round trip)."""
 
     async def create(db) -> None:
-        user = User(name="Direct User", email=email, password_hash=hash_password(password))
+        user = User(
+            name="Direct User",
+            email=email,
+            password_hash=hash_password(password),
+            role=role,
+        )
         await db.users.insert_one(user.model_dump(by_alias=True, exclude={"id"}))
 
     _with_mongo(create)
     return {"email": email, "password": password}
+
+
+def login(client: TestClient, creds: dict) -> dict[str, str]:
+    """Log in a pre-created user and return ready-to-use auth headers."""
+    response = client.post("/api/auth/login", json=creds)
+    assert response.status_code == 200, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
 def delete_user(email: str) -> None:

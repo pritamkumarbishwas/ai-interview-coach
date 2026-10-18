@@ -92,6 +92,7 @@ def _interview_out(interview: Interview) -> InterviewOut:
         resume_id=interview.resume_id,
         jd_id=interview.jd_id,
         role=interview.role,
+        kind=interview.kind,
         level=interview.level,
         type=interview.type,
         difficulty=interview.difficulty,
@@ -293,6 +294,7 @@ class InterviewService:
             InterviewSummary(
                 id=doc["_id"],
                 role=doc.get("role", ""),
+                kind=doc.get("kind", "practice"),
                 type=doc.get("type", "technical"),
                 difficulty=doc.get("difficulty", "intermediate"),
                 status=doc.get("status", "created"),

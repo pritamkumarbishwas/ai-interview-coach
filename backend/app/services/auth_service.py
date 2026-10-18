@@ -3,7 +3,7 @@ import logging
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.config import settings
-from app.core.exceptions import AuthenticationError, ConflictError
+from app.core.exceptions import AuthenticationError, AuthorizationError, ConflictError
 from app.core.security import (
     create_access_token,
     hash_password,
@@ -26,6 +26,11 @@ class AuthService:
         self._users = users
 
     async def register(self, db: AsyncIOMotorDatabase, payload: RegisterRequest) -> User:
+        # In a screening deployment candidates are guests (magic links) and
+        # staff are provisioned by invitation, so self-registration is closed.
+        if settings.feature_screening_enabled:
+            raise AuthorizationError("Public registration is disabled")
+
         existing = await self._users.get_by_email(db, payload.email)
         if existing is not None:
             raise ConflictError("An account with this email already exists")

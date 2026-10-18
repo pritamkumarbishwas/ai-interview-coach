@@ -10,14 +10,25 @@ import {
   FileText,
   LayoutDashboard,
   Mic,
+  ScrollText,
   User,
+  Users,
 } from "lucide-react";
 
 import { Logo } from "@/components/layout/logo";
 import { Avatar } from "@/components/ui/avatar";
 import { cx } from "@/lib/utils";
+import type { Role } from "@/types";
 
-const NAV_ITEMS = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  /** Only shown to these roles; omitted = everyone with this nav set. */
+  roles?: Role[];
+}
+
+const CANDIDATE_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/interviews", label: "My Interviews", icon: ClipboardList },
   { href: "/practice", label: "Practice", icon: Mic },
@@ -27,14 +38,41 @@ const NAV_ITEMS = [
   { href: "/profile", label: "Profile", icon: User },
 ];
 
+const STAFF_NAV: NavItem[] = [
+  { href: "/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/templates", label: "Templates", icon: ClipboardList },
+  { href: "/team", label: "Team", icon: Users, roles: ["admin"] },
+  { href: "/audit", label: "Audit log", icon: ScrollText, roles: ["admin"] },
+  { href: "/profile", label: "Profile", icon: User },
+];
+
+const STAFF_ROLE_SET: Role[] = ["admin", "recruiter", "reviewer"];
+
+function navForRole(role: Role | undefined): NavItem[] {
+  if (role && STAFF_ROLE_SET.includes(role)) {
+    return STAFF_NAV.filter((item) => !item.roles || item.roles.includes(role));
+  }
+  return CANDIDATE_NAV;
+}
+
+const ROLE_LABELS: Record<Role, string> = {
+  candidate: "Candidate",
+  admin: "Administrator",
+  recruiter: "Recruiter",
+  reviewer: "Reviewer",
+};
+
 interface SidebarProps {
   userName: string;
+  role?: Role;
   className?: string;
   onClose?: () => void;
 }
 
-export function Sidebar({ userName, className, onClose }: SidebarProps) {
+export function Sidebar({ userName, role, className, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const navItems = navForRole(role);
+  const isStaff = role ? STAFF_ROLE_SET.includes(role) : false;
 
   return (
     <aside
@@ -72,7 +110,7 @@ export function Sidebar({ userName, className, onClose }: SidebarProps) {
         className="flex-1 space-y-1 overflow-y-auto px-3 py-4"
         aria-label="Main navigation"
       >
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const active =
             pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
@@ -118,7 +156,7 @@ export function Sidebar({ userName, className, onClose }: SidebarProps) {
             </span>
             <span className="flex items-center gap-1 text-[11px] text-ink-3">
               <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-brand" />
-              Active Interview
+              {isStaff ? ROLE_LABELS[role!] : "Active Interview"}
             </span>
           </span>
         </Link>

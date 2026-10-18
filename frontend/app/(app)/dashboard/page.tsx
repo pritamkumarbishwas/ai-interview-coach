@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import {
   ArrowRight,
@@ -50,8 +52,16 @@ const ONBOARDING_STEPS = [
 ];
 
 export default function DashboardPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const name = (user?.name ?? "").split(" ")[0];
+
+  // Staff land on their recruiting workspace, not the candidate dashboard.
+  useEffect(() => {
+    if (user && user.role !== "candidate") {
+      router.replace("/jobs");
+    }
+  }, [user, router]);
 
   const { data: stats, loading, error, reload } = useAsync(
     getDashboardStats,

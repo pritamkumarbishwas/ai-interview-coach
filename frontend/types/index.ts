@@ -9,13 +9,19 @@ export type Difficulty = "beginner" | "intermediate" | "advanced";
 export type InterviewStatus = "created" | "in_progress" | "completed";
 export type ProctoringMode = "off" | "camera_only" | "strict";
 export type NextStep = "follow_up" | "harder" | "easier" | "new_topic";
+export type Role = "candidate" | "admin" | "recruiter" | "reviewer";
+
+export const STAFF_ROLES: Role[] = ["admin", "recruiter", "reviewer"];
 
 export interface User {
   id: string;
   name: string;
   email: string;
+  role: Role;
   created_at: string;
 }
+
+
 
 export interface TokenResponse {
   access_token: string;
@@ -238,4 +244,204 @@ export interface DashboardStats {
   strong_topics: string[];
   weak_topics: string[];
   recent: DashboardInterview[];
+}
+
+/* ---- Recruiter: job requisitions ---------------------------------------- */
+
+export type JobStatus = "draft" | "open" | "closed";
+
+export interface JobSummary {
+  id: string;
+  title: string;
+  company: string;
+  status: JobStatus;
+  template_id: string | null;
+  created_at: string;
+}
+
+export interface Job {
+  id: string;
+  title: string;
+  company: string;
+  location: string;
+  description: string;
+  status: JobStatus;
+  template_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateJobInput {
+  title: string;
+  company?: string;
+  location?: string;
+  description?: string;
+  status?: JobStatus;
+  template_id?: string | null;
+}
+
+export type UpdateJobInput = Partial<CreateJobInput>;
+
+/* ---- Recruiter: interview templates ------------------------------------- */
+
+export type ResponseMode = "voice" | "typed" | "code" | "whiteboard";
+export type IntegrityPolicy = "advisory" | "strict";
+
+export interface RoundConfig {
+  key: string;
+  label: string;
+  interview_type: InterviewType;
+  difficulty: Difficulty;
+  duration_minutes: number;
+  target_questions: number;
+  response_modes: ResponseMode[];
+}
+
+export interface TemplateConfig {
+  proctoring_mode: ProctoringMode;
+  integrity_policy: IntegrityPolicy;
+  allow_pauses: boolean;
+  rounds: RoundConfig[];
+}
+
+export interface BankQuestion {
+  id: string;
+  text: string;
+  topic: string;
+  competency: string;
+  interview_type: InterviewType | null;
+  difficulty: Difficulty | null;
+}
+
+export type BankQuestionInput = Omit<BankQuestion, "id">;
+
+export interface TemplateSummary {
+  id: string;
+  name: string;
+  description: string;
+  proctoring_mode: ProctoringMode;
+  round_count: number;
+  question_count: number;
+  created_at: string;
+}
+
+export interface InterviewTemplate {
+  id: string;
+  name: string;
+  description: string;
+  config: TemplateConfig;
+  question_bank: BankQuestion[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateTemplateInput {
+  name: string;
+  description?: string;
+  config?: TemplateConfig;
+  question_bank?: BankQuestionInput[];
+}
+
+export type UpdateTemplateInput = Partial<CreateTemplateInput>;
+
+export interface TemplatePreviewInput {
+  role?: string;
+  round_key?: string | null;
+  interview_type?: InterviewType;
+  difficulty?: Difficulty;
+  topic?: string;
+}
+
+export interface TemplatePreview {
+  question: string;
+  topic: string;
+  interview_type: InterviewType;
+  difficulty: Difficulty;
+}
+
+/* ---- Candidate invitations ---------------------------------------------- */
+
+export type InvitationStatus =
+  | "pending"
+  | "started"
+  | "completed"
+  | "expired"
+  | "revoked";
+
+export interface Invitation {
+  id: string;
+  job_id: string;
+  candidate_name: string;
+  candidate_email: string;
+  role: string;
+  status: InvitationStatus;
+  expires_at: string;
+  interview_id: string | null;
+  created_at: string;
+  accept_url: string | null;
+}
+
+export interface CreateInvitationInput {
+  job_id: string;
+  candidate_email: string;
+  candidate_name?: string;
+  round_key?: string | null;
+  start_window_start?: string | null;
+  start_window_end?: string | null;
+  expires_in_days?: number;
+}
+
+/** Pre-check payload for a magic-link candidate (no account, no scores). */
+export interface InvitationSession {
+  status: InvitationStatus;
+  role: string;
+  company: string;
+  interview_type: InterviewType;
+  difficulty: Difficulty;
+  proctoring_mode: ProctoringMode;
+  consent_required: boolean;
+  total_questions: number;
+  started: boolean;
+  expires_at: string;
+  start_window_start: string | null;
+  start_window_end: string | null;
+  round_deadline: string | null;
+}
+
+/* ---- Staff & roles ------------------------------------------------------ */
+
+export type StaffInvitationStatus = "pending" | "accepted" | "revoked";
+
+export interface StaffInvitation {
+  id: string;
+  email: string;
+  role: Role;
+  status: StaffInvitationStatus;
+  expires_at: string;
+  created_at: string;
+  accept_url: string | null;
+}
+
+export interface CreateStaffInvitationInput {
+  email: string;
+  role: Role;
+  name?: string;
+}
+
+export interface AcceptStaffInvitationInput {
+  token: string;
+  name: string;
+  password: string;
+}
+
+/* ---- Audit -------------------------------------------------------------- */
+
+export interface AuditLog {
+  id: string;
+  actor_id: string | null;
+  action: string;
+  target_type: string;
+  target_id: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }

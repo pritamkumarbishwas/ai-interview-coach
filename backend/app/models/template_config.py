@@ -31,9 +31,12 @@ class RoundConfig(BaseModel):
 
 
 class InterviewTemplateConfig(BaseModel):
-    """A reusable, standardized interview definition."""
+    """A reusable, standardized interview definition.
 
-    name: str
+    The template's display name lives on the owning ``InterviewTemplate``; this
+    object captures only the interview shape so it can travel independently.
+    """
+
     proctoring_mode: ProctoringMode = "strict"
     # "advisory": integrity signals inform a human reviewer. "strict": policy can
     # block/flag harder. Never auto-rejects — a human always decides.

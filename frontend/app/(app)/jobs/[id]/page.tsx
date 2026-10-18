@@ -1,0 +1,590 @@
+"use client";
+
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+
+import {
+  ArrowLeft,
+  BellRing,
+  Check,
+  Copy,
+  Save,
+  Trash,
+  UserPlus,
+} from "lucide-react";
+
+import { RequireRole } from "@/components/auth/require-role";
+import { Alert } from "@/components/ui/alert";
+import { Badge, type BadgeTone } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Field, Input, Textarea, inputClasses } from "@/components/ui/input";
+import { FullScreenLoader, SkeletonList } from "@/components/ui/loading";
+import { Modal } from "@/components/ui/modal";
+import { useAsync } from "@/hooks/use-async";
+import { toApiError } from "@/lib/api";
+import { JOB_STATUS_LABELS, JOB_STATUS_TONES, STAFF_ROLES } from "@/lib/recruiting";
+import { formatDate } from "@/lib/utils";
+import * as invitationService from "@/services/invitations";
+import * as jobService from "@/services/jobs";
+import * as templateService from "@/services/templates";
+import type { Invitation, InvitationStatus, JobStatus } from "@/types";
+
+const INVITATION_TONES: Record<InvitationStatus, BadgeTone> = {
+  pending: "warning",
+  started: "ai",
+  completed: "success",
+  expired: "muted",
+  revoked: "danger",
+};
+
+const INVITATION_LABELS: Record<InvitationStatus, string> = {
+  pending: "Pending",
+  started: "In progress",
+  completed: "Completed",
+  expired: "Expired",
+  revoked: "Revoked",
+};
+
+function CopyLinkButton({ url }: { url: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard can be blocked; the link stays selectable in the input.
+    }
+  };
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      icon={
+        copied ? (
+          <Check className="h-3.5 w-3.5" aria-hidden />
+        ) : (
+          <Copy className="h-3.5 w-3.5" aria-hidden />
+        )
+      }
+      onClick={() => void onCopy()}
+    >
+      {copied ? "Copied" : "Copy link"}
+    </Button>
+  );
+}
+
+export default function JobDetailPage() {
+  return (
+    <RequireRole roles={STAFF_ROLES}>
+      <JobDetail />
+    </RequireRole>
+  );
+}
+
+function JobDetail() {
+  const router = useRouter();
+  const params = useParams<{ id: string }>();
+
+  const {
+    data: job,
+    loading,
+    error,
+    reload,
+  } = useAsync(() => jobService.getJob(params.id), [params.id]);
+  const { data: templates } = useAsync(() => templateService.listTemplates(), []);
+  const {
+    data: invitations,
+    loading: invitationsLoading,
+    reload: reloadInvitations,
+  } = useAsync(() => invitationService.listInvitations(params.id), [params.id]);
+
+  const [form, setForm] = useState<{
+    title: string;
+    company: string;
+    location: string;
+    description: string;
+    status: JobStatus;
+    template_id: string;
+  } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [link, setLink] = useState<string | null>(null);
+
+  const seededRef = useRef("");
+
+  useEffect(() => {
+    if (!job) return;
+    const signature = `${job.id}:${job.updated_at}`;
+    if (seededRef.current === signature) return;
+    seededRef.current = signature;
+    setForm({
+      title: job.title,
+      company: job.company,
+      location: job.location,
+      description: job.description,
+      status: job.status,
+      template_id: job.template_id ?? "",
+    });
+  }, [job]);
+
+  if (loading && !job) return <FullScreenLoader label="Loading job" />;
+
+  if (error || !job) {
+    return (
+      <div className="mx-auto max-w-xl py-16">
+        <Alert tone="error">{error?.message || "Job not found."}</Alert>
+        <div className="mt-4 flex justify-center">
+          <Button variant="outline" onClick={() => router.push("/jobs")}>
+            Back to jobs
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const onSave = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!form) return;
+    if (!form.title.trim()) {
+      setSaveError("A job title is required.");
+      return;
+    }
+    setSaving(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      await jobService.updateJob(job.id, {
+        title: form.title.trim(),
+        company: form.company.trim(),
+        location: form.location.trim(),
+        description: form.description,
+        status: form.status,
+        template_id: form.template_id || null,
+      });
+      setSaved(true);
+      reload();
+    } catch (caught) {
+      setSaveError(toApiError(caught).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onDelete = async () => {
+    setDeleting(true);
+    try {
+      await jobService.deleteJob(job.id);
+      router.push("/jobs");
+    } catch (caught) {
+      setSaveError(toApiError(caught).message);
+      setDeleting(false);
+      setDeleteOpen(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <Link
+          href="/jobs"
+          className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-2 transition-colors hover:text-ink"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+          Back to jobs
+        </Link>
+        <div className="mt-2 flex flex-wrap items-center gap-2.5">
+          <h2 className="text-xl font-bold tracking-tight text-ink lg:text-2xl">
+            {job.title}
+          </h2>
+          <Badge tone={JOB_STATUS_TONES[job.status]}>
+            {JOB_STATUS_LABELS[job.status]}
+          </Badge>
+        </div>
+        <p className="mt-1 text-sm text-ink-2">
+          {job.company || "No company set"} · created {formatDate(job.created_at)}
+        </p>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader title="Job details" description="Edit the requisition." />
+          <CardContent>
+            {form ? (
+              <form onSubmit={onSave} className="space-y-4" noValidate>
+                {saveError ? <Alert tone="error">{saveError}</Alert> : null}
+                {saved ? <Alert tone="success">Job saved.</Alert> : null}
+
+                <Field label="Title" htmlFor="edit-title" required>
+                  <Input
+                    id="edit-title"
+                    value={form.title}
+                    onChange={(event) =>
+                      setForm({ ...form, title: event.target.value })
+                    }
+                  />
+                </Field>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Company" htmlFor="edit-company" optional>
+                    <Input
+                      id="edit-company"
+                      value={form.company}
+                      onChange={(event) =>
+                        setForm({ ...form, company: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label="Location" htmlFor="edit-location" optional>
+                    <Input
+                      id="edit-location"
+                      value={form.location}
+                      onChange={(event) =>
+                        setForm({ ...form, location: event.target.value })
+                      }
+                    />
+                  </Field>
+                </div>
+
+                <Field label="Description" htmlFor="edit-description" optional>
+                  <Textarea
+                    id="edit-description"
+                    value={form.description}
+                    onChange={(event) =>
+                      setForm({ ...form, description: event.target.value })
+                    }
+                  />
+                </Field>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Status" htmlFor="edit-status">
+                    <select
+                      id="edit-status"
+                      className={inputClasses}
+                      value={form.status}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          status: event.target.value as JobStatus,
+                        })
+                      }
+                    >
+                      {(Object.keys(JOB_STATUS_LABELS) as JobStatus[]).map(
+                        (value) => (
+                          <option key={value} value={value}>
+                            {JOB_STATUS_LABELS[value]}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </Field>
+                  <Field
+                    label="Interview template"
+                    htmlFor="edit-template"
+                    optional
+                  >
+                    <select
+                      id="edit-template"
+                      className={inputClasses}
+                      value={form.template_id}
+                      onChange={(event) =>
+                        setForm({ ...form, template_id: event.target.value })
+                      }
+                    >
+                      <option value="">No template</option>
+                      {(templates ?? []).map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-1">
+                  <Button
+                    variant="danger-soft"
+                    size="sm"
+                    icon={<Trash className="h-3.5 w-3.5" aria-hidden />}
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    Delete
+                  </Button>
+                  <Button
+                    type="submit"
+                    loading={saving}
+                    icon={<Save className="h-4 w-4" aria-hidden />}
+                  >
+                    Save changes
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <SkeletonList rows={3} />
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Candidates"
+            description="Invite candidates by magic link."
+          />
+          <CardContent className="space-y-5">
+            {link ? (
+              <div className="rounded-btn border border-[#f8dcb8] bg-ai p-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={link}
+                    aria-label="Candidate interview link"
+                    onFocus={(event) => event.target.select()}
+                    className="h-9 min-w-0 flex-1 rounded-btn border border-line bg-card px-3 text-[13px] text-ink"
+                  />
+                  <CopyLinkButton url={link} />
+                </div>
+                <p className="mt-1.5 text-xs text-[#8a5310]">
+                  Share this link with the candidate — it expires and works once.
+                </p>
+              </div>
+            ) : null}
+
+            <InviteForm
+              jobId={job.id}
+              onInvited={(invitation) => {
+                reloadInvitations();
+                setLink(invitation.accept_url);
+              }}
+            />
+
+            <div>
+              {invitationsLoading && !invitations ? (
+                <SkeletonList rows={2} />
+              ) : invitations && invitations.length > 0 ? (
+                <ul className="space-y-2">
+                  {invitations.map((invitation) => (
+                    <InvitationRow
+                      key={invitation.id}
+                      invitation={invitation}
+                      onChanged={reloadInvitations}
+                      onLink={setLink}
+                    />
+                  ))}
+                </ul>
+              ) : (
+                <EmptyState
+                  icon={<UserPlus className="h-6 w-6" aria-hidden />}
+                  title="No candidates yet"
+                  description="Invite someone above and share the magic link."
+                  className="py-10"
+                />
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Modal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title="Delete this job?"
+        description="This removes the requisition. Invitations already sent are kept."
+      >
+        <div className="flex items-center justify-end gap-3">
+          <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            loading={deleting}
+            onClick={() => void onDelete()}
+          >
+            Delete job
+          </Button>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+interface InviteFormProps {
+  jobId: string;
+  onInvited: (invitation: Invitation) => void;
+}
+
+function InviteForm({ jobId, onInvited }: InviteFormProps) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [expiresDays, setExpiresDays] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!email.trim()) {
+      setError("A candidate email is required.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const invitation = await invitationService.createInvitation({
+        job_id: jobId,
+        candidate_email: email.trim(),
+        candidate_name: name.trim(),
+        expires_in_days: expiresDays ? Number(expiresDays) : undefined,
+      });
+      setName("");
+      setEmail("");
+      setExpiresDays("");
+      onInvited(invitation);
+    } catch (caught) {
+      setError(toApiError(caught).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form
+      onSubmit={onSubmit}
+      className="rounded-btn border border-line bg-surface p-4"
+      noValidate
+    >
+      <h4 className="text-[13px] font-semibold text-ink">Invite a candidate</h4>
+      {error ? (
+        <div className="mt-3">
+          <Alert tone="error">{error}</Alert>
+        </div>
+      ) : null}
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Input
+          aria-label="Candidate name"
+          placeholder="Candidate name (optional)"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
+        <Input
+          aria-label="Candidate email"
+          type="email"
+          placeholder="candidate@example.com"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+      </div>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <div className="w-40">
+          <Field label="Link expires" htmlFor="invite-expires" optional>
+            <select
+              id="invite-expires"
+              className={inputClasses}
+              value={expiresDays}
+              onChange={(event) => setExpiresDays(event.target.value)}
+            >
+              <option value="">Default</option>
+              <option value="1">1 day</option>
+              <option value="3">3 days</option>
+              <option value="7">7 days</option>
+              <option value="14">14 days</option>
+            </select>
+          </Field>
+        </div>
+        <Button type="submit" loading={submitting} className="mb-0.5">
+          Send invite
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+interface InvitationRowProps {
+  invitation: Invitation;
+  onChanged: () => void;
+  onLink: (url: string) => void;
+}
+
+function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
+  const [busy, setBusy] = useState<"remind" | "revoke" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const remind = async () => {
+    setBusy("remind");
+    setError(null);
+    try {
+      const updated = await invitationService.remindInvitation(invitation.id);
+      if (updated.accept_url) onLink(updated.accept_url);
+      onChanged();
+    } catch (caught) {
+      setError(toApiError(caught).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const revoke = async () => {
+    setBusy("revoke");
+    setError(null);
+    try {
+      await invitationService.revokeInvitation(invitation.id);
+      onChanged();
+    } catch (caught) {
+      setError(toApiError(caught).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const revocable = invitation.status === "pending";
+
+  return (
+    <li className="rounded-btn border border-line px-3.5 py-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-medium text-ink">
+            {invitation.candidate_name || invitation.candidate_email}
+          </p>
+          <p className="truncate text-xs text-ink-2">
+            {invitation.candidate_email} · expires {formatDate(invitation.expires_at)}
+          </p>
+        </div>
+        <Badge tone={INVITATION_TONES[invitation.status]}>
+          {INVITATION_LABELS[invitation.status]}
+        </Badge>
+        <div className="flex items-center gap-1.5">
+          {revocable ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<BellRing className="h-3.5 w-3.5" aria-hidden />}
+                loading={busy === "remind"}
+                onClick={() => void remind()}
+              >
+                Remind
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={busy === "revoke"}
+                onClick={() => void revoke()}
+              >
+                Revoke
+              </Button>
+            </>
+          ) : null}
+        </div>
+      </div>
+      {error ? (
+        <p className="mt-2 text-xs font-medium text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </li>
+  );
+}

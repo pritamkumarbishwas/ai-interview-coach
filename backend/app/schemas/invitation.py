@@ -1,0 +1,59 @@
+from datetime import datetime
+
+from pydantic import BaseModel, EmailStr, Field
+
+from app.models.interview import Difficulty, InterviewType, ProctoringMode
+from app.models.invitation import InvitationStatus
+
+
+class InvitationCreate(BaseModel):
+    job_id: str = Field(min_length=1)
+    candidate_name: str = Field(default="", max_length=120)
+    candidate_email: EmailStr
+    # Which round of the job's template this invitation is for (defaults to the
+    # template's first round).
+    round_key: str | None = None
+    # Optional scheduling window (server-enforced).
+    start_window_start: datetime | None = None
+    start_window_end: datetime | None = None
+    # Overrides the configured default link lifetime (1-30 days).
+    expires_in_days: int | None = Field(default=None, ge=1, le=30)
+
+
+class InvitationOut(BaseModel):
+    id: str
+    job_id: str
+    candidate_name: str = ""
+    candidate_email: EmailStr
+    role: str
+    status: InvitationStatus
+    expires_at: datetime
+    interview_id: str | None = None
+    created_at: datetime
+    # Returned to the recruiter so the link can be shared if email is not
+    # configured; never derivable from the stored record.
+    accept_url: str | None = None
+
+
+class InvitationSessionOut(BaseModel):
+    """Pre-check payload for the candidate (no account, no scores)."""
+
+    status: InvitationStatus
+    role: str
+    company: str = ""
+    interview_type: InterviewType
+    difficulty: Difficulty
+    proctoring_mode: ProctoringMode
+    consent_required: bool
+    # Total number of questions the candidate will be asked (progress display).
+    total_questions: int = 5
+    started: bool
+    expires_at: datetime
+    start_window_start: datetime | None = None
+    start_window_end: datetime | None = None
+    round_deadline: datetime | None = None
+
+
+class StartInterviewRequest(BaseModel):
+    # Proctored interviews require explicit consent before the first question.
+    consent: bool = False

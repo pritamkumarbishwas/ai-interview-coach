@@ -10,11 +10,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user } = useAuth();
   const userName = user?.name ?? "";
+  const role = user?.role;
 
   return (
     <div className="min-h-screen bg-canvas">
       <div className="fixed inset-y-0 left-0 z-40 hidden xl:flex">
-        <Sidebar userName={userName} />
+        <Sidebar userName={userName} role={role} />
       </div>
 
       {mobileOpen ? (
@@ -27,6 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <div className="absolute inset-y-0 left-0 shadow-xl">
             <Sidebar
               userName={userName}
+              role={role}
               onClose={() => setMobileOpen(false)}
             />
           </div>

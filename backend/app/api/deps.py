@@ -1,21 +1,32 @@
+from collections.abc import Awaitable, Callable
+
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.database import get_db
-from app.core.exceptions import AuthenticationError
+from app.core.exceptions import AuthenticationError, AuthorizationError
 from app.core.security import decode_access_token
-from app.models.user import User
+from app.models.user import STAFF_ROLES, User
 from app.repositories.interview_repository import interview_repository
+from app.repositories.invitation_repository import invitation_repository
 from app.repositories.job_description_repository import job_description_repository
+from app.repositories.job_repository import job_repository
 from app.repositories.resume_repository import resume_repository
+from app.repositories.staff_invitation_repository import staff_invitation_repository
+from app.repositories.template_repository import template_repository
 from app.repositories.user_repository import UserRepository, user_repository
+from app.services.audit_service import AuditService, audit_service
 from app.services.auth_service import AuthService
 from app.services.dashboard_service import DashboardService
 from app.services.interview_service import InterviewService
 from app.services.job_description_service import JobDescriptionService
+from app.services.job_service import JobService
 from app.services.recording_service import RecordingService, recording_service
 from app.services.resume_service import ResumeService
+from app.services.screening_service import ScreeningService
+from app.services.staff_service import StaffService
+from app.services.template_service import TemplateService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -39,6 +50,14 @@ def get_job_description_service() -> JobDescriptionService:
     return JobDescriptionService(job_description_repository)
 
 
+def get_job_service() -> JobService:
+    return JobService(job_repository, template_repository)
+
+
+def get_template_service() -> TemplateService:
+    return TemplateService(template_repository, job_repository)
+
+
 def get_interview_service() -> InterviewService:
     return InterviewService(interview_repository, resume_repository, job_description_repository)
 
@@ -49,6 +68,25 @@ def get_recording_service() -> RecordingService:
 
 def get_dashboard_service() -> DashboardService:
     return DashboardService(interview_repository)
+
+
+def get_screening_service() -> ScreeningService:
+    return ScreeningService(
+        invitation_repository,
+        job_repository,
+        template_repository,
+        job_description_repository,
+        interview_repository,
+        get_interview_service(),
+    )
+
+
+def get_staff_service() -> StaffService:
+    return StaffService(user_repository, staff_invitation_repository)
+
+
+def get_audit_service() -> AuditService:
+    return audit_service
 
 
 async def get_current_user(
@@ -64,3 +102,19 @@ async def get_current_user(
     if user is None:
         raise AuthenticationError("User no longer exists")
     return user
+
+
+def require_roles(*allowed: str) -> Callable[..., Awaitable[User]]:
+    """Dependency factory: allow only the given roles (else 403)."""
+
+    async def dependency(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role not in allowed:
+            raise AuthorizationError("You do not have permission to perform this action")
+        return current_user
+
+    return dependency
+
+
+require_staff = require_roles(*STAFF_ROLES)
+require_admin = require_roles("admin")
+require_recruiter = require_roles("admin", "recruiter")

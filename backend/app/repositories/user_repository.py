@@ -5,7 +5,7 @@ from pymongo.collection import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from app.core.exceptions import ConflictError
-from app.models.user import User
+from app.models.user import STAFF_ROLES, Role, User
 from app.repositories.base import stringify_id, to_object_id
 
 
@@ -34,11 +34,13 @@ class UserRepository:
         name: str,
         email: str,
         password_hash: str,
+        role: Role = "candidate",
     ) -> User:
         user = User(
             name=name.strip(),
             email=email.strip().lower(),
             password_hash=password_hash,
+            role=role,
         )
         doc = user.model_dump(by_alias=True, exclude={"id"})
         try:
@@ -56,6 +58,29 @@ class UserRepository:
         await db[self.collection_name].update_one(
             {"_id": object_id}, {"$set": {"password_hash": new_hash}}
         )
+
+    async def list_staff(self, db: AsyncIOMotorDatabase, limit: int) -> list[User]:
+        """Internal users only (admin/recruiter/reviewer), newest first."""
+        cursor = (
+            db[self.collection_name]
+            .find({"role": {"$in": list(STAFF_ROLES)}})
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+        return [_to_user(doc) async for doc in cursor]
+
+    async def update_role(
+        self, db: AsyncIOMotorDatabase, user_id: str, role: Role
+    ) -> User | None:
+        object_id = to_object_id(user_id)
+        if object_id is None:
+            return None
+        doc = await db[self.collection_name].find_one_and_update(
+            {"_id": object_id},
+            {"$set": {"role": role, "updated_at": datetime.now(UTC)}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return _to_user(doc) if doc else None
 
     async def update_profile(
         self, db: AsyncIOMotorDatabase, user_id: str, *, name: str

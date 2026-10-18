@@ -89,6 +89,47 @@ def invitation_email(
     )
 
 
+def staff_invitation_email(
+    *,
+    invitee_name: str,
+    role: str,
+    company: str,
+    accept_url: str,
+    expires_at: datetime | None = None,
+) -> EmailContent:
+    """Invite an internal teammate to join with a staff role."""
+    greeting = invitee_name.strip() or "there"
+    expiry_line = (
+        f"\nThis invitation expires on {expires_at:%Y-%m-%d %H:%M UTC}."
+        if expires_at is not None
+        else ""
+    )
+    text = (
+        f"Hi {greeting},\n\n"
+        f"You have been invited to join {company} on the interview platform "
+        f"as a {role}.\n\n"
+        f"Accept your invitation and set your password: {accept_url}{expiry_line}\n\n"
+        f"Welcome aboard,\n"
+        f"The {company} team"
+    )
+    rows = _row("Role", role) + _row("Company", company)
+    if expires_at is not None:
+        rows += _row("Expires", f"{expires_at:%Y-%m-%d %H:%M UTC}")
+    html = _shell(
+        "You're invited",
+        f"Hi {greeting}, you have been invited to join {company} on the interview "
+        f"platform as a {role}. Accept the invitation and set your password.",
+        rows,
+        "Accept invitation",
+        accept_url,
+    )
+    return EmailContent(
+        subject=f"You're invited to join {company}",
+        text=text,
+        html=html,
+    )
+
+
 def reminder_email(
     *,
     candidate_name: str,

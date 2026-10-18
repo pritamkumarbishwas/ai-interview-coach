@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from app.models.answer import Answer
 from app.models.interview import (
     Difficulty,
+    InterviewKind,
     InterviewStatus,
     InterviewType,
     Level,
@@ -39,6 +40,7 @@ class InterviewSummary(BaseModel):
 
     id: str
     role: str
+    kind: InterviewKind = "practice"
     type: InterviewType
     difficulty: Difficulty
     status: InterviewStatus
@@ -54,6 +56,7 @@ class InterviewOut(BaseModel):
     resume_id: str
     jd_id: str
     role: str
+    kind: InterviewKind = "practice"
     level: Level
     type: InterviewType
     difficulty: Difficulty

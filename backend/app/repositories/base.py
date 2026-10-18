@@ -28,14 +28,17 @@ async def find_owned_document(
     collection: str,
     document_id: str,
     user_id: str,
+    owner_field: str = "user_id",
 ) -> dict | None:
-    """Fetch one document that belongs to `user_id`, or `None` if missing.
+    """Fetch one document owned by `user_id`, or `None` if missing.
 
     Returns `None` for invalid ids too, so callers only handle one failure
-    case and cannot read another user's data.
+    case and cannot read another user's data. ``owner_field`` names the column
+    that records the owner (most collections use ``user_id``; candidate
+    invitations track the recruiter in ``created_by``).
     """
     object_id = to_object_id(document_id)
     if object_id is None:
         return None
-    doc = await db[collection].find_one({"_id": object_id, "user_id": user_id})
+    doc = await db[collection].find_one({"_id": object_id, owner_field: user_id})
     return stringify_id(doc) if doc else None

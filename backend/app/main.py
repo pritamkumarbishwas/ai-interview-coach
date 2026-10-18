@@ -12,17 +12,24 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
 from app.api.dashboard import router as dashboard_router
 from app.api.interviews import router as interviews_router
 from app.api.job_descriptions import router as job_descriptions_router
+from app.api.jobs import router as jobs_router
 from app.api.questions import router as questions_router
 from app.api.resumes import router as resumes_router
+from app.api.screening import public_router as screening_public_router
+from app.api.screening import router as screening_router
+from app.api.staff import router as staff_router
+from app.api.templates import router as templates_router
 from app.core.config import settings
 from app.core.database import close_mongo, connect_to_mongo, ensure_indexes
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
 from app.core.rate_limit import client_key
+from app.services.staff_service import ensure_bootstrap_admin
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -57,6 +64,7 @@ async def lifespan(app: FastAPI):
     app.state.mongo = client
     db = client[settings.mongo_db_name]
     await ensure_indexes(db)
+    await ensure_bootstrap_admin(db)
 
     # Background jobs are opt-in; the worker polls the persistent queue.
     worker_task: asyncio.Task | None = None
@@ -248,6 +256,20 @@ app.include_router(
     job_descriptions_router,
     prefix=f"{settings.api_prefix}/job-descriptions",
     tags=["job descriptions"],
+)
+app.include_router(jobs_router, prefix=f"{settings.api_prefix}/jobs", tags=["jobs"])
+app.include_router(
+    templates_router, prefix=f"{settings.api_prefix}/templates", tags=["templates"]
+)
+app.include_router(staff_router, prefix=f"{settings.api_prefix}/staff", tags=["staff"])
+app.include_router(
+    audit_router, prefix=f"{settings.api_prefix}/audit-logs", tags=["audit"]
+)
+app.include_router(
+    screening_router, prefix=f"{settings.api_prefix}/invitations", tags=["invitations"]
+)
+app.include_router(
+    screening_public_router, prefix=f"{settings.api_prefix}/screening", tags=["screening"]
 )
 app.include_router(
     interviews_router, prefix=f"{settings.api_prefix}/interviews", tags=["interviews"]

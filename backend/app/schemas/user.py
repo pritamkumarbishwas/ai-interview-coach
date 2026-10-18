@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.models.user import Role
+
 
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -9,6 +11,7 @@ class UserOut(BaseModel):
     id: str
     name: str
     email: EmailStr
+    role: Role = "candidate"
     created_at: datetime
 
 

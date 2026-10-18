@@ -45,6 +45,28 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         await db.interviews.create_index(
             [("user_id", 1), ("created_at", -1)], name="ix_interviews_user_created"
         )
+        await db.templates.create_index("user_id", name="ix_templates_user_id")
+        await db.templates.create_index(
+            [("user_id", 1), ("created_at", -1)], name="ix_templates_user_created"
+        )
+        await db.jobs.create_index("user_id", name="ix_jobs_user_id")
+        await db.jobs.create_index(
+            [("user_id", 1), ("created_at", -1)], name="ix_jobs_user_created"
+        )
+        await db.screening_invitations.create_index(
+            "token_hash", unique=True, name="ux_screening_invitations_token"
+        )
+        await db.screening_invitations.create_index(
+            [("job_id", 1), ("created_at", -1)],
+            name="ix_screening_invitations_job_created",
+        )
+        await db.staff_invitations.create_index(
+            "token_hash", unique=True, name="ux_staff_invitations_token"
+        )
+        await db.staff_invitations.create_index(
+            [("email", 1), ("status", 1)], name="ix_staff_invitations_email_status"
+        )
+        await db.audit_logs.create_index([("created_at", -1)], name="ix_audit_logs_created")
         # Background job queue: the claim query filters by status and due time.
         await db[settings.jobs_collection_name].create_index(
             [("status", 1), ("run_at", 1)], name="ix_jobs_status_run_at"
