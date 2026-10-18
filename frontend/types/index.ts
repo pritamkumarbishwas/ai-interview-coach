@@ -368,6 +368,9 @@ export type InvitationStatus =
   | "expired"
   | "revoked";
 
+/** Human review decision; the AI never sets this. */
+export type Decision = "pending" | "advance" | "hold" | "decline";
+
 export interface Invitation {
   id: string;
   job_id: string;
@@ -379,8 +382,26 @@ export interface Invitation {
   round_minutes: number;
   round_deadline: string | null;
   interview_id: string | null;
+  decision: Decision;
+  decision_note: string;
+  decided_at: string | null;
   created_at: string;
   accept_url: string | null;
+}
+
+export interface ShortlistEntry {
+  invitation_id: string;
+  candidate_name: string;
+  candidate_email: string;
+  status: InvitationStatus;
+  decision: Decision;
+  overall_score: number;
+  threshold: number;
+  meets_threshold: boolean;
+  competency_count: number;
+  integrity_level: IntegrityLevel | null;
+  integrity_score: number | null;
+  generated_at: string | null;
 }
 
 export interface CreateInvitationInput {
@@ -442,6 +463,37 @@ export interface IntegrityReport {
   signals: IntegritySignalCount[];
   moments: IntegrityMoment[];
   notes: string[];
+  generated_at: string;
+}
+
+/* ---- Scorecard (advisory competency scoring) ---------------------------- */
+
+export interface CompetencyEvidence {
+  question_id: string;
+  topic: string;
+  score: number;
+  quotes: string[];
+}
+
+export interface CompetencyScore {
+  competency: string;
+  score: number;
+  answered: number;
+  evidence: CompetencyEvidence[];
+}
+
+export interface Scorecard {
+  interview_id: string;
+  role: string;
+  advisory: boolean;
+  overall_score: number;
+  competencies: CompetencyScore[];
+  strengths: string[];
+  concerns: string[];
+  recommendation: string;
+  threshold: number;
+  meets_threshold: boolean;
+  identity_hidden: boolean;
   generated_at: string;
 }
 

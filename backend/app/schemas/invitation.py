@@ -3,7 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
 from app.models.interview import Difficulty, InterviewType, ProctoringMode
-from app.models.invitation import InvitationStatus
+from app.models.invitation import Decision, InvitationStatus
 
 
 class InvitationCreate(BaseModel):
@@ -28,6 +28,13 @@ class InvitationExtend(BaseModel):
     minutes: int = Field(ge=1, le=180)
 
 
+class InvitationDecision(BaseModel):
+    """Record a human decision after reviewing the advisory scorecard."""
+
+    decision: Decision
+    note: str = Field(default="", max_length=1_000)
+
+
 class InvitationOut(BaseModel):
     id: str
     job_id: str
@@ -39,10 +46,34 @@ class InvitationOut(BaseModel):
     round_minutes: int = 30
     round_deadline: datetime | None = None
     interview_id: str | None = None
+    decision: Decision = "pending"
+    decision_note: str = ""
+    decided_at: datetime | None = None
     created_at: datetime
     # Returned to the recruiter so the link can be shared if email is not
     # configured; never derivable from the stored record.
     accept_url: str | None = None
+
+
+class ShortlistEntry(BaseModel):
+    """One candidate in the job's ranked shortlist.
+
+    Every scored field is advisory; `needs_review` is true until a human
+    records a decision.
+    """
+
+    invitation_id: str
+    candidate_name: str = ""
+    candidate_email: EmailStr
+    status: InvitationStatus
+    decision: Decision = "pending"
+    overall_score: float = 0.0
+    threshold: float = 0.0
+    meets_threshold: bool = False
+    competency_count: int = 0
+    integrity_level: str | None = None
+    integrity_score: int | None = None
+    generated_at: datetime | None = None
 
 
 class InvitationSessionOut(BaseModel):

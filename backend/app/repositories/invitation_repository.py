@@ -16,6 +16,10 @@ LIST_PROJECTION = {
     "created_at": 1,
     "round_minutes": 1,
     "round_deadline": 1,
+    "pass_threshold": 1,
+    "decision": 1,
+    "decision_note": 1,
+    "decided_at": 1,
 }
 
 
@@ -107,6 +111,30 @@ class InvitationRepository:
             return
         await db[self.collection_name].update_one(
             {"_id": object_id}, {"$set": {"round_deadline": round_deadline}}
+        )
+
+    async def set_decision(
+        self,
+        db: AsyncIOMotorDatabase,
+        invitation_id: str,
+        decision: str,
+        note: str,
+        decided_by: str,
+    ) -> None:
+        """Record a human decision (never a candidate-visible field)."""
+        object_id = to_object_id(invitation_id)
+        if object_id is None:
+            return
+        await db[self.collection_name].update_one(
+            {"_id": object_id},
+            {
+                "$set": {
+                    "decision": decision,
+                    "decision_note": note,
+                    "decided_by": decided_by,
+                    "decided_at": datetime.now(UTC),
+                }
+            },
         )
 
     async def delete(self, db: AsyncIOMotorDatabase, invitation_id: str, user_id: str) -> None:

@@ -1,8 +1,11 @@
 import { api, toApiError } from "@/lib/api";
 import type {
   CreateInvitationInput,
+  Decision,
   IntegrityReport,
   Invitation,
+  Scorecard,
+  ShortlistEntry,
 } from "@/types";
 
 export async function listInvitations(jobId: string): Promise<Invitation[]> {
@@ -66,6 +69,45 @@ export async function getInvitationIntegrity(
 ): Promise<IntegrityReport> {
   try {
     const { data } = await api.get<IntegrityReport>(`/invitations/${id}/integrity`);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/** Advisory, rubric-based competency scorecard with cited evidence. */
+export async function getInvitationScorecard(id: string): Promise<Scorecard> {
+  try {
+    const { data } = await api.get<Scorecard>(`/invitations/${id}/scorecard`);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/** Ranked, advisory shortlist for a job (score + integrity + decision). */
+export async function getJobShortlist(jobId: string): Promise<ShortlistEntry[]> {
+  try {
+    const { data } = await api.get<ShortlistEntry[]>("/invitations/shortlist", {
+      params: { job_id: jobId },
+    });
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/** Record the human decision for a candidate (never set by the AI). */
+export async function setInvitationDecision(
+  id: string,
+  decision: Decision,
+  note = "",
+): Promise<Invitation> {
+  try {
+    const { data } = await api.patch<Invitation>(`/invitations/${id}/decision`, {
+      decision,
+      note,
+    });
     return data;
   } catch (error) {
     throw toApiError(error);

@@ -20,9 +20,11 @@ from app.schemas.answer import AnswerInput, AnswerResultOut
 from app.schemas.interview import CurrentQuestionOut, ProctoringEventCreate
 from app.schemas.invitation import (
     InvitationCreate,
+    InvitationDecision,
     InvitationExtend,
     InvitationOut,
     InvitationSessionOut,
+    ShortlistEntry,
     StartInterviewRequest,
 )
 from app.schemas.transcript import TranscriptionOut
@@ -56,6 +58,17 @@ async def list_invitations(
     return await service.list_invitations(db, recruiter.id or "", job_id, limit)
 
 
+@router.get("/shortlist", response_model=list[ShortlistEntry])
+async def get_job_shortlist(
+    job_id: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+) -> list[ShortlistEntry]:
+    """Ranked, advisory shortlist for a job (score + integrity + decision)."""
+    return await service.shortlist(db, recruiter, job_id)
+
+
 @router.delete("/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_invitation(
     invitation_id: str,
@@ -87,6 +100,20 @@ async def extend_invitation(
 ) -> InvitationOut:
     """Grant extra time on an invitation (accessibility accommodation)."""
     return await service.extend(db, recruiter, invitation_id, payload.minutes)
+
+
+@router.patch("/{invitation_id}/decision", response_model=InvitationOut)
+async def decide_invitation(
+    invitation_id: str,
+    payload: InvitationDecision,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+) -> InvitationOut:
+    """Record the human decision: advance, hold, decline, or pending (undo)."""
+    return await service.decide(
+        db, recruiter, invitation_id, payload.decision, payload.note
+    )
 
 
 @router.get("/{invitation_id}/integrity", response_model=IntegrityReport)

@@ -41,6 +41,7 @@ from app.schemas.invitation import (
     InvitationCreate,
     InvitationOut,
     InvitationSessionOut,
+    ShortlistEntry,
 )
 from app.services.audit_service import audit_service
 from app.services.integrity_service import integrity_service
@@ -52,6 +53,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ROUND = RoundConfig(key="screen", label="Screening")
 SNIPPET_LENGTH = 180
+# Bounded shortlist so a huge pipeline cannot load unbounded interviews.
+SHORTLIST_LIMIT = 200
 
 
 def _hash_token(token: str) -> str:
@@ -169,6 +172,9 @@ class ScreeningService:
                 round_minutes=doc.get("round_minutes", 30),
                 round_deadline=doc.get("round_deadline"),
                 interview_id=doc.get("interview_id"),
+                decision=doc.get("decision", "pending"),
+                decision_note=doc.get("decision_note", ""),
+                decided_at=doc.get("decided_at"),
                 created_at=doc["created_at"],
             )
             for doc in docs
@@ -278,6 +284,93 @@ class ScreeningService:
             )
             interview = await self._require_interview(db, recruiter, invitation_id)
         return scorecard_service.build(interview)
+
+    async def decide(
+        self,
+        db: AsyncIOMotorDatabase,
+        recruiter: User,
+        invitation_id: str,
+        decision: str,
+        note: str,
+    ) -> InvitationOut:
+        """Record a human decision on a candidate (the AI never decides).
+
+        ``pending`` clears a previous decision so a reviewer can undo a call.
+        """
+        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
+        if doc is None:
+            raise NotFoundError("Invitation not found")
+        await self._invitations.set_decision(
+            db, invitation_id, decision, note, recruiter.id or ""
+        )
+        updated = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
+        assert updated is not None
+        await audit_service.record(
+            db,
+            action="invitation.decided",
+            actor_id=recruiter.id,
+            target_type="screening_invitation",
+            target_id=invitation_id,
+            metadata={"decision": decision},
+        )
+        return self._to_out(ScreeningInvitation(**updated))
+
+    async def shortlist(
+        self, db: AsyncIOMotorDatabase, recruiter: User, job_id: str
+    ) -> list[ShortlistEntry]:
+        """Rank a job's candidates by advisory score (integrity shown alongside).
+
+        Candidates who have not finished are included but sort last, so the
+        recruiter sees the whole pipeline. Ranking is advisory — a human makes
+        every decision (``decision`` is surfaced, never set here).
+        """
+        await self._require_job(db, recruiter.id or "", job_id)
+        # `list_for_job` returns a projection (not full documents), so read the
+        # fields the shortlist needs straight from the dicts.
+        docs = await self._invitations.list_for_job(db, job_id, SHORTLIST_LIMIT)
+
+        entries: list[ShortlistEntry] = []
+        for doc in docs:
+            entry = ShortlistEntry(
+                invitation_id=str(doc.get("_id", "")),
+                candidate_name=doc.get("candidate_name", ""),
+                candidate_email=doc.get("candidate_email", ""),
+                status=doc.get("status", "pending"),
+                decision=doc.get("decision", "pending"),
+                threshold=doc.get("pass_threshold", 0.0),
+            )
+            interview_id = doc.get("interview_id")
+            if interview_id and entry.status == "completed":
+                interview_doc = await self._interviews.get_by_id(db, interview_id)
+                if interview_doc is not None:
+                    # Backfill any answers the completion-time task has not
+                    # scored yet, so the ranking is complete.
+                    await self._interview_service.ensure_evaluations(
+                        db, interview_id, interview_doc.get("user_id", "")
+                    )
+                    refreshed = await self._interviews.get_by_id(db, interview_id)
+                    interview = Interview(**(refreshed or interview_doc))
+                    card = scorecard_service.build(interview)
+                    report = integrity_service.build(interview)
+                    entry.overall_score = card.overall_score
+                    entry.meets_threshold = card.meets_threshold
+                    entry.competency_count = sum(
+                        1 for item in card.competencies if item.answered
+                    )
+                    entry.integrity_level = report.level
+                    entry.integrity_score = report.score
+                    entry.generated_at = card.generated_at
+            entries.append(entry)
+
+        entries.sort(
+            key=lambda item: (
+                item.status == "completed",
+                item.overall_score,
+                item.integrity_score if item.integrity_score is not None else 0,
+            ),
+            reverse=True,
+        )
+        return entries
 
     async def _require_interview(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
@@ -572,6 +665,9 @@ class ScreeningService:
             round_minutes=invitation.round_minutes,
             round_deadline=invitation.round_deadline,
             interview_id=invitation.interview_id,
+            decision=invitation.decision,
+            decision_note=invitation.decision_note,
+            decided_at=invitation.decided_at,
             created_at=invitation.created_at,
             accept_url=accept_url,
         )

@@ -10,6 +10,7 @@ import {
   Check,
   Clock,
   Copy,
+  Gauge,
   Save,
   ShieldCheck,
   Trash,
@@ -32,11 +33,14 @@ import { cx, formatDate } from "@/lib/utils";import * as invitationService from 
 import * as jobService from "@/services/jobs";
 import * as templateService from "@/services/templates";
 import type {
+  Decision,
   IntegrityLevel,
   IntegrityReport,
   Invitation,
   InvitationStatus,
   JobStatus,
+  Scorecard,
+  ShortlistEntry,
 } from "@/types";
 
 const INVITATION_TONES: Record<InvitationStatus, BadgeTone> = {
@@ -137,6 +141,12 @@ function JobDetail() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+  const [reviewSignal, setReviewSignal] = useState(0);
+
+  const refreshCandidates = () => {
+    reloadInvitations();
+    setReviewSignal((signal) => signal + 1);
+  };
 
   const seededRef = useRef("");
 
@@ -379,7 +389,7 @@ function JobDetail() {
             <InviteForm
               jobId={job.id}
               onInvited={(invitation) => {
-                reloadInvitations();
+                refreshCandidates();
                 setLink(invitation.accept_url);
               }}
             />
@@ -393,7 +403,7 @@ function JobDetail() {
                     <InvitationRow
                       key={invitation.id}
                       invitation={invitation}
-                      onChanged={reloadInvitations}
+                      onChanged={refreshCandidates}
                       onLink={setLink}
                     />
                   ))}
@@ -407,6 +417,20 @@ function JobDetail() {
                 />
               )}
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader
+            title="Shortlist"
+            description="Advisory ranking by score. Integrity is context, not a verdict — you make the call."
+          />
+          <CardContent>
+            <ShortlistPanel
+              jobId={job.id}
+              reloadSignal={reviewSignal}
+              onChanged={refreshCandidates}
+            />
           </CardContent>
         </Card>
       </div>
@@ -557,6 +581,24 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
   const [integrityOpen, setIntegrityOpen] = useState(false);
   const [integrityLoading, setIntegrityLoading] = useState(false);
   const [integrityError, setIntegrityError] = useState<string | null>(null);
+  const [scorecard, setScorecard] = useState<Scorecard | null>(null);
+  const [scorecardOpen, setScorecardOpen] = useState(false);
+  const [scorecardLoading, setScorecardLoading] = useState(false);
+  const [scorecardError, setScorecardError] = useState<string | null>(null);
+
+  const openScorecard = async () => {
+    setScorecardOpen(true);
+    if (scorecard) return;
+    setScorecardLoading(true);
+    setScorecardError(null);
+    try {
+      setScorecard(await invitationService.getInvitationScorecard(invitation.id));
+    } catch (caught) {
+      setScorecardError(toApiError(caught).message);
+    } finally {
+      setScorecardLoading(false);
+    }
+  };
 
   const openIntegrity = async () => {
     setIntegrityOpen(true);
@@ -646,6 +688,16 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
             onClick={() => void openIntegrity()}
           >
             Integrity
+          </Button>
+        ) : null}
+        {invitation.status === "completed" ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Gauge className="h-3.5 w-3.5" aria-hidden />}
+            onClick={() => void openScorecard()}
+          >
+            Scorecard
           </Button>
         ) : null}
         {extendable ? (
@@ -778,6 +830,173 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
           </div>
         ) : null}
       </Modal>
+
+      <Modal
+        open={scorecardOpen}
+        onClose={() => setScorecardOpen(false)}
+        title="Competency scorecard"
+        description="Advisory scoring with cited evidence — a human always decides."
+      >
+        {scorecardLoading ? (
+          <p className="text-sm text-ink-2">Loading scorecard…</p>
+        ) : scorecardError ? (
+          <Alert tone="error">{scorecardError}</Alert>
+        ) : scorecard ? (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <Badge tone={scorecard.meets_threshold ? "success" : "muted"}>
+                {scorecard.meets_threshold ? "Meets threshold" : "Below threshold"}
+              </Badge>
+              <span className="text-sm font-semibold tabular-nums text-ink">
+                Overall {scorecard.overall_score}/100
+                {scorecard.threshold > 0 ? ` · threshold ${scorecard.threshold}` : ""}
+              </span>
+            </div>
+            <p className="text-[13px] text-ink-2">{scorecard.recommendation}</p>
+
+            <ul className="space-y-3">
+              {scorecard.competencies.map((item) => (
+                <li
+                  key={item.competency}
+                  className="rounded-btn border border-line px-3 py-2.5"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-[13px] font-medium text-ink">
+                      {item.competency}
+                    </span>
+                    <span className="tabular-nums text-[13px] text-ink-2">
+                      {item.answered > 0 ? `${item.score}/100` : "Not assessed"}
+                    </span>
+                  </div>
+                  {item.evidence.length > 0 ? (
+                    <ul className="mt-1.5 space-y-1">
+                      {item.evidence.flatMap((entry) =>
+                        entry.quotes.map((quote) => (
+                          <li
+                            key={`${entry.question_id}-${quote}`}
+                            className="text-xs italic text-ink-3"
+                          >
+                            &ldquo;{quote}&rdquo;
+                          </li>
+                        )),
+                      )}
+                    </ul>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+
+            {scorecard.strengths.length > 0 || scorecard.concerns.length > 0 ? (
+              <p className="text-xs text-ink-3">
+                {scorecard.strengths.length > 0
+                  ? `Strengths: ${scorecard.strengths.join(", ")}. `
+                  : ""}
+                {scorecard.concerns.length > 0
+                  ? `Concerns: ${scorecard.concerns.join(", ")}.`
+                  : ""}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
     </li>
+  );
+}
+
+const DECISION_OPTIONS: { value: Decision; label: string }[] = [
+  { value: "pending", label: "No decision" },
+  { value: "advance", label: "Advance" },
+  { value: "hold", label: "Hold" },
+  { value: "decline", label: "Decline" },
+];
+
+interface ShortlistPanelProps {
+  jobId: string;
+  reloadSignal: number;
+  onChanged: () => void;
+}
+
+function ShortlistPanel({ jobId, reloadSignal, onChanged }: ShortlistPanelProps) {
+  const { data, loading, error, reload } = useAsync(
+    () => invitationService.getJobShortlist(jobId),
+    [jobId, reloadSignal],
+  );
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const decide = async (entry: ShortlistEntry, decision: Decision) => {
+    setBusyId(entry.invitation_id);
+    setActionError(null);
+    try {
+      await invitationService.setInvitationDecision(entry.invitation_id, decision);
+      reload();
+      onChanged();
+    } catch (caught) {
+      setActionError(toApiError(caught).message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading && !data) return <SkeletonList rows={2} />;
+  if (error) return <Alert tone="error">{error.message}</Alert>;
+  if (!data || data.length === 0) {
+    return (
+      <p className="text-[13px] text-ink-2">
+        No candidates yet — invite someone to build the shortlist.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {actionError ? <Alert tone="error">{actionError}</Alert> : null}
+      <ol className="space-y-2">
+        {data.map((entry, index) => (
+          <li
+            key={entry.invitation_id}
+            className="rounded-btn border border-line px-3.5 py-3"
+          >
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="w-5 shrink-0 text-sm font-semibold tabular-nums text-ink-3">
+                {index + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium text-ink">
+                  {entry.candidate_name || entry.candidate_email}
+                </p>
+                <p className="truncate text-xs text-ink-2">
+                  {entry.status === "completed"
+                    ? `${entry.overall_score}/100${
+                        entry.threshold > 0 ? ` · threshold ${entry.threshold}` : ""
+                      }`
+                    : "Not completed"}
+                </p>
+              </div>
+              {entry.integrity_level ? (
+                <Badge tone={INTEGRITY_TONES[entry.integrity_level]}>
+                  {INTEGRITY_LABELS[entry.integrity_level]}
+                </Badge>
+              ) : null}
+              <select
+                aria-label={`Decision for ${entry.candidate_email}`}
+                className={cx(inputClasses, "h-8 w-32 px-2 py-0 text-xs")}
+                value={entry.decision}
+                disabled={busyId === entry.invitation_id}
+                onChange={(event) =>
+                  void decide(entry, event.target.value as Decision)
+                }
+              >
+                {DECISION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }

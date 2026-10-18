@@ -79,7 +79,7 @@ def _rubric_block(interview: Interview) -> str:
 
     Practice interviews have no rubric, so the model picks its own label.
     """
-    names = [name.strip() for name in interview.rubric if name.strip()]
+    names = [" ".join(name.split()) for name in interview.rubric if name.strip()]
     if not names:
         return "(no fixed rubric — label the answer with the competency it best measures)"
     return ", ".join(names)[:MAX_RUBRIC_CHARS]

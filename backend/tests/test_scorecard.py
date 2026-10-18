@@ -76,7 +76,7 @@ def test_build_aggregates_competencies_with_evidence() -> None:
 
     # Overall averages the competency means (unanswered dimensions excluded).
     assert card.overall_score == 80.0
-    assert card.strengths == ["system design"]
+    assert card.strengths == ["SQL", "system design"]
     assert card.concerns == []
     assert card.threshold == 70.0
     assert card.meets_threshold is True
@@ -140,7 +140,10 @@ def _patch_llm(monkeypatch, prompts: list[str]) -> None:
                 evidence=["I profiled the hot path"],
             )
         if name == "ReportGeneration":
-            return schema(narrative="ok", preparation_plan=[])
+            return schema(
+                narrative="ok",
+                preparation_plan=[{"focus": "Depth", "actions": ["Practice out loud"]}],
+            )
         raise AssertionError(f"unexpected schema {name}")
 
     monkeypatch.setattr(INTERVIEW_LLM, fake)

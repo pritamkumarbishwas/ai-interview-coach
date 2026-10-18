@@ -19,6 +19,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.models.interview import Difficulty, InterviewType, ProctoringMode
 
 InvitationStatus = Literal["pending", "started", "completed", "expired", "revoked"]
+# Recruiter decision after reviewing the advisory scorecard. "pending" means
+# no decision has been recorded yet. The AI never sets this.
+Decision = Literal["pending", "advance", "hold", "decline"]
 
 
 class ScreeningInvitation(BaseModel):
@@ -49,6 +52,11 @@ class ScreeningInvitation(BaseModel):
     # Server-authoritative deadline, set when the candidate starts.
     round_deadline: datetime | None = None
     interview_id: str | None = None
+    # Human decision workflow (advisory scoring never decides for the reviewer).
+    decision: Decision = "pending"
+    decision_note: str = ""
+    decided_by: str | None = None
+    decided_at: datetime | None = None
     created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
