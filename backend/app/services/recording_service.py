@@ -30,6 +30,16 @@ ALLOWED_RECORDING_KINDS = ("camera",)
 ALLOWED_RECORDING_CONTENT_TYPES = ("video/webm", "video/mp4", "video/x-matroska")
 
 
+def _parse_datetime(value: object) -> datetime | None:
+    """Parse a stored ISO timestamp, tolerating junk from old documents."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 class RecordingService:
     def __init__(self, interviews: InterviewRepository) -> None:
         self._interviews = interviews
@@ -47,6 +57,7 @@ class RecordingService:
         chunk: bytes,
         content_type: str,
         finalize: bool,
+        capture_started_at: datetime | None = None,
     ) -> RecordingMeta | None:
         """Append one recorded chunk for (interview, kind).
 
@@ -55,6 +66,10 @@ class RecordingService:
         tracks `seq` and running `size_bytes` so the total cap is enforced
         across chunks. `finalize=True` writes the sealed `RecordingMeta` to
         the interview document.
+
+        ``capture_started_at`` (client-reported media-recorder start) is stored
+        on the first chunk that supplies it and carried forward, so the sealed
+        metadata can map answer timestamps onto positions in the recording.
         """
         if kind not in ALLOWED_RECORDING_KINDS:
             raise NotFoundError(f"Unknown recording kind: {kind}")
@@ -89,6 +104,12 @@ class RecordingService:
                 f"Recording exceeds the "
                 f"{settings.max_recording_bytes // (1024 * 1024)}MB limit."
             )
+        # First non-null capture start wins and is carried forward on every
+        # chunk, so the highest-seq chunk always exposes it to `_seal`.
+        prev_started = (existing_meta or {}).get("capture_started_at")
+        capture_iso = (
+            capture_started_at.isoformat() if capture_started_at is not None else prev_started
+        )
 
         # GridFS has no append, so each chunk is its own file, named
         # "<interview>:<kind>#<seq>" and concatenated on read.
@@ -103,6 +124,7 @@ class RecordingService:
                 # it back to enforce the cap across the whole recording.
                 "size_bytes": total,
                 "content_type": content_type,
+                "capture_started_at": capture_iso,
             },
         )
         await grid_in.write(chunk)
@@ -134,6 +156,7 @@ class RecordingService:
             total += int(grid_out.length)
             count += 1
 
+        chunk_meta = await self._read_grid_meta(bucket, f"{interview_id}:{kind}")
         now = datetime.now(UTC)
         meta = RecordingMeta(
             file_id=f"{interview_id}:{kind}",
@@ -141,6 +164,7 @@ class RecordingService:
             size_bytes=total,
             chunk_count=count,
             finalized=True,
+            capture_started_at=_parse_datetime((chunk_meta or {}).get("capture_started_at")),
             created_at=now,
             updated_at=now,
         )

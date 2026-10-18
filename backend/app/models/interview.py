@@ -63,6 +63,10 @@ class RecordingMeta(BaseModel):
     size_bytes: int = 0
     chunk_count: int = 0
     finalized: bool = False
+    # Wall-clock instant the client's MediaRecorder started, i.e. media time 0.
+    # Reported by the client on the first chunk so a reviewer's jump-to-moment
+    # can map an answer's timestamp onto a position in the recording.
+    capture_started_at: datetime | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

@@ -37,9 +37,16 @@ interface UseInterviewRecorderOptions {
   interviewId?: string;
   /**
    * Overrides the default uploader. Guest sessions pass a token-addressed
-   * uploader so the recorder never hits the authenticated endpoint.
+   * uploader so the recorder never hits the authenticated endpoint. The final
+   * argument is the wall-clock ms when capture started, so the reviewer's
+   * timeline can anchor offsets to media time 0.
    */
-  upload?: (blob: Blob, seq: number, finalize: boolean) => Promise<void>;
+  upload?: (
+    blob: Blob,
+    seq: number,
+    finalize: boolean,
+    captureStartedAtMs: number,
+  ) => Promise<void>;
   targetQuestions: number;
   /** Whether the interview is actively in progress (drives auto-start). */
   active: boolean;
@@ -108,8 +115,9 @@ export function useInterviewRecorder({
 
   const uploadChunk = useCallback(
     async (blob: Blob, seq: number, finalize: boolean) => {
+      const captureStartedAtMs = startedAtRef.current;
       if (upload) {
-        await upload(blob, seq, finalize);
+        await upload(blob, seq, finalize, captureStartedAtMs);
         return;
       }
       if (!interviewId) {
@@ -121,6 +129,7 @@ export function useInterviewRecorder({
         blob,
         finalize,
         blob.type || "video/webm",
+        captureStartedAtMs,
       );
     },
     [interviewId, upload],

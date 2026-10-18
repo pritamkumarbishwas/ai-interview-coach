@@ -69,6 +69,8 @@ class Settings(BaseSettings):
         # profile as authenticated recording, so the same headroom applies.
         "screening_recording": (60, 60),
         "screening_transcribe": (60, 60),
+        # Recruiter playback of a finalized session (occasional, not bulk).
+        "recording_download": (30, 60),
     }
     trust_proxy_headers: bool = False
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "https://resume-builder-rho-woad.vercel.app"]

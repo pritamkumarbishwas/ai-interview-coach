@@ -6,6 +6,8 @@ magic-link token. Token responses are marked ``Cache-Control: private, no-store`
 so an interview link is never cached by a shared proxy or browser history.
 """
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -14,6 +16,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import rate_limit
 from app.models.integrity import IntegrityReport
+from app.models.review import ReviewTimeline
 from app.models.scorecard import Scorecard
 from app.models.user import User
 from app.schemas.answer import AnswerInput, AnswerResultOut
@@ -138,6 +141,39 @@ async def get_invitation_scorecard(
     return await service.scorecard(db, recruiter, invitation_id)
 
 
+@router.get("/{invitation_id}/timeline", response_model=ReviewTimeline)
+async def get_invitation_timeline(
+    invitation_id: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+) -> ReviewTimeline:
+    """Answers + integrity moments anchored to recording time (advisory)."""
+    return await service.timeline(db, recruiter, invitation_id)
+
+
+@router.get("/{invitation_id}/recordings/{kind}")
+async def download_invitation_recording(
+    invitation_id: str,
+    kind: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+    _: None = Depends(rate_limit("recording_download")),
+) -> Response:
+    """Stream a candidate's finalized recording (ownership-gated by invitation)."""
+    data, content_type = await service.recording(db, recruiter, invitation_id, kind)
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={
+            "Content-Length": str(len(data)),
+            "Content-Disposition": f'inline; filename="{kind}.webm"',
+            "Cache-Control": NO_STORE,
+        },
+    )
+
+
 @public_router.get("/{token}", response_model=InvitationSessionOut)
 async def get_session(
     token: str,
@@ -195,6 +231,16 @@ async def answer_question(
 READ_CHUNK = 64 * 1024
 
 
+def _parse_optional_datetime(value: str | None) -> datetime | None:
+    """Parse a client ISO timestamp; ignore anything malformed."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 async def _read_upload(file: UploadFile, max_bytes: int) -> bytes:
     """Read at most `max_bytes` so a hostile client cannot exhaust memory."""
     chunks: list[bytes] = []
@@ -236,6 +282,7 @@ async def upload_recording_chunk(
     seq: int = Form(...),
     finalize: bool = Form(False),
     content_type: str = Form("video/webm"),
+    capture_started_at: str | None = Form(None),
     chunk: UploadFile = File(...),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: ScreeningService = Depends(get_screening_service),
@@ -244,7 +291,16 @@ async def upload_recording_chunk(
     """Append one recorded chunk for a guest session; `finalize=true` seals it."""
     response.headers["Cache-Control"] = NO_STORE
     data = await _read_upload(chunk, settings.max_recording_chunk_bytes)
-    await service.append_recording(db, token, kind, seq, data, content_type, finalize)
+    await service.append_recording(
+        db,
+        token,
+        kind,
+        seq,
+        data,
+        content_type,
+        finalize,
+        capture_started_at=_parse_optional_datetime(capture_started_at),
+    )
 
 
 @public_router.post("/{token}/transcribe", response_model=TranscriptionOut)

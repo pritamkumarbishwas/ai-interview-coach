@@ -1,6 +1,7 @@
 import type { BadgeTone } from "@/components/ui/badge";
 import type {
   Difficulty,
+  IntegrityLevel,
   IntegrityPolicy,
   InterviewType,
   JobStatus,
@@ -44,6 +45,21 @@ export const PROCTORING_LABELS: Record<ProctoringMode, string> = {
 export const INTEGRITY_LABELS: Record<IntegrityPolicy, string> = {
   advisory: "Advisory",
   strict: "Strict",
+};
+
+/** Advisory integrity *level* (session outcome) labels + tones. */
+export const INTEGRITY_LEVEL_LABELS: Record<IntegrityLevel, string> = {
+  low: "Low concern",
+  moderate: "Moderate",
+  elevated: "Elevated",
+  high: "High",
+};
+
+export const INTEGRITY_LEVEL_TONES: Record<IntegrityLevel, BadgeTone> = {
+  low: "success",
+  moderate: "warning",
+  elevated: "danger",
+  high: "danger",
 };
 
 export const RESPONSE_MODE_LABELS: Record<ResponseMode, string> = {

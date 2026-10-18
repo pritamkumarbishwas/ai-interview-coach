@@ -4,9 +4,13 @@ import type {
   Decision,
   IntegrityReport,
   Invitation,
+  ReviewTimeline,
   Scorecard,
   ShortlistEntry,
 } from "@/types";
+
+/** Recordings are large; allow the same headroom as an upload. */
+const RECORDING_TIMEOUT_MS = 60_000;
 
 export async function listInvitations(jobId: string): Promise<Invitation[]> {
   try {
@@ -108,6 +112,37 @@ export async function setInvitationDecision(
       decision,
       note,
     });
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/** Answers + integrity moments anchored to recording time (advisory). */
+export async function getInvitationTimeline(
+  id: string,
+): Promise<ReviewTimeline> {
+  try {
+    const { data } = await api.get<ReviewTimeline>(`/invitations/${id}/timeline`);
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/**
+ * Fetch a candidate's finalized recording as a blob. Callers should
+ * `URL.createObjectURL` and revoke it on unmount.
+ */
+export async function getInvitationRecordingBlob(
+  id: string,
+  kind = "camera",
+): Promise<Blob> {
+  try {
+    const { data } = await api.get<Blob>(
+      `/invitations/${id}/recordings/${kind}`,
+      { responseType: "blob", timeout: RECORDING_TIMEOUT_MS },
+    );
     return data;
   } catch (error) {
     throw toApiError(error);

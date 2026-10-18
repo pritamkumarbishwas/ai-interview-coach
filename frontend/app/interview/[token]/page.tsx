@@ -90,13 +90,14 @@ function ScreeningInterview() {
   const sessionActive = stage === "session" && !completed;
 
   const uploadChunk = useCallback(
-    (blob: Blob, seq: number, finalize: boolean) =>
+    (blob: Blob, seq: number, finalize: boolean, captureStartedAtMs: number) =>
       screening.uploadRecordingChunk(
         token,
         seq,
         blob,
         finalize,
         blob.type || "video/webm",
+        captureStartedAtMs,
       ),
     [token],
   );

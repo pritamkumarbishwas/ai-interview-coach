@@ -70,6 +70,9 @@ class ShortlistEntry(BaseModel):
     overall_score: float = 0.0
     threshold: float = 0.0
     meets_threshold: bool = False
+    # Cohort-relative context (advisory; computed against this job's candidates).
+    percentile: float | None = None
+    z_score: float | None = None
     competency_count: int = 0
     integrity_level: str | None = None
     integrity_score: int | None = None

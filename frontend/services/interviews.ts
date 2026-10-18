@@ -141,6 +141,7 @@ export async function uploadRecordingChunk(
   chunk: Blob,
   finalize: boolean,
   contentType = "video/webm",
+  captureStartedAtMs?: number,
 ): Promise<void> {
   // MediaRecorder blobs carry codec parameters (e.g. "video/webm;codecs=vp9,opus");
   // the API expects the bare MIME type.
@@ -150,6 +151,10 @@ export async function uploadRecordingChunk(
   form.append("seq", String(seq));
   form.append("finalize", String(finalize));
   form.append("content_type", baseContentType);
+  if (captureStartedAtMs) {
+    // Anchors reviewer-timeline offsets to media time 0.
+    form.append("capture_started_at", new Date(captureStartedAtMs).toISOString());
+  }
   form.append("chunk", chunk, `camera-${seq}.webm`);
   try {
     await api.post(`/interviews/${interviewId}/recordings/chunk`, form, {

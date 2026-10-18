@@ -399,6 +399,9 @@ export interface ShortlistEntry {
   threshold: number;
   meets_threshold: boolean;
   competency_count: number;
+  /** Cohort-relative context (advisory; null until at least one peer is scored). */
+  percentile: number | null;
+  z_score: number | null;
   integrity_level: IntegrityLevel | null;
   integrity_score: number | null;
   generated_at: string | null;
@@ -494,6 +497,34 @@ export interface Scorecard {
   threshold: number;
   meets_threshold: boolean;
   identity_hidden: boolean;
+  generated_at: string;
+}
+
+/* ---- Review timeline (transcript ↔ recording navigation) ---------------- */
+
+export type TimelineEntryKind = "answer" | "signal";
+
+export interface TimelineEntry {
+  kind: TimelineEntryKind;
+  /** Seconds from the start of the recording (media time 0). */
+  at_seconds: number;
+  at: string | null;
+  label: string;
+  question_id: string;
+  question: string;
+  answer: string;
+  competency: string;
+  score: number | null;
+  severity: number;
+}
+
+export interface ReviewTimeline {
+  interview_id: string;
+  /** True when offsets are anchored to the client-reported recorder start. */
+  anchored_to_recording: boolean;
+  recording_available: boolean;
+  duration_seconds: number;
+  entries: TimelineEntry[];
   generated_at: string;
 }
 

@@ -10,6 +10,7 @@ import {
   Check,
   Clock,
   Copy,
+  Film,
   Gauge,
   Save,
   ShieldCheck,
@@ -18,6 +19,10 @@ import {
 } from "lucide-react";
 
 import { RequireRole } from "@/components/auth/require-role";
+import {
+  CandidateTimelineModal,
+  CompareCandidatesButton,
+} from "@/components/recruiting/candidate-review";
 import { Alert } from "@/components/ui/alert";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,13 +33,18 @@ import { FullScreenLoader, SkeletonList } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
 import { toApiError } from "@/lib/api";
-import { JOB_STATUS_LABELS, JOB_STATUS_TONES, STAFF_ROLES } from "@/lib/recruiting";
+import {
+  INTEGRITY_LEVEL_LABELS,
+  INTEGRITY_LEVEL_TONES,
+  JOB_STATUS_LABELS,
+  JOB_STATUS_TONES,
+  STAFF_ROLES,
+} from "@/lib/recruiting";
 import { cx, formatDate } from "@/lib/utils";import * as invitationService from "@/services/invitations";
 import * as jobService from "@/services/jobs";
 import * as templateService from "@/services/templates";
 import type {
   Decision,
-  IntegrityLevel,
   IntegrityReport,
   Invitation,
   InvitationStatus,
@@ -57,20 +67,6 @@ const INVITATION_LABELS: Record<InvitationStatus, string> = {
   completed: "Completed",
   expired: "Expired",
   revoked: "Revoked",
-};
-
-const INTEGRITY_TONES: Record<IntegrityLevel, BadgeTone> = {
-  low: "success",
-  moderate: "warning",
-  elevated: "danger",
-  high: "danger",
-};
-
-const INTEGRITY_LABELS: Record<IntegrityLevel, string> = {
-  low: "Low concern",
-  moderate: "Moderate",
-  elevated: "Elevated",
-  high: "High",
 };
 
 function CopyLinkButton({ url }: { url: string }) {
@@ -585,6 +581,7 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
   const [scorecardOpen, setScorecardOpen] = useState(false);
   const [scorecardLoading, setScorecardLoading] = useState(false);
   const [scorecardError, setScorecardError] = useState<string | null>(null);
+  const [timelineOpen, setTimelineOpen] = useState(false);
 
   const openScorecard = async () => {
     setScorecardOpen(true);
@@ -690,6 +687,16 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
             Integrity
           </Button>
         ) : null}
+        {hasSession ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Film className="h-3.5 w-3.5" aria-hidden />}
+            onClick={() => setTimelineOpen(true)}
+          >
+            Timeline
+          </Button>
+        ) : null}
         {invitation.status === "completed" ? (
           <Button
             variant="ghost"
@@ -767,8 +774,8 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
         ) : integrity ? (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <Badge tone={INTEGRITY_TONES[integrity.level]}>
-                {INTEGRITY_LABELS[integrity.level]}
+              <Badge tone={INTEGRITY_LEVEL_TONES[integrity.level]}>
+                {INTEGRITY_LEVEL_LABELS[integrity.level]}
               </Badge>
               <span className="text-sm font-semibold tabular-nums text-ink">
                 Clean-session score {integrity.score}/100
@@ -899,6 +906,15 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
           </div>
         ) : null}
       </Modal>
+
+      <CandidateTimelineModal
+        invitationId={invitation.id}
+        candidateName={
+          invitation.candidate_name || invitation.candidate_email
+        }
+        open={timelineOpen}
+        onClose={() => setTimelineOpen(false)}
+      />
     </li>
   );
 }
@@ -951,6 +967,9 @@ function ShortlistPanel({ jobId, reloadSignal, onChanged }: ShortlistPanelProps)
   return (
     <div className="space-y-3">
       {actionError ? <Alert tone="error">{actionError}</Alert> : null}
+      <div className="flex justify-end">
+        <CompareCandidatesButton entries={data} />
+      </div>
       <ol className="space-y-2">
         {data.map((entry, index) => (
           <li
@@ -969,13 +988,17 @@ function ShortlistPanel({ jobId, reloadSignal, onChanged }: ShortlistPanelProps)
                   {entry.status === "completed"
                     ? `${entry.overall_score}/100${
                         entry.threshold > 0 ? ` · threshold ${entry.threshold}` : ""
+                      }${
+                        entry.percentile !== null
+                          ? ` · ${entry.percentile}th pct`
+                          : ""
                       }`
                     : "Not completed"}
                 </p>
               </div>
               {entry.integrity_level ? (
-                <Badge tone={INTEGRITY_TONES[entry.integrity_level]}>
-                  {INTEGRITY_LABELS[entry.integrity_level]}
+                <Badge tone={INTEGRITY_LEVEL_TONES[entry.integrity_level]}>
+                  {INTEGRITY_LEVEL_LABELS[entry.integrity_level]}
                 </Badge>
               ) : null}
               <select

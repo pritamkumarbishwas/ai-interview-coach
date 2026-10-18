@@ -78,6 +78,10 @@ def test_shortlist_ranks_completed_candidates(
     assert top["competency_count"] == 1
     assert top["integrity_level"] is not None
     assert top["decision"] == "pending"
+    # Only one candidate is scored, so its percentile is the neutral 50 (never
+    # presented as "top of the cohort" on a sample of one).
+    assert top["percentile"] == 50.0
+    assert top["z_score"] == 0.0
 
     # A not-yet-finished candidate still appears, ranked last with no scores.
     assert rows[1]["status"] == "pending"

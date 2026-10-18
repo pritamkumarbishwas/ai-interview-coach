@@ -26,6 +26,7 @@ from app.models.interview import Interview
 from app.models.invitation import ScreeningInvitation
 from app.models.job import Job
 from app.models.job_description import JobDescription
+from app.models.review import ReviewTimeline
 from app.models.scorecard import Scorecard
 from app.models.template import InterviewTemplate
 from app.models.template_config import RoundConfig
@@ -46,7 +47,9 @@ from app.schemas.invitation import (
 from app.services.audit_service import audit_service
 from app.services.integrity_service import integrity_service
 from app.services.interview_service import InterviewService
+from app.services.normalization_service import normalize
 from app.services.recording_service import RecordingService
+from app.services.review_service import review_service
 from app.services.scorecard_service import scorecard_service
 
 logger = logging.getLogger(__name__)
@@ -362,6 +365,14 @@ class ScreeningService:
                     entry.generated_at = card.generated_at
             entries.append(entry)
 
+        # Cohort-relative context across the scored candidates of this job.
+        scored = [entry for entry in entries if entry.status == "completed"]
+        for entry, normalized in zip(
+            scored, normalize([item.overall_score for item in scored]), strict=True
+        ):
+            entry.percentile = normalized.percentile
+            entry.z_score = normalized.z_score
+
         entries.sort(
             key=lambda item: (
                 item.status == "completed",
@@ -371,6 +382,26 @@ class ScreeningService:
             reverse=True,
         )
         return entries
+
+    async def timeline(
+        self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
+    ) -> ReviewTimeline:
+        """Answers + integrity moments anchored to recording time (advisory)."""
+        interview = await self._require_interview(db, recruiter, invitation_id)
+        return review_service.build(interview, integrity_service.build(interview))
+
+    async def recording(
+        self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str, kind: str
+    ) -> tuple[bytes, str]:
+        """Stream a candidate's finalized recording to the owning recruiter.
+
+        The interview is owned by the internal guest identity, so ownership is
+        gated by the invitation and the guest id is used for the GridFS read.
+        """
+        interview = await self._require_interview(db, recruiter, invitation_id)
+        return await self._recordings.read_recording(
+            db, interview.user_id, interview.id or "", kind
+        )
 
     async def _require_interview(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
@@ -489,6 +520,7 @@ class ScreeningService:
         data: bytes,
         content_type: str,
         finalize: bool,
+        capture_started_at: datetime | None = None,
     ) -> None:
         """Store one recorded chunk for the guest's interview (token-addressed).
 
@@ -508,6 +540,7 @@ class ScreeningService:
             data,
             content_type,
             finalize,
+            capture_started_at=capture_started_at,
         )
 
     async def record_event(
