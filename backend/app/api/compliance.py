@@ -15,7 +15,7 @@ from app.schemas.compliance import ComplianceRecord, Subprocessor
 
 router = APIRouter()
 
-# Data-subject rights implemented today (see `docs/compliance/data-processing.md`).
+# Data-subject rights implemented today.
 DATA_SUBJECT_ENDPOINTS = [
     "GET /api/invitations/{id}/data (right of access)",
     "POST /api/invitations/{id}/erase (right to erasure)",
