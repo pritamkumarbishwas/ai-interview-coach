@@ -36,6 +36,13 @@ class Evaluation(BaseModel):
     feedback: str = ""
     improved_answer: str = ""
     next_step: NextStep = "new_topic"
+    # Rubric dimension this answer is scored against (empty on documents
+    # written before rubric scoring existed; the scorecard falls back to the
+    # question's topic).
+    competency: str = ""
+    # Verbatim quotes lifted from the candidate's answer that justify the
+    # score — the evidence a reviewer can jump back to.
+    evidence: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

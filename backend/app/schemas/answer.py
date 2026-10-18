@@ -33,3 +33,7 @@ class EvaluationGeneration(BaseModel):
     feedback: str = Field(min_length=1)
     improved_answer: str = Field(min_length=1)
     next_step: NextStep = "new_topic"
+    # Rubric dimension + verbatim supporting quotes. Optional so older prompts
+    # (and test fakes) that omit them still validate.
+    competency: str = ""
+    evidence: list[str] = Field(default_factory=list)

@@ -1,5 +1,9 @@
 import { api, toApiError } from "@/lib/api";
-import type { CreateInvitationInput, Invitation } from "@/types";
+import type {
+  CreateInvitationInput,
+  IntegrityReport,
+  Invitation,
+} from "@/types";
 
 export async function listInvitations(jobId: string): Promise<Invitation[]> {
   try {
@@ -50,6 +54,18 @@ export async function extendInvitation(
     const { data } = await api.post<Invitation>(`/invitations/${id}/extend`, {
       minutes,
     });
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/** Advisory integrity summary + flagged-moment timeline for a candidate. */
+export async function getInvitationIntegrity(
+  id: string,
+): Promise<IntegrityReport> {
+  try {
+    const { data } = await api.get<IntegrityReport>(`/invitations/${id}/integrity`);
     return data;
   } catch (error) {
     throw toApiError(error);

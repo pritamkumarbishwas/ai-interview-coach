@@ -18,6 +18,13 @@ each from 0 to 100:
 Then provide strengths (what was good), weaknesses (what was missing or
 wrong), actionable feedback, and an improved model answer.
 
+Rubric for this round:
+{rubric}
+Set "competency" to the single rubric dimension this answer best measures
+(use one of the rubric names above when a rubric is given; otherwise a short
+label such as "problem solving"). Set "evidence" to 1-3 SHORT verbatim quotes
+copied from the candidate's answer that justify the scores.
+
 Finally choose exactly one next_step:
 - "follow_up": dig deeper into the same topic as this question
 - "harder": raise the difficulty on this topic
@@ -26,7 +33,7 @@ Finally choose exactly one next_step:
 
 Return JSON with exactly these keys: scores (object with technical,
 relevance, completeness, structure, clarity), strengths, weaknesses,
-feedback, improved_answer, next_step.
+feedback, improved_answer, next_step, competency, evidence.
 
 <question>
 {question}

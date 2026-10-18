@@ -39,6 +39,9 @@ class ScreeningInvitation(BaseModel):
     target_questions: int = 5
     proctoring_mode: ProctoringMode = "strict"
     round_minutes: int = 30
+    # Competency rubric + advisory pass threshold snapshotted from the round.
+    rubric: list[str] = Field(default_factory=list)
+    pass_threshold: float = 0.0
     status: InvitationStatus = "pending"
     expires_at: datetime
     start_window_start: datetime | None = None

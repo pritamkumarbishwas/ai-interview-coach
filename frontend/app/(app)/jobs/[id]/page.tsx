@@ -11,6 +11,7 @@ import {
   Clock,
   Copy,
   Save,
+  ShieldCheck,
   Trash,
   UserPlus,
 } from "lucide-react";
@@ -30,7 +31,13 @@ import { JOB_STATUS_LABELS, JOB_STATUS_TONES, STAFF_ROLES } from "@/lib/recruiti
 import { cx, formatDate } from "@/lib/utils";import * as invitationService from "@/services/invitations";
 import * as jobService from "@/services/jobs";
 import * as templateService from "@/services/templates";
-import type { Invitation, InvitationStatus, JobStatus } from "@/types";
+import type {
+  IntegrityLevel,
+  IntegrityReport,
+  Invitation,
+  InvitationStatus,
+  JobStatus,
+} from "@/types";
 
 const INVITATION_TONES: Record<InvitationStatus, BadgeTone> = {
   pending: "warning",
@@ -46,6 +53,20 @@ const INVITATION_LABELS: Record<InvitationStatus, string> = {
   completed: "Completed",
   expired: "Expired",
   revoked: "Revoked",
+};
+
+const INTEGRITY_TONES: Record<IntegrityLevel, BadgeTone> = {
+  low: "success",
+  moderate: "warning",
+  elevated: "danger",
+  high: "danger",
+};
+
+const INTEGRITY_LABELS: Record<IntegrityLevel, string> = {
+  low: "Low concern",
+  moderate: "Moderate",
+  elevated: "Elevated",
+  high: "High",
 };
 
 function CopyLinkButton({ url }: { url: string }) {
@@ -532,6 +553,24 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
   const [busy, setBusy] = useState<"remind" | "revoke" | "extend" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [extendMinutes, setExtendMinutes] = useState("15");
+  const [integrity, setIntegrity] = useState<IntegrityReport | null>(null);
+  const [integrityOpen, setIntegrityOpen] = useState(false);
+  const [integrityLoading, setIntegrityLoading] = useState(false);
+  const [integrityError, setIntegrityError] = useState<string | null>(null);
+
+  const openIntegrity = async () => {
+    setIntegrityOpen(true);
+    if (integrity) return;
+    setIntegrityLoading(true);
+    setIntegrityError(null);
+    try {
+      setIntegrity(await invitationService.getInvitationIntegrity(invitation.id));
+    } catch (caught) {
+      setIntegrityError(toApiError(caught).message);
+    } finally {
+      setIntegrityLoading(false);
+    }
+  };
 
   const remind = async () => {
     setBusy("remind");
@@ -581,6 +620,8 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
     invitation.status === "pending" ||
     invitation.status === "started" ||
     invitation.status === "expired";
+  const hasSession =
+    invitation.status === "started" || invitation.status === "completed";
 
   return (
     <li className="rounded-btn border border-line px-3.5 py-3">
@@ -597,6 +638,16 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
         <Badge tone={INVITATION_TONES[invitation.status]}>
           {INVITATION_LABELS[invitation.status]}
         </Badge>
+        {hasSession ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<ShieldCheck className="h-3.5 w-3.5" aria-hidden />}
+            onClick={() => void openIntegrity()}
+          >
+            Integrity
+          </Button>
+        ) : null}
         {extendable ? (
           <div className="flex items-center gap-1.5">
             <select
@@ -650,6 +701,83 @@ function InvitationRow({ invitation, onChanged, onLink }: InvitationRowProps) {
           {error}
         </p>
       ) : null}
+
+      <Modal
+        open={integrityOpen}
+        onClose={() => setIntegrityOpen(false)}
+        title="Integrity summary"
+        description="Advisory signals only — a human always decides."
+      >
+        {integrityLoading ? (
+          <p className="text-sm text-ink-2">Loading integrity summary…</p>
+        ) : integrityError ? (
+          <Alert tone="error">{integrityError}</Alert>
+        ) : integrity ? (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Badge tone={INTEGRITY_TONES[integrity.level]}>
+                {INTEGRITY_LABELS[integrity.level]}
+              </Badge>
+              <span className="text-sm font-semibold tabular-nums text-ink">
+                Clean-session score {integrity.score}/100
+              </span>
+            </div>
+
+            {integrity.recording_available ? (
+              <p className="flex items-center gap-2 text-xs text-ink-2">
+                <ShieldCheck className="h-3.5 w-3.5 text-brand" aria-hidden />
+                Session recording available (
+                {Math.round(integrity.recording_size_bytes / 1024 / 1024)} MB)
+              </p>
+            ) : null}
+
+            {integrity.signals.length > 0 ? (
+              <ul className="space-y-2">
+                {integrity.signals.map((signal) => (
+                  <li
+                    key={signal.type}
+                    className="flex items-center justify-between gap-3 text-[13px] text-ink"
+                  >
+                    <span className="min-w-0">{signal.label}</span>
+                    <span className="tabular-nums text-ink-2">×{signal.count}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[13px] text-ink-2">
+                No notable signals during the session.
+              </p>
+            )}
+
+            {integrity.moments.length > 0 ? (
+              <div>
+                <h5 className="text-[13px] font-semibold text-ink">Timeline</h5>
+                <ul className="mt-2 space-y-1.5">
+                  {integrity.moments.map((moment, index) => (
+                    <li
+                      key={`${moment.type}-${index}`}
+                      className="flex items-center justify-between gap-3 text-xs text-ink-2"
+                    >
+                      <span className="min-w-0 truncate">{moment.label}</span>
+                      <span className="tabular-nums">
+                        {moment.at ? new Date(`${moment.at}Z`).toLocaleTimeString() : "—"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {integrity.notes.length > 0 ? (
+              <ul className="space-y-1 text-xs text-ink-3">
+                {integrity.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
     </li>
   );
 }

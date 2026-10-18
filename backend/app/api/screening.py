@@ -13,6 +13,8 @@ from app.api.deps import get_screening_service, require_recruiter
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import rate_limit
+from app.models.integrity import IntegrityReport
+from app.models.scorecard import Scorecard
 from app.models.user import User
 from app.schemas.answer import AnswerInput, AnswerResultOut
 from app.schemas.interview import CurrentQuestionOut, ProctoringEventCreate
@@ -85,6 +87,28 @@ async def extend_invitation(
 ) -> InvitationOut:
     """Grant extra time on an invitation (accessibility accommodation)."""
     return await service.extend(db, recruiter, invitation_id, payload.minutes)
+
+
+@router.get("/{invitation_id}/integrity", response_model=IntegrityReport)
+async def get_invitation_integrity(
+    invitation_id: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+) -> IntegrityReport:
+    """Advisory integrity summary + flagged-moment timeline (never a verdict)."""
+    return await service.integrity(db, recruiter, invitation_id)
+
+
+@router.get("/{invitation_id}/scorecard", response_model=Scorecard)
+async def get_invitation_scorecard(
+    invitation_id: str,
+    recruiter: User = Depends(require_recruiter),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+) -> Scorecard:
+    """Advisory, rubric-based competency scorecard with cited evidence."""
+    return await service.scorecard(db, recruiter, invitation_id)
 
 
 @public_router.get("/{token}", response_model=InvitationSessionOut)

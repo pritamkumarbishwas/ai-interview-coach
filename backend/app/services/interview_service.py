@@ -50,6 +50,11 @@ logger = logging.getLogger(__name__)
 STRONG_TOPIC_MIN_SCORE = 70.0
 WEAK_TOPIC_MAX_SCORE = 50.0
 
+# Cap the verbatim quotes stored per answer so a chatty model cannot bloat the
+# evaluation document.
+MAX_EVIDENCE_QUOTES = 5
+MAX_RUBRIC_CHARS = 600
+
 # Deferred-evaluation pipeline: bounded concurrency for the end-of-exam
 # parallel evaluation calls, plus strong references so fire-and-forget
 # background tasks are not garbage-collected mid-run.
@@ -67,6 +72,17 @@ def _report_lock(interview_id: str) -> asyncio.Lock:
         lock = asyncio.Lock()
         _report_locks[interview_id] = lock
     return lock
+
+
+def _rubric_block(interview: Interview) -> str:
+    """Rubric dimensions for the evaluation prompt, bounded and safe.
+
+    Practice interviews have no rubric, so the model picks its own label.
+    """
+    names = [name.strip() for name in interview.rubric if name.strip()]
+    if not names:
+        return "(no fixed rubric — label the answer with the competency it best measures)"
+    return ", ".join(names)[:MAX_RUBRIC_CHARS]
 
 
 def _context_block(data: object, limit: int = MAX_CONTEXT_CHARS) -> str:
@@ -476,6 +492,20 @@ class InterviewService:
                 return _report_out(latest)
             return _report_out(Interview(**doc))
 
+    async def ensure_evaluations(
+        self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str
+    ) -> None:
+        """Evaluate any answers still pending scoring (idempotent, self-healing).
+
+        The screening scorecard calls this so a reviewer opening it never
+        depends on the completion-time background task having finished.
+        """
+        async with _report_lock(interview_id):
+            doc = await self._interviews.find_owned(db, interview_id, user_id)
+            if doc is None:
+                return
+            await self._ensure_evaluations(db, Interview(**doc))
+
     def _spawn_evaluation_task(
         self, db: AsyncIOMotorDatabase, interview: Interview
     ) -> None:
@@ -594,8 +624,10 @@ class InterviewService:
             role=interview.role,
             level=interview.level,
             difficulty=interview.difficulty,
+            prompt="",
             question=question.text,
             answer=answer_text,
+            rubric=_rubric_block(interview),
         )
         try:
             result = await llm_service.generate_structured(
@@ -614,6 +646,10 @@ class InterviewService:
             feedback=result.feedback,
             improved_answer=result.improved_answer,
             next_step=result.next_step,
+            competency=result.competency.strip(),
+            evidence=[quote.strip() for quote in result.evidence if quote.strip()][
+                :MAX_EVIDENCE_QUOTES
+            ],
         )
 
     async def _generate_next_question(

@@ -21,10 +21,12 @@ from app.core.exceptions import ConflictError, NotFoundError
 from app.core.mailer import EmailMessage, get_mailer
 from app.core.transcription import get_transcriber
 from app.emails.templates import invitation_email, reminder_email
+from app.models.integrity import IntegrityReport
 from app.models.interview import Interview
 from app.models.invitation import ScreeningInvitation
 from app.models.job import Job
 from app.models.job_description import JobDescription
+from app.models.scorecard import Scorecard
 from app.models.template import InterviewTemplate
 from app.models.template_config import RoundConfig
 from app.models.user import User
@@ -41,8 +43,10 @@ from app.schemas.invitation import (
     InvitationSessionOut,
 )
 from app.services.audit_service import audit_service
+from app.services.integrity_service import integrity_service
 from app.services.interview_service import InterviewService
 from app.services.recording_service import RecordingService
+from app.services.scorecard_service import scorecard_service
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +131,8 @@ class ScreeningService:
             target_questions=round_config.target_questions,
             proctoring_mode=template.config.proctoring_mode if template else "strict",
             round_minutes=round_config.duration_minutes + payload.extra_minutes,
+            rubric=list(round_config.rubric),
+            pass_threshold=round_config.pass_threshold,
             expires_at=_now() + timedelta(days=ttl_days),
             start_window_start=payload.start_window_start,
             start_window_end=payload.start_window_end,
@@ -244,6 +250,49 @@ class ScreeningService:
         invitation.round_deadline = new_deadline
         return self._to_out(invitation)
 
+    async def integrity(
+        self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
+    ) -> IntegrityReport:
+        """Advisory integrity summary for a candidate's session (recruiter view).
+
+        Access is gated by invitation ownership (``created_by``); the interview
+        itself is owned by the internal guest identity, so it is fetched
+        regardless of owner once the invitation checks out.
+        """
+        interview = await self._require_interview(db, recruiter, invitation_id)
+        return integrity_service.build(interview)
+
+    async def scorecard(
+        self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
+    ) -> Scorecard:
+        """Advisory, rubric-based scorecard for a candidate (recruiter view).
+
+        Aggregated in code from the stored evaluations; the candidate's identity
+        is never part of the scoring. Same ownership gate as ``integrity``.
+        """
+        interview = await self._require_interview(db, recruiter, invitation_id)
+        if interview.status == "completed":
+            # Backfill any answers the completion-time task has not scored yet.
+            await self._interview_service.ensure_evaluations(
+                db, interview.id or "", interview.user_id
+            )
+            interview = await self._require_interview(db, recruiter, invitation_id)
+        return scorecard_service.build(interview)
+
+    async def _require_interview(
+        self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
+    ) -> Interview:
+        doc = await self._invitations.find_owned(db, invitation_id, recruiter.id or "")
+        if doc is None:
+            raise NotFoundError("Invitation not found")
+        invitation = ScreeningInvitation(**doc)
+        if not invitation.interview_id:
+            raise ConflictError("This candidate has not started the interview yet.")
+        interview_doc = await self._interviews.get_by_id(db, invitation.interview_id)
+        if interview_doc is None:
+            raise NotFoundError("Interview not found")
+        return Interview(**interview_doc)
+
     # --- Candidate-facing (token) ------------------------------------------
     async def session(self, db: AsyncIOMotorDatabase, token: str) -> InvitationSessionOut:
         invitation = await self._require_token(db, token)
@@ -289,6 +338,8 @@ class ScreeningService:
             difficulty=invitation.difficulty,
             proctoring_mode=invitation.proctoring_mode,
             target_questions=invitation.target_questions,
+            rubric=list(invitation.rubric),
+            pass_threshold=invitation.pass_threshold,
         )
         interview.id = await self._interviews.insert(db, interview)
         await self._invitations.mark_started(db, invitation.id or "", interview.id, deadline)

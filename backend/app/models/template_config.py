@@ -26,6 +26,11 @@ class RoundConfig(BaseModel):
     duration_minutes: int = Field(default=30, ge=1, le=180)
     target_questions: int = Field(default=5, ge=1, le=20)
     response_modes: list[ResponseMode] = Field(default_factory=lambda: ["voice", "typed"])
+    # Competency rubric for the round; answers are scored against these
+    # dimensions and the reviewer sees a per-competency scorecard.
+    rubric: list[str] = Field(default_factory=list)
+    # Advisory pass threshold (0-100). 0 disables the pass/fail comparison.
+    pass_threshold: float = Field(default=0.0, ge=0, le=100)
 
     model_config = ConfigDict(extra="forbid")
 

@@ -412,6 +412,39 @@ export interface InvitationSession {
   round_deadline: string | null;
 }
 
+/** Advisory integrity summary for a candidate session (never a verdict). */
+export type IntegrityLevel = "low" | "moderate" | "elevated" | "high";
+
+export interface IntegritySignalCount {
+  type: string;
+  label: string;
+  count: number;
+  weight: number;
+}
+
+export interface IntegrityMoment {
+  at: string | null;
+  type: string;
+  label: string;
+  severity: number;
+  details: Record<string, unknown>;
+}
+
+export interface IntegrityReport {
+  interview_id: string;
+  advisory: boolean;
+  score: number;
+  level: IntegrityLevel;
+  session_started_at: string | null;
+  session_ended_at: string | null;
+  recording_available: boolean;
+  recording_size_bytes: number;
+  signals: IntegritySignalCount[];
+  moments: IntegrityMoment[];
+  notes: string[];
+  generated_at: string;
+}
+
 /* ---- Staff & roles ------------------------------------------------------ */
 
 export type StaffInvitationStatus = "pending" | "accepted" | "revoked";

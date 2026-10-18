@@ -82,6 +82,11 @@ class Interview(BaseModel):
     proctoring_session: ProctoringSession | None = None
     # The interview completes automatically once this many answers are scored.
     target_questions: int = 5
+    # Competency rubric for a screening round (empty for practice). Used to
+    # label answer evaluations and to build the advisory scorecard.
+    rubric: list[str] = Field(default_factory=list)
+    # Advisory pass threshold (0-100) for the round; 0 disables the comparison.
+    pass_threshold: float = 0.0
     questions: list[Question] = Field(default_factory=list)
     answers: list[Answer] = Field(default_factory=list)
     # Cached final report; generated once on completion (backfilled by the
