@@ -53,6 +53,25 @@ async def test_generate_structured_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_generate_structured_supports_compact_system_prompt() -> None:
+    service = LLMService()
+    mock_client = MockAsyncOpenAI(['{"score": 8, "feedback": "Good job!"}'])
+    service.client = mock_client
+
+    result = await service.generate_structured(
+        "Extract this resume",
+        MockResponseSchema,
+        system_prompt="Return only the requested JSON object.",
+    )
+
+    assert result.score == 8
+    assert mock_client.last_kwargs["messages"][0] == {
+        "role": "system",
+        "content": "Return only the requested JSON object.",
+    }
+
+
+@pytest.mark.asyncio
 async def test_generate_structured_retry_logic() -> None:
     service = LLMService()
     mock_client = MockAsyncOpenAI(

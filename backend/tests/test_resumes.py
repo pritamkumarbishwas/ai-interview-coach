@@ -216,12 +216,14 @@ def test_large_resumes_are_extracted_in_bounded_chunks(
 ) -> None:
     """Long documents are split so no single provider request exceeds the budget."""
     prompts: list[str] = []
+    calls: list[dict] = []
 
     def huge_pages(file_bytes: bytes):
         return [{"page": 0, "text": "Experience: backend services.\n" * 5000}]
 
     async def capturing_extraction(prompt: str, schema, **kwargs):
         prompts.append(prompt)
+        calls.append(kwargs)
         return schema(skills=[], experience=[], projects=[], education=[])
 
     monkeypatch.setattr(RESUME_PARSE_PAGES, huge_pages)
@@ -237,6 +239,7 @@ def test_large_resumes_are_extracted_in_bounded_chunks(
     assert max(len(prompt) for prompt in prompts) < (
         settings.resume_extraction_chunk_chars + 15_000
     )
+    assert all(call.get("system_prompt") for call in calls)
 
 
 def test_upload_is_queued_when_inline_processing_is_disabled(

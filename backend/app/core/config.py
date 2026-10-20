@@ -55,8 +55,8 @@ class Settings(BaseSettings):
     resume_max_previews: int = Field(default=40, ge=1, le=200)
     resume_max_pages: int = Field(default=60, ge=1, le=500)
     resume_max_inline_text_chars: int = Field(default=200_000, ge=10_000)
-    resume_max_extraction_chunks: int = Field(default=40, ge=1, le=200)
-    resume_extraction_chunk_chars: int = Field(default=7_000, ge=2_000, le=12_000)
+    resume_max_extraction_chunks: int = Field(default=12, ge=1, le=200)
+    resume_extraction_chunk_chars: int = Field(default=5_000, ge=2_000, le=12_000)
     # Inline is the safe local-development default; Compose turns it off and
     # uses the durable background worker for OCR/LLM processing.
     resume_processing_inline: bool = True

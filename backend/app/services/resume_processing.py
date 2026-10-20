@@ -23,7 +23,10 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.core.config import resolve_storage_dir, settings
 from app.models.resume import ResumePreview
-from app.prompts.templates import EXTRACT_RESUME_INFO_PROMPT
+from app.prompts.templates import (
+    EXTRACT_RESUME_INFO_PROMPT,
+    EXTRACT_RESUME_SYSTEM_PROMPT,
+)
 from app.repositories.resume_repository import ResumeRepository, resume_repository
 from app.schemas.resume import ContactInfo, ContactLink, ResumeStructuredData
 from app.services.llm_service import llm_service
@@ -747,7 +750,10 @@ class ResumeProcessingService:
             try:
                 results.append(
                     await llm_service.generate_structured(
-                        prompt, ResumeStructuredData, max_retries=2
+                        prompt,
+                        ResumeStructuredData,
+                        max_retries=3,
+                        system_prompt=EXTRACT_RESUME_SYSTEM_PROMPT,
                     )
                 )
             except Exception as exc:

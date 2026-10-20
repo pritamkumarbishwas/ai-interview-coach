@@ -238,21 +238,33 @@ class LLMService:
             max_retries=0,
         )
 
-    async def generate_structured(self, prompt: str, schema: type[T], max_retries: int = 3) -> T:
+    async def generate_structured(
+        self,
+        prompt: str,
+        schema: type[T],
+        max_retries: int = 3,
+        *,
+        system_prompt: str | None = None,
+    ) -> T:
         """Ask the model for JSON and validate it against `schema`.
 
         Invalid JSON / schema violations are fed back to the model; transient
         API failures are retried with a short backoff. After `max_retries`
         attempts the last error is raised.
+
+        `system_prompt` can replace the full JSON-schema system message for
+        prompts that already describe their keys. The schema is still enforced
+        locally by Pydantic; this mainly saves prompt tokens on low-TPM tiers.
         """
         # Refuse to spend past the configured monthly ceiling (Phase 9).
         await _enforce_budget()
 
-        system_prompt = (
-            "You are a helpful AI assistant. You must respond in ONLY valid JSON.\n"
-            f"The JSON must strictly match the following schema:\n"
-            f"{json.dumps(schema.model_json_schema())}"
-        )
+        if system_prompt is None:
+            system_prompt = (
+                "You are a helpful AI assistant. You must respond in ONLY valid JSON.\n"
+                f"The JSON must strictly match the following schema:\n"
+                f"{json.dumps(schema.model_json_schema())}"
+            )
         base_messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt},
