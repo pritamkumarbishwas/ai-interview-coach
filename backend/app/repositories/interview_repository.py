@@ -81,6 +81,20 @@ class InterviewRepository:
         doc = await db[self.collection_name].find_one({"_id": object_id})
         return stringify_id(doc) if doc else None
 
+    async def active_ids_for_resume(
+        self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str
+    ) -> list[str]:
+        """Ids of interviews that still reference a resume and are unfinished."""
+        cursor = db[self.collection_name].find(
+            {
+                "user_id": user_id,
+                "resume_id": resume_id,
+                "status": {"$in": ["created", "in_progress"]},
+            },
+            {"_id": 1},
+        )
+        return [str(doc["_id"]) async for doc in cursor]
+
     async def find_by_question(
         self, db: AsyncIOMotorDatabase, question_id: str, user_id: str
     ) -> dict | None:

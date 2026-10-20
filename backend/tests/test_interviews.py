@@ -312,21 +312,48 @@ def test_create_rejects_resume_that_is_still_processing(
     assert "still running" in response.json()["detail"]
 
 
-def test_active_interview_blocks_resume_deletion(
+def test_deleting_resume_cascades_active_interviews(
     client: TestClient,
     auth_headers: dict,
     interview_context: dict,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.services.recording_service import recording_service
+
+    monkeypatch.setattr(INTERVIEW_LLM, fake_question_generation)
     interview = client.post(
         "/api/interviews", headers=auth_headers, json=interview_payload(interview_context)
     )
     assert interview.status_code == 201, interview.text
+    interview_id = interview.json()["id"]
+    started = client.post(f"/api/interviews/{interview_id}/start", headers=auth_headers)
+    assert started.status_code == 200, started.text
+
+    purged: list[str] = []
+
+    async def fake_purge(db, current_interview_id: str) -> int:
+        purged.append(current_interview_id)
+        return 0
+
+    monkeypatch.setattr(
+        recording_service, "purge_interview_recordings", fake_purge
+    )
 
     response = client.delete(
         f"/api/resumes/{interview_context['resume_id']}", headers=auth_headers
     )
-    assert response.status_code == 409
-    assert "active interview" in response.json()["detail"]
+    assert response.status_code == 204, response.text
+    assert purged == [interview_id]
+    assert (
+        client.get(f"/api/interviews/{interview_id}", headers=auth_headers).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            f"/api/resumes/{interview_context['resume_id']}", headers=auth_headers
+        ).status_code
+        == 404
+    )
 
 
 def test_start_interview_of_another_user_is_404(

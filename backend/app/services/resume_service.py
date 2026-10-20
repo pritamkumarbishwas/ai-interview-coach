@@ -17,6 +17,7 @@ from app.core.exceptions import (
 )
 from app.core.jobs import job_queue
 from app.models.resume import Resume
+from app.repositories.interview_repository import InterviewRepository, interview_repository
 from app.repositories.resume_repository import ResumeRepository, resume_repository
 from app.schemas.resume import (
     ResumeStructuredData,
@@ -25,6 +26,7 @@ from app.schemas.resume import (
     ResumeUploadResponse,
 )
 from app.services.parsers import parse_docx, parse_pdf
+from app.services.recording_service import RecordingService, recording_service
 from app.services.resume_processing import (
     ANALYSIS_VERSION,
     RESUME_PROCESS_JOB,
@@ -107,9 +109,13 @@ class ResumeService:
         self,
         resumes: ResumeRepository,
         storage: ResumeStorage | None = None,
+        interviews: InterviewRepository | None = None,
+        recordings: RecordingService | None = None,
     ) -> None:
         self._resumes = resumes
         self._storage = storage or resume_storage
+        self._interviews = interviews or interview_repository
+        self._recordings = recordings or recording_service
 
     async def upload(
         self,
@@ -354,24 +360,26 @@ class ResumeService:
         self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str
     ) -> None:
         doc = await self._require(db, user_id, resume_id)
-        active = await db.interviews.count_documents(
-            {
-                "user_id": user_id,
-                "resume_id": resume_id,
-                "status": {"$in": ["created", "in_progress"]},
-            }
-        )
-        if active:
-            raise ConflictError(
-                "This resume is used by an active interview. Finish or abandon "
-                "that interview before deleting it."
-            )
+        # Mark the resume first so a concurrent interview cannot attach after
+        # the cascade lookup but before the resume disappears.
         await self._resumes.update_fields(
             db,
             resume_id,
             user_id,
             {"analysis.status": "deleting", "deleted_at": datetime.now(UTC)},
         )
+        active_ids = await self._interviews.active_ids_for_resume(
+            db, user_id, resume_id
+        )
+        for interview_id in active_ids:
+            try:
+                await self._recordings.purge_interview_recordings(db, interview_id)
+            except Exception:
+                logger.warning(
+                    "Could not remove recordings for cascaded interview %s",
+                    interview_id,
+                )
+            await self._interviews.delete_by_id(db, interview_id)
         file_ids = [doc.get("original_file_id"), doc.get("content_file_id")]
         file_ids.extend(
             item.get("file_id") for item in (doc.get("previews") or [])

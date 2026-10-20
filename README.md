@@ -314,8 +314,9 @@ The main groups are:
   warning instead of failing.
 - **Resume storage is durable and owner-scoped.** Originals, extracted content,
   and previews live in GridFS and are served only through authenticated routes.
-  Deleting a resume is blocked while an active interview references it. AI
-  failure keeps the upload and text; use retry analysis instead of re-uploading.
+  Deleting a resume also deletes any unfinished interviews that reference it,
+  including their answers and stored recordings. AI failure keeps the upload and
+  text; use retry analysis instead of re-uploading.
 - **Retention is manual.** `POST /api/invitations/retention/purge` erases expired
   session data and anonymizes invitation rows, but no scheduler enqueues it
   automatically. Run it from an admin/cron process if automatic retention is required.
