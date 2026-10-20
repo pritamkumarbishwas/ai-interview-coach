@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from tests.test_resumes import RESUME_SERVICE_LLM, make_pdf
 
 INTERVIEW_LLM = "app.services.interview_service.llm_service.generate_structured"
@@ -273,6 +274,42 @@ def test_start_leaves_interview_created_when_llm_is_down(
     detail = client.get(f"/api/interviews/{interview['id']}", headers=auth_headers).json()
     assert detail["status"] == "created"
     assert detail["questions"] == []
+
+
+def test_create_rejects_resume_that_is_still_processing(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "resume_processing_inline", False)
+    monkeypatch.setattr(RESUME_SERVICE_LLM, fake_llm)
+
+    resume = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={"file": ("resume.pdf", make_pdf(), "application/pdf")},
+    )
+    assert resume.status_code == 202, resume.text
+    jd = client.post(
+        "/api/job-descriptions",
+        headers=auth_headers,
+        json={
+            "title": "Backend Engineer",
+            "company": "Acme",
+            "raw_text": "Own our FastAPI services and MongoDB collections.",
+        },
+    )
+    assert jd.status_code == 201
+
+    response = client.post(
+        "/api/interviews",
+        headers=auth_headers,
+        json=interview_payload(
+            {"resume_id": resume.json()["id"], "jd_id": jd.json()["id"]}
+        ),
+    )
+    assert response.status_code == 409
+    assert "still running" in response.json()["detail"]
 
 
 def test_active_interview_blocks_resume_deletion(

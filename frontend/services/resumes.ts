@@ -11,7 +11,7 @@ import type {
 /** LLM-backed endpoints need far more headroom than the default 30s. */
 export const LLM_TIMEOUT_MS = 120_000;
 export const RESUME_POLL_MS = 2_000;
-export const RESUME_POLL_TIMEOUT_MS = 180_000;
+export const RESUME_POLL_TIMEOUT_MS = 300_000;
 
 export function isResumeProcessing(status: ResumeAnalysisStatus): boolean {
   return status === "pending" || status === "processing";

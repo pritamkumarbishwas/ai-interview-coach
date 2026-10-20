@@ -258,7 +258,13 @@ class ResumeService:
         self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str
     ) -> Resume:
         doc = await self._require(db, user_id, resume_id)
-        return Resume(**doc)
+        resume = Resume(**doc)
+        # Normalize legacy four-section documents so the API always returns the
+        # complete shape (contact, summary, additional_sections, ...).
+        resume.structured_data = ResumeStructuredData.model_validate(
+            doc.get("structured_data") or {}
+        ).model_dump()
+        return resume
 
     async def get_text(
         self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str

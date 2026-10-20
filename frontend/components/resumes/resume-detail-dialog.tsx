@@ -143,6 +143,7 @@ export function ResumeDetailDialog({
     setActionError(null);
     try {
       await resumeService.retryResumeAnalysis(resume.id);
+      setFullText(null);
       reload();
     } catch (caught) {
       setActionError(toApiError(caught).message);
@@ -179,7 +180,7 @@ export function ResumeDetailDialog({
             )} - added ${formatDate(resume.created_at)}`
           : "Loading the stored resume and its extracted content."
       }
-      className="max-w-5xl"
+      className="max-h-[92vh] max-w-5xl!"
     >
       {error ? (
         <Alert tone="error">

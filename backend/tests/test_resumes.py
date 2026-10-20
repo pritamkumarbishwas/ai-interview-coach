@@ -1,10 +1,19 @@
+import io
 from datetime import UTC, datetime
 
 import pytest
+from docx import Document
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
-from tests.conftest import RESUME_SERVICE_LLM, insert_job_description, make_pdf
+from app.core.jobs import job_worker
+from app.services.resume_processing import RESUME_PROCESS_JOB
+from tests.conftest import (
+    RESUME_SERVICE_LLM,
+    _with_mongo,
+    insert_job_description,
+    make_pdf,
+)
 
 JD_SERVICE_LLM = "app.services.job_description_service.llm_service.generate_structured"
 RESUME_PARSE_PAGES = "app.services.resume_processing.parse_pdf_pages"
@@ -17,6 +26,20 @@ async def fake_resume_extraction(prompt: str, schema, **kwargs):
         projects=[],
         education=[],
     )
+
+
+def make_docx() -> bytes:
+    document = Document()
+    document.add_paragraph("Jane Doe - Backend Engineer")
+    document.add_paragraph("Built reliable Python services.")
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Company"
+    table.cell(0, 1).text = "Acme"
+    table.cell(1, 0).text = "Skills"
+    table.cell(1, 1).text = "Python, FastAPI"
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
 
 
 def test_list_resumes_requires_auth(client: TestClient) -> None:
@@ -136,6 +159,35 @@ def test_upload_valid_pdf_is_listed_fetched_and_deleted(
     assert client.get(f"/api/resumes/{resume_id}/file", headers=auth_headers).status_code == 404
 
 
+def test_docx_upload_preserves_paragraphs_tables_and_text(
+    client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(RESUME_SERVICE_LLM, fake_resume_extraction)
+
+    created = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={
+            "file": (
+                "resume.docx",
+                make_docx(),
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["analysis_status"] == "ready"
+    assert body["filename"] == "resume.docx"
+
+    text = client.get(f"/api/resumes/{body['id']}/text", headers=auth_headers)
+    assert text.status_code == 200
+    extracted = text.json()["text"]
+    assert "Jane Doe" in extracted
+    assert "Company | Acme" in extracted
+    assert "Python, FastAPI" in extracted
+
+
 def test_duplicate_upload_reuses_the_stored_resume(
     client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -185,6 +237,39 @@ def test_large_resumes_are_extracted_in_bounded_chunks(
     assert max(len(prompt) for prompt in prompts) < (
         settings.resume_extraction_chunk_chars + 15_000
     )
+
+
+def test_upload_is_queued_when_inline_processing_is_disabled(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "resume_processing_inline", False)
+    monkeypatch.setattr(RESUME_SERVICE_LLM, fake_resume_extraction)
+
+    created = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={"file": ("resume.pdf", make_pdf(), "application/pdf")},
+    )
+    assert created.status_code == 202, created.text
+    body = created.json()
+    assert body["analysis_status"] == "pending"
+    resume_id = body["id"]
+
+    async def run_handler(db) -> None:
+        queued = await db.background_jobs.find_one(
+            {"type": RESUME_PROCESS_JOB, "payload.resume_id": resume_id}
+        )
+        assert queued is not None
+        handler = job_worker.handlers()[RESUME_PROCESS_JOB]
+        await handler(db, queued["payload"])
+
+    _with_mongo(run_handler)
+
+    detail = client.get(f"/api/resumes/{resume_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    assert detail.json()["analysis"]["status"] == "ready"
 
 
 def test_upload_survives_llm_failure_and_can_be_retried(
@@ -368,6 +453,29 @@ def test_job_description_list_handles_legacy_documents(
     assert response.status_code == 200
     legacy = next(item for item in response.json() if item["title"] == "Legacy Role")
     assert legacy["snippet"] == ""
+
+
+def test_chunk_merge_preserves_link_objects() -> None:
+    from app.services.resume_processing import _merge_objects
+
+    merged = _merge_objects(
+        [
+            {
+                "name": "Portfolio",
+                "links": [{"label": "GitHub", "url": "https://github.com/a"}],
+            },
+            {
+                "name": "Portfolio",
+                "links": [{"label": "Demo", "url": "https://example.com/demo"}],
+            },
+        ],
+        ("name",),
+    )
+    assert len(merged) == 1
+    assert merged[0]["links"] == [
+        {"label": "GitHub", "url": "https://github.com/a"},
+        {"label": "Demo", "url": "https://example.com/demo"},
+    ]
 
 
 def test_missing_resume_sections_default_to_empty_lists() -> None:

@@ -116,6 +116,7 @@ def _run_tesseract(png: bytes) -> str:
 def _render_pdf_assets(
     file_bytes: bytes,
     ocr_pages: set[int],
+    max_pages: int,
 ) -> tuple[list[dict[str, Any]], dict[int, bytes]]:
     """Render preview/OCR images in one blocking operation."""
     import fitz
@@ -126,6 +127,8 @@ def _render_pdf_assets(
         if doc.needs_pass:
             raise ResumeProcessingError("parse_failed", "The PDF is password protected.")
         for index, page in enumerate(doc):
+            if index >= max_pages:
+                break
             number = index + 1
             if index < settings.resume_max_previews:
                 try:
@@ -251,6 +254,24 @@ def _dedupe_strings(values: list[str]) -> list[str]:
     return result
 
 
+def _merge_list_values(values: list[Any]) -> list[Any]:
+    """De-duplicate a list while preserving dict entries such as links."""
+    seen: set[str] = set()
+    result: list[Any] = []
+    for value in values:
+        if isinstance(value, str):
+            key = f"str:{value.strip().casefold()}"
+        else:
+            key = f"json:{json.dumps(value, sort_keys=True, default=str)}"
+        if key in seen:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
+
+
 def _merge_objects(
     items: list[dict[str, Any]],
     key_fields: tuple[str, ...],
@@ -268,9 +289,13 @@ def _merge_objects(
         current = merged[key]
         for field, value in item.items():
             if isinstance(value, list) and isinstance(current.get(field), list):
-                current[field] = _dedupe_strings(
-                    [str(v) for v in current[field] + value]
-                )
+                current[field] = _merge_list_values(current[field] + value)
+            elif field == "content" and isinstance(value, str) and value:
+                existing = str(current.get(field) or "").strip()
+                if value.strip() and value.strip() not in existing:
+                    current[field] = "\n".join(
+                        part for part in (existing, value.strip()) if part
+                    )
             elif not current.get(field) and value:
                 current[field] = value
     return list(merged.values())
@@ -418,6 +443,15 @@ class ResumeProcessingService:
             )
             structured, failed_chunks = await self._extract_structured(raw_text)
             status = "partial" if failed_chunks else "ready"
+            chunk_budget = (
+                settings.resume_extraction_chunk_chars
+                * settings.resume_max_extraction_chunks
+            )
+            if len(raw_text) > chunk_budget:
+                warnings.append(
+                    "Structured extraction covers the first "
+                    f"{chunk_budget:,} characters; the full text is still stored."
+                )
             if not raw_text.strip():
                 warnings.append("No readable text was extracted from this resume.")
                 status = "partial"
@@ -502,13 +536,18 @@ class ResumeProcessingService:
         warnings: list[str],
     ) -> tuple[list[dict[str, Any]], str, list[int], bool]:
         pages = await run_in_threadpool(parse_pdf_pages, original)
+        if len(pages) > settings.resume_max_pages:
+            pages = pages[: settings.resume_max_pages]
+            warnings.append(
+                f"Content extraction is limited to {settings.resume_max_pages} pages."
+            )
         ocr_numbers = {
             page["number"]
             for page in pages
             if len(str(page.get("text", "")).strip()) < settings.resume_ocr_min_chars
         }
         previews, ocr_images = await run_in_threadpool(
-            _render_pdf_assets, original, ocr_numbers
+            _render_pdf_assets, original, ocr_numbers, settings.resume_max_pages
         )
         if len(pages) > settings.resume_max_previews:
             warnings.append(
@@ -564,13 +603,18 @@ class ResumeProcessingService:
             return pages, full_text, [], bool(native_text)
 
         pages = await run_in_threadpool(parse_pdf_pages, pdf_bytes)
+        if len(pages) > settings.resume_max_pages:
+            pages = pages[: settings.resume_max_pages]
+            warnings.append(
+                f"Content extraction is limited to {settings.resume_max_pages} pages."
+            )
         ocr_numbers = {
             page["number"]
             for page in pages
             if len(str(page.get("text", "")).strip()) < settings.resume_ocr_min_chars
         }
         previews, ocr_images = await run_in_threadpool(
-            _render_pdf_assets, pdf_bytes, ocr_numbers
+            _render_pdf_assets, pdf_bytes, ocr_numbers, settings.resume_max_pages
         )
         ocr_pages: list[int] = []
         if ocr_numbers and not _ocr_available():
@@ -597,7 +641,7 @@ class ResumeProcessingService:
             "\n\n".join(str(page["text"]) for page in pages)
         ) or native_text
         if native_text and len(native_text) > len(full_text):
-            pages[0]["text"] = f"{native_text}\n\n{pages[0]['text']}".strip()
+            pages[0]["text"] = native_text
             pages[0]["method"] = "docx"
             full_text = native_text
         return pages, full_text, ocr_pages, bool(native_text)

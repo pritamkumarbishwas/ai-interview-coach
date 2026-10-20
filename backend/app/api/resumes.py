@@ -97,7 +97,6 @@ async def list_resumes(
         "storage_backend": True,
         "previews": {"__all__": {"file_id"}},
     },
-
 )
 async def get_resume(
     resume_id: str,
