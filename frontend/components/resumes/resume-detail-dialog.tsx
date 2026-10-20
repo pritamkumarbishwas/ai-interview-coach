@@ -614,6 +614,11 @@ function CertificationSection({ items }: { items: ResumeCertification[] }) {
             <p className="text-xs text-ink-3">
               {[item.issue_date, item.credential_id].filter(Boolean).join(" - ")}
             </p>
+            {item.description ? (
+              <p className="mt-1 whitespace-pre-wrap text-sm text-ink-2">
+                {item.description}
+              </p>
+            ) : null}
             <LinkList links={item.url ? [{ label: item.name, url: item.url }] : []} />
           </div>
         ))}

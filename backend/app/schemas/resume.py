@@ -85,6 +85,7 @@ class Certification(BaseModel):
     issue_date: str = ""
     credential_id: str = ""
     url: str = ""
+    description: str = ""
 
     @field_validator("url", mode="before")
     @classmethod
@@ -138,7 +139,7 @@ class ResumeStructuredData(BaseModel):
     ``additional_sections`` instead of being silently discarded.
     """
 
-    version: int = 3
+    version: int = 4
     contact: ContactInfo = Field(default_factory=ContactInfo)
     summary: str = ""
     skills: list[str] = Field(

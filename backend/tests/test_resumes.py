@@ -29,6 +29,36 @@ async def fake_resume_extraction(prompt: str, schema, **kwargs):
     )
 
 
+def make_docx_with_link() -> bytes:
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    document = Document()
+    paragraph = document.add_paragraph("Portfolio: ")
+    relationship_id = document.part.relate_to(
+        "https://example.com/portfolio", RT.HYPERLINK, is_external=True
+    )
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("r:id"), relationship_id)
+    run = OxmlElement("w:r")
+    text = OxmlElement("w:t")
+    text.text = "Portfolio"
+    run.append(text)
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
+    buffer = io.BytesIO()
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+def test_docx_hyperlink_annotations_are_extracted() -> None:
+    from app.services.parsers import parse_docx_links
+
+    links = parse_docx_links(make_docx_with_link())
+    assert links == [{"label": "Portfolio", "url": "https://example.com/portfolio"}]
+
+
 def make_docx() -> bytes:
     document = Document()
     document.add_paragraph("Jane Doe - Backend Engineer")
@@ -605,7 +635,7 @@ def test_duplicate_upload_reprocesses_an_outdated_ready_analysis(
             {
                 "$set": {
                     "analysis.status": "ready",
-                    "analysis.version": "resume-v2",
+                    "analysis.version": "resume-v3",
                     "structured_data.skills": ["stale"],
                 }
             },
@@ -716,9 +746,97 @@ def test_achievements_are_first_class_and_deduplicated() -> None:
         ],
         ContactInfo(),
     )
-    assert merged.version == 3
+    assert merged.version == 4
     assert len(merged.achievements) == 1
     assert merged.achievements[0].title == "Coding profiles"
+
+
+def test_section_chunking_keeps_projects_heading_with_project_entries() -> None:
+    from app.services.resume_processing import _chunk_resume, _section_segments
+
+    text = (
+        "Jane Doe\nPune, India\n\n"
+        "Professional Summary\n"
+        + ("Software engineer building reliable APIs. " * 40)
+        + "\n\nTechnical Skills\n"
+        + ("Python, FastAPI, MongoDB, React, TypeScript, Docker. " * 40)
+        + "\n\nExperience\n"
+        + ("Definedge Solution\nSoftware Engineer\nBuilt APIs and dashboards.\n" * 30)
+        + "\n\nProjects\nGurukul\nBuilt an e-learning platform.\n"
+        + ("Napuf\nBuilt a shopping cart and authentication.\n" * 30)
+        + "\n\nEducation\nBCA\nMCA\n"
+    )
+
+    segments = _section_segments(text)
+    projects = next(segment for segment, label in segments if label == "Projects")
+    assert "Gurukul" in projects
+    assert "Napuf" in projects
+
+    chunks = _chunk_resume(text)
+    assert any("Projects" in chunk and "Gurukul" in chunk for chunk, _ in chunks)
+    assert any("Projects" in label for _, label in chunks)
+
+
+def test_project_like_experience_is_removed_but_dated_roles_survive() -> None:
+    from app.schemas.resume import ContactInfo, Experience, Project, ResumeStructuredData
+    from app.services.resume_processing import _merge_structured
+
+    merged = _merge_structured(
+        [
+            ResumeStructuredData(
+                experience=[
+                    Experience(company="Napuf", description="Built a shop."),
+                    Experience(
+                        company="Napuf",
+                        duration="2022 - 2023",
+                        description="A real role.",
+                    ),
+                ],
+                projects=[Project(name="Napuf", description="Built a shop.")],
+            )
+        ],
+        ContactInfo(),
+    )
+
+    assert [(item.company, item.duration) for item in merged.experience] == [
+        ("Napuf", "2022 - 2023")
+    ]
+
+
+def test_redundant_first_class_additional_sections_are_removed() -> None:
+    from app.schemas.resume import (
+        AdditionalSection,
+        Certification,
+        ContactInfo,
+        ResumeStructuredData,
+    )
+    from app.services.resume_processing import _merge_structured
+
+    merged = _merge_structured(
+        [
+            ResumeStructuredData(
+                skills=["Python"],
+                certifications=[
+                    Certification(name="Meta", description="Completed 9 courses.")
+                ],
+                additional_sections=[
+                    AdditionalSection(
+                        heading="Header", content="Jane Doe, jane@example.com"
+                    ),
+                    AdditionalSection(
+                        heading="Technical Skills", content="Python, FastAPI"
+                    ),
+                    AdditionalSection(
+                        heading="Certifications", content="Meta - 9 courses"
+                    ),
+                ],
+            )
+        ],
+        ContactInfo(),
+    )
+
+    assert merged.certifications[0].description == "Completed 9 courses."
+    assert merged.additional_sections == []
 
 
 def test_missing_resume_sections_default_to_empty_lists() -> None:

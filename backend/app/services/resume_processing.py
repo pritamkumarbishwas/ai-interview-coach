@@ -42,7 +42,7 @@ from app.services.resume_storage import ResumeStorage, resume_storage
 
 logger = logging.getLogger(__name__)
 
-ANALYSIS_VERSION = "resume-v3"
+ANALYSIS_VERSION = "resume-v4"
 RESUME_PROCESS_JOB = "resume.process"
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 PHONE_RE = re.compile(r"(?<![\w])\+?\(?\d(?:[ \t().-]*\d){7,14}(?![\w])")
@@ -51,6 +51,89 @@ CHUNK_OVERLAP_CHARS = 400
 MIN_SPLIT_RETRY_CHARS = 1_600
 MAX_COMPLETION_TOKENS = 4_096
 EXTRACTION_REASONING_EFFORT = "low"
+
+_SECTION_ALIASES = {
+    "professional summary": "Summary",
+    "summary": "Summary",
+    "profile": "Summary",
+    "professional profile": "Summary",
+    "objective": "Summary",
+    "career objective": "Summary",
+    "about me": "Summary",
+    "technical skills": "Skills",
+    "skills": "Skills",
+    "core skills": "Skills",
+    "core competencies": "Skills",
+    "technical expertise": "Skills",
+    "technologies": "Skills",
+    "experience": "Experience",
+    "work experience": "Experience",
+    "professional experience": "Experience",
+    "employment history": "Experience",
+    "work history": "Experience",
+    "career history": "Experience",
+    "projects": "Projects",
+    "personal projects": "Projects",
+    "academic projects": "Projects",
+    "key projects": "Projects",
+    "selected projects": "Projects",
+    "project experience": "Projects",
+    "education": "Education",
+    "academic background": "Education",
+    "academics": "Education",
+    "education & training": "Education",
+    "education and training": "Education",
+    "certifications": "Certifications",
+    "certificates": "Certifications",
+    "professional certifications": "Certifications",
+    "licenses & certifications": "Certifications",
+    "licenses and certifications": "Certifications",
+    "certifications & licenses": "Certifications",
+    "awards": "Awards",
+    "honors": "Awards",
+    "honours": "Awards",
+    "honors & awards": "Awards",
+    "awards & honors": "Awards",
+    "achievements": "Achievements",
+    "accomplishments": "Achievements",
+    "key achievements": "Achievements",
+    "coding profiles": "Achievements",
+    "publications": "Publications",
+    "papers": "Publications",
+    "languages": "Languages",
+    "volunteer": "Volunteer",
+    "volunteering": "Volunteer",
+    "volunteer experience": "Volunteer",
+    "community involvement": "Volunteer",
+    "interests": "Interests",
+    "hobbies": "Interests",
+}
+
+_ADDITIONAL_SECTION_FIELDS = {
+    "header": "contact",
+    "contact": "contact",
+    "contact information": "contact",
+    "personal information": "contact",
+    "summary": "summary",
+    "professional summary": "summary",
+    "technical skills": "skills",
+    "skills": "skills",
+    "core competencies": "skills",
+    "experience": "experience",
+    "work experience": "experience",
+    "professional experience": "experience",
+    "projects": "projects",
+    "personal projects": "projects",
+    "education": "education",
+    "certifications": "certifications",
+    "certificates": "certifications",
+    "awards": "awards",
+    "achievements": "achievements",
+    "publications": "publications",
+    "languages": "languages",
+    "volunteer": "volunteer",
+    "interests": "interests",
+}
 
 
 class ResumeProcessingError(Exception):
@@ -346,6 +429,77 @@ def _chunk_text(text: str) -> list[str]:
     return chunks
 
 
+def _normalize_heading(line: str) -> str:
+    cleaned = re.sub(
+        r"^[\s\u2022\u00b7\u25aa\u25e6*\-\u2013\u2014]+", "", line.strip()
+    )
+    return re.sub(r"\s+", " ", cleaned).strip(" :.-").casefold()
+
+
+def _section_segments(text: str) -> list[tuple[str, str]]:
+    """Split text at recognized section headings without losing the preamble."""
+    lines = text.splitlines(keepends=True)
+    headings: list[tuple[int, str]] = []
+    offset = 0
+    for line in lines:
+        label = _SECTION_ALIASES.get(_normalize_heading(line.rstrip("\r\n")))
+        if label is not None:
+            headings.append((offset, label))
+        offset += len(line)
+    if not headings:
+        return [(text.strip(), "Resume")] if text.strip() else []
+
+    segments: list[tuple[str, str]] = []
+    if headings[0][0] > 0:
+        preamble = text[: headings[0][0]].strip()
+        if preamble:
+            segments.append((preamble, "Header"))
+    for index, (start, label) in enumerate(headings):
+        end = headings[index + 1][0] if index + 1 < len(headings) else len(text)
+        content = text[start:end].strip()
+        if content:
+            segments.append((content, label))
+    return segments
+
+
+def _chunk_resume(text: str) -> list[tuple[str, str]]:
+    """Build chunks that preserve section headings and carry section context."""
+    segments = _section_segments(text)
+    limit = settings.resume_extraction_chunk_chars
+    max_chunks = settings.resume_max_extraction_chunks
+    chunks: list[tuple[str, str]] = []
+    parts: list[str] = []
+    labels: list[str] = []
+    size = 0
+
+    def flush() -> None:
+        nonlocal parts, labels, size
+        if parts:
+            chunks.append(("\n\n".join(parts).strip(), ", ".join(dict.fromkeys(labels))))
+            parts = []
+            labels = []
+            size = 0
+
+    for segment, label in segments:
+        if len(chunks) >= max_chunks:
+            break
+        if len(segment) > limit:
+            flush()
+            for part in _chunk_text(segment):
+                if len(chunks) >= max_chunks:
+                    break
+                chunks.append((part, label))
+            continue
+        addition = len(segment) + (2 if parts else 0)
+        if parts and size + addition > limit:
+            flush()
+        parts.append(segment)
+        labels.append(label)
+        size += addition
+    flush()
+    return chunks[:max_chunks]
+
+
 def _split_chunk_for_retry(text: str) -> tuple[str, str] | None:
     """Split an oversized chunk after the provider truncates its JSON."""
     if len(text) < MIN_SPLIT_RETRY_CHARS:
@@ -420,11 +574,64 @@ def _merge_objects(
     return list(merged.values())
 
 
+def _drop_project_like_experience(
+    experience: list[dict[str, Any]], projects: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Remove project entries that a chunk without a Projects heading mislabelled."""
+    project_names = {
+        str(item.get("name") or "").strip().casefold()
+        for item in projects
+        if str(item.get("name") or "").strip()
+    }
+    if not project_names:
+        return experience
+    kept: list[dict[str, Any]] = []
+    for item in experience:
+        company = str(item.get("company") or "").strip().casefold()
+        role = str(item.get("role") or "").strip().casefold()
+        has_employment_meta = any(
+            str(item.get(field) or "").strip()
+            for field in ("duration", "start_date", "end_date", "location")
+        )
+        if not has_employment_meta and (company in project_names or role in project_names):
+            logger.info(
+                "Dropping project-like experience entry: company=%r role=%r",
+                item.get("company"),
+                item.get("role"),
+            )
+            continue
+        kept.append(item)
+    return kept
+
+
+def _drop_redundant_additional_sections(
+    sections: list[dict[str, Any]], merged: dict[str, Any]
+) -> list[dict[str, Any]]:
+    kept: list[dict[str, Any]] = []
+    for section in sections:
+        heading = _normalize_heading(str(section.get("heading") or ""))
+        field = _ADDITIONAL_SECTION_FIELDS.get(heading)
+        if field and merged.get(field):
+            if field == "certifications":
+                certifications = merged.get("certifications") or []
+                # Keep the fallback section when certificate descriptions were
+                # not mapped into the first-class field.
+                if any(
+                    not str(item.get("description") or "").strip()
+                    for item in certifications
+                ):
+                    kept.append(section)
+                    continue
+            continue
+        kept.append(section)
+    return kept
+
+
 def _merge_structured(
     results: list[ResumeStructuredData], contact: ContactInfo
 ) -> ResumeStructuredData:
     merged: dict[str, Any] = {
-        "version": 3,
+        "version": 4,
         "contact": {"name": "", "email": "", "phone": "", "location": "", "links": []},
         "summary": "",
         "skills": [],
@@ -482,6 +689,12 @@ def _merge_structured(
         merged[field] = _merge_objects(merged[field], key_fields)
     merged["additional_sections"] = _merge_objects(
         merged["additional_sections"], ("heading",)
+    )
+    merged["experience"] = _drop_project_like_experience(
+        merged["experience"], merged["projects"]
+    )
+    merged["additional_sections"] = _drop_redundant_additional_sections(
+        merged["additional_sections"], merged
     )
     # Keep deterministic contact details even when the LLM was given redacted
     # text and could not see them. The LLM still supplies the name, location
@@ -888,15 +1101,15 @@ class ResumeProcessingService:
         document_links: list[dict[str, Any]] | None = None,
     ) -> tuple[ResumeStructuredData, int]:
         contact = _extract_contact(raw_text, document_links)
-        chunks = _chunk_text(_redact_contact_pii(raw_text))
+        chunks = _chunk_resume(_redact_contact_pii(raw_text))
         if not chunks:
             return ResumeStructuredData(contact=contact), 0
         links_context = _link_context(document_links or [])
         results: list[ResumeStructuredData] = []
         failed = 0
-        for chunk in chunks:
+        for chunk, section_context in chunks:
             chunk_results, chunk_failed = await self._extract_chunk(
-                chunk, links_context
+                chunk, links_context, section_context
             )
             results.extend(chunk_results)
             failed += chunk_failed
@@ -911,14 +1124,19 @@ class ResumeProcessingService:
         self,
         chunk: str,
         links_context: str,
+        section_context: str = "Resume",
         depth: int = 0,
     ) -> tuple[list[ResumeStructuredData], int]:
-        prompt = EXTRACT_RESUME_INFO_PROMPT.replace("{links}", links_context).replace(
-            "{text}", chunk
+        prompt = (
+            EXTRACT_RESUME_INFO_PROMPT.replace("{links}", links_context)
+            .replace("{section_context}", section_context)
+            .replace("{text}", chunk)
         )
         try:
             request: dict[str, Any] = {
-                "max_retries": 3,
+                # Free Groq tiers can reject back-to-back chunks with 429;
+                # the provider supplies a retry hint, so allow a few more tries.
+                "max_retries": 5,
                 "system_prompt": EXTRACT_RESUME_SYSTEM_PROMPT,
                 "max_completion_tokens": MAX_COMPLETION_TOKENS,
             }
@@ -945,7 +1163,7 @@ class ResumeProcessingService:
                 failed = 0
                 for part in split:
                     part_results, part_failed = await self._extract_chunk(
-                        part, links_context, depth + 1
+                        part, links_context, section_context, depth + 1
                     )
                     results.extend(part_results)
                     failed += part_failed

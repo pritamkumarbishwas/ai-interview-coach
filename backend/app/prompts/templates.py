@@ -67,7 +67,8 @@ Return a JSON object with these keys:
   links: [{label, url}], achievements: [string]}
 - education: array of {institution, degree, field_of_study, year, start_date,
   end_date, grade, details: [string]}
-- certifications: array of {name, issuer, issue_date, credential_id, url}
+- certifications: array of {name, issuer, issue_date, credential_id, url,
+  description}
 - awards: array of {title, issuer, date, description}
 - achievements: array of {title, description}
 - publications: array of {title, publisher, date, url, description}
@@ -84,6 +85,14 @@ in achievements, not awards. If a heading does not fit one of the named
 sections, put its heading and full text in additional_sections. Do not invent
 facts.
 
+The <section_context> tells you which section this chunk belongs to. Use it when
+a chunk starts inside a section without repeating the heading. A project is
+NEVER an experience, even when it has no dates or location: projects belong only
+in projects. Only employment, freelance, or volunteer roles belong in experience
+or volunteer. Emit every education entry separately; never stop after the first
+degree. Do not copy a section into additional_sections when its content is
+already represented by a named key.
+
 Use <document_links> to attach exact URLs to the matching project, certification,
 publication, or contact entry. Do not invent URLs not present in the text or
 link list.
@@ -91,6 +100,10 @@ link list.
 <document_links>
 {links}
 </document_links>
+
+<section_context>
+{section_context}
+</section_context>
 
 <resume_text>
 {text}
