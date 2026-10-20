@@ -155,7 +155,7 @@ export function DeviceCheck({
               </div>
             )}
           </div>
-          {camState !== "pass" ? (
+          {camState !== "pass" && cameraStatus !== "starting" ? (
             <Button
               variant="outline"
               size="sm"
@@ -209,7 +209,7 @@ export function DeviceCheck({
               </div>
             )}
           </div>
-          {screenState !== "pass" ? (
+          {screenState !== "pass" && screenStatus !== "starting" ? (
             <Button
               variant="outline"
               size="sm"
@@ -219,12 +219,12 @@ export function DeviceCheck({
             >
               Share your screen
             </Button>
-          ) : (
+          ) : screenState === "pass" ? (
             <p className="mt-3 text-xs text-ink-3">
               Pick &quot;Entire screen&quot; or a window — the interview is
               proctored.
             </p>
-          )}
+          ) : null}
         </div>
         ) : null}
       </div>

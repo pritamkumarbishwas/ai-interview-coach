@@ -34,6 +34,10 @@ interface MediaContextValue {
 
 const MediaContext = createContext<MediaContextValue | null>(null);
 
+function stopTracks(stream: MediaStream | null): void {
+  stream?.getTracks().forEach((track) => track.stop());
+}
+
 export function useMedia(): MediaContextValue {
   const ctx = useContext(MediaContext);
   if (!ctx) {
@@ -53,71 +57,131 @@ export function MediaProvider({ children }: { children: ReactNode }) {
   const cameraRef = useRef<MediaStream | null>(null);
   const screenRef = useRef<MediaStream | null>(null);
 
+  // Media capture is asynchronous and cannot be cancelled. These guards make
+  // starting idempotent: Strict Mode effects and rapid clicks share one
+  // permission request, and late results from a stopped/unmounted provider are
+  // discarded instead of leaving a hidden capture running.
+  const mountedRef = useRef(true);
+  const cameraRequestRef = useRef(0);
+  const screenRequestRef = useRef(0);
+  const cameraRequestPromiseRef = useRef<Promise<void> | null>(null);
+  const screenRequestPromiseRef = useRef<Promise<void> | null>(null);
+
   const stopCamera = useCallback(() => {
-    cameraRef.current?.getTracks().forEach((track) => track.stop());
+    cameraRequestRef.current += 1;
+    cameraRequestPromiseRef.current = null;
+    stopTracks(cameraRef.current);
     cameraRef.current = null;
     setCameraStream(null);
     setCameraStatus("idle");
   }, []);
 
   const stopScreen = useCallback(() => {
-    screenRef.current?.getTracks().forEach((track) => track.stop());
+    screenRequestRef.current += 1;
+    screenRequestPromiseRef.current = null;
+    stopTracks(screenRef.current);
     screenRef.current = null;
     setScreenStream(null);
     setScreenStatus("idle");
   }, []);
 
-  const startCamera = useCallback(async () => {
-    if (cameraRef.current) return;
+  const startCamera = useCallback((): Promise<void> => {
+    if (cameraRef.current) return Promise.resolve();
+    if (cameraRequestPromiseRef.current) return cameraRequestPromiseRef.current;
+
+    const requestId = ++cameraRequestRef.current;
     setCameraStatus("starting");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true,
-      });
-      cameraRef.current = stream;
-      setCameraStream(stream);
-      setCamOn(true);
-      setMicOn(true);
-      setCameraStatus("active");
-    } catch (err) {
-      const name = (err as { name?: string })?.name;
-      setCameraStatus(
-        name === "NotAllowedError" || name === "PermissionDeniedError"
-          ? "denied"
-          : "unavailable",
-      );
-    }
+
+    const request = (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          if (mountedRef.current && requestId === cameraRequestRef.current) {
+            setCameraStatus("unavailable");
+          }
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+        if (!mountedRef.current || requestId !== cameraRequestRef.current) {
+          stopTracks(stream);
+          return;
+        }
+        cameraRef.current = stream;
+        setCameraStream(stream);
+        setCamOn(true);
+        setMicOn(true);
+        setCameraStatus("active");
+      } catch (err) {
+        if (!mountedRef.current || requestId !== cameraRequestRef.current) return;
+        const name = (err as { name?: string })?.name;
+        setCameraStatus(
+          name === "NotAllowedError" || name === "PermissionDeniedError"
+            ? "denied"
+            : "unavailable",
+        );
+      }
+    })();
+
+    cameraRequestPromiseRef.current = request;
+    void request.finally(() => {
+      if (cameraRequestPromiseRef.current === request) {
+        cameraRequestPromiseRef.current = null;
+      }
+    });
+    return request;
   }, []);
 
-  const startScreen = useCallback(async () => {
-    if (screenRef.current) return;
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      setScreenStatus("unavailable");
-      return;
-    }
+  const startScreen = useCallback((): Promise<void> => {
+    if (screenRef.current) return Promise.resolve();
+    if (screenRequestPromiseRef.current) return screenRequestPromiseRef.current;
+
+    const requestId = ++screenRequestRef.current;
     setScreenStatus("starting");
-    try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-      });
-      screenRef.current = stream;
-      setScreenStream(stream);
-      setScreenStatus("active");
-      // The user can stop sharing from the browser's own controls.
-      stream.getVideoTracks()[0]?.addEventListener("ended", () => {
-        screenRef.current = null;
-        setScreenStream(null);
-        setScreenStatus("idle");
-      });
-    } catch (err) {
-      const name = (err as { name?: string })?.name;
-      setScreenStatus(
-        name === "NotAllowedError" || name === "PermissionDeniedError"
-          ? "denied"
-          : "idle",
-      );
-    }
+
+    const request = (async () => {
+      try {
+        if (!navigator.mediaDevices?.getDisplayMedia) {
+          if (mountedRef.current && requestId === screenRequestRef.current) {
+            setScreenStatus("unavailable");
+          }
+          return;
+        }
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+        });
+        if (!mountedRef.current || requestId !== screenRequestRef.current) {
+          stopTracks(stream);
+          return;
+        }
+        screenRef.current = stream;
+        setScreenStream(stream);
+        setScreenStatus("active");
+        // The user can stop sharing from the browser's own controls.
+        stream.getVideoTracks()[0]?.addEventListener("ended", () => {
+          screenRef.current = null;
+          setScreenStream(null);
+          setScreenStatus("idle");
+        });
+      } catch (err) {
+        if (!mountedRef.current || requestId !== screenRequestRef.current) return;
+        const name = (err as { name?: string })?.name;
+        setScreenStatus(
+          name === "NotAllowedError" || name === "PermissionDeniedError"
+            ? "denied"
+            : "idle",
+        );
+      }
+    })();
+
+    screenRequestPromiseRef.current = request;
+    void request.finally(() => {
+      if (screenRequestPromiseRef.current === request) {
+        screenRequestPromiseRef.current = null;
+      }
+    });
+    return request;
   }, []);
 
   const toggleMic = useCallback(() => {
@@ -138,11 +202,17 @@ export function MediaProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // Stop all tracks when the provider unmounts (leaving the interview).
+  // Stop all tracks when the provider unmounts (leaving the interview). The
+  // in-flight promises stay shared across Strict Mode's simulated remount; if
+  // they resolve after a real unmount their tracks are stopped above.
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      cameraRef.current?.getTracks().forEach((track) => track.stop());
-      screenRef.current?.getTracks().forEach((track) => track.stop());
+      mountedRef.current = false;
+      stopTracks(cameraRef.current);
+      stopTracks(screenRef.current);
+      cameraRef.current = null;
+      screenRef.current = null;
     };
   }, []);
 

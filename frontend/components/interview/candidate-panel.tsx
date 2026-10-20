@@ -220,8 +220,15 @@ export function CandidatePanel({
           )}
         </ControlButton>
         <ControlButton
-          label={sharing ? "Stop sharing screen" : "Share screen"}
+          label={
+            screenStatus === "starting"
+              ? "Starting screen share"
+              : sharing
+                ? "Stop sharing screen"
+                : "Share screen"
+          }
           active={sharing}
+          disabled={screenStatus === "starting"}
           onClick={handleToggleScreen}
         >
           {sharing ? (
@@ -264,6 +271,7 @@ function ControlButton({
   active,
   danger,
   solid,
+  disabled,
   onClick,
 }: {
   children: React.ReactNode;
@@ -271,17 +279,20 @@ function ControlButton({
   active?: boolean;
   danger?: boolean;
   solid?: boolean;
+  disabled?: boolean;
   onClick?: () => void;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       title={label}
       aria-label={label}
       aria-pressed={active}
       className={cx(
         "flex h-10 w-10 items-center justify-center rounded-full transition-all duration-150",
+        disabled && "cursor-not-allowed opacity-50",
         solid
           ? "bg-danger text-white hover:brightness-95"
           : danger
