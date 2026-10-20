@@ -167,7 +167,7 @@ completed. Treat the link as sensitive.
 | AI        | OpenAI-compatible client (`openai` or `groq`), structured output generation |
 | RAG       | Qdrant + fastembed (`BAAI/bge-small-en-v1.5`) |
 | Frontend  | Next.js 16, React 19, TypeScript, Tailwind CSS v4, Lucide |
-| Infra     | Docker, Docker Compose, GitHub Actions |
+| Infra     | Docker, Docker Compose |
 
 ## Folder structure
 

@@ -137,6 +137,7 @@ function InterviewWorkspace() {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
+  const [answeredCount, setAnsweredCount] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [consentChecked, setConsentChecked] = useState(false);
   // "ready" = waiting room · "check" = camera/screen verification step
@@ -192,12 +193,13 @@ function InterviewWorkspace() {
   // Seed session state from the loaded interview (first load or after start).
   useEffect(() => {
     if (!interview) return;
-    const signature = `${interview.id}:${interview.status}:${interview.questions.length}`;
+    const signature = `${interview.id}:${interview.status}:${interview.questions.length}:${interview.answers.length}`;
     if (seededRef.current === signature) return;
     seededRef.current = signature;
 
     setMessages(seedMessages(interview));
     setCurrentQuestion(findCurrentQuestion(interview));
+    setAnsweredCount(interview.answers.length);
     setCompleted(interview.status === "completed");
     if (interview.status === "completed") {
       router.replace(`/interviews/${interview.id}/result`);
@@ -245,7 +247,6 @@ function InterviewWorkspace() {
   }
 
   const targetQuestions = interview.target_questions;
-  const answeredCount = interview.answers.length;
   const questionNumber = currentQuestion
     ? currentQuestion.sequence
     : Math.max(answeredCount, 1);
@@ -333,6 +334,7 @@ function InterviewWorkspace() {
     setAiStatus("thinking");
     try {
       const result = await submitAnswerApi(currentQuestion.id, text);
+      setAnsweredCount(result.questions_answered);
       if (result.status === "completed") {
         setCompleted(true);
         await finishAndGoToResult();
