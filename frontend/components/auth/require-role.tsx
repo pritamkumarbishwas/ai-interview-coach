@@ -15,9 +15,11 @@ import type { Role } from "@/types";
 export function RequireRole({
   roles,
   children,
+  redirectTo = "/dashboard",
 }: {
   roles: Role[];
   children: ReactNode;
+  redirectTo?: string;
 }) {
   const { user, status } = useAuth();
   const router = useRouter();
@@ -26,16 +28,16 @@ export function RequireRole({
 
   useEffect(() => {
     if (status === "authenticated" && user && !roles.includes(user.role)) {
-      router.replace("/dashboard");
+      router.replace(redirectTo);
     }
-  }, [status, user, roles, router]);
+  }, [status, user, roles, router, redirectTo]);
 
   if (status !== "authenticated" || !user) {
     return <FullScreenLoader label="Checking access" />;
   }
 
   if (!allowed) {
-    return <FullScreenLoader label="Redirecting to your dashboard" />;
+    return <FullScreenLoader label="Redirecting" />;
   }
 
   return <>{children}</>;

@@ -205,7 +205,7 @@ def env(client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(RESUME_SERVICE_LLM, dispatcher)
 
-    def setup(target: int = 3) -> dict:
+    def setup(target: int = 3, start: bool = True) -> dict:
         resume = client.post(
             "/api/resumes/upload",
             headers=auth_headers,
@@ -239,6 +239,12 @@ def env(client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch)
             },
         )
         assert created.status_code == 201, created.text
+        if not start:
+            return {
+                "id": created.json()["id"],
+                "question_id": None,
+                "target": target,
+            }
         started = client.post(f"/api/interviews/{created.json()['id']}/start", headers=auth_headers)
         assert started.status_code == 200, started.text
         return {

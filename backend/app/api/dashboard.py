@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.api.deps import get_current_user, get_dashboard_service
@@ -12,9 +12,11 @@ router = APIRouter()
 
 @router.get("/stats", response_model=DashboardStats)
 async def dashboard_stats(
+    response: Response,
     current_user: User = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: DashboardService = Depends(get_dashboard_service),
 ) -> DashboardStats:
     """Counts, average score, weak/strong topics, and recent interviews."""
+    response.headers["Cache-Control"] = "private, no-store"
     return await service.stats(db, current_user.id)

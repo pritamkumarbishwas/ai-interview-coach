@@ -28,19 +28,28 @@ LIST_PROJECTION = {
 
 # Dashboard stats need counts plus the cached report's scores/topics — never
 # the question or answer bodies themselves.
-DASHBOARD_PROJECTION = {
+RECENT_PROJECTION = {
     "role": 1,
+    "kind": 1,
     "type": 1,
     "difficulty": 1,
     "status": 1,
-    "proctoring_mode": 1,
     "target_questions": 1,
     "created_at": 1,
-    "answers.id": 1,
-    "report.overall_score": 1,
-    "report.strong_topics": 1,
-    "report.weak_topics": 1,
+    "answered_count": {"$size": {"$ifNull": ["$answers", []]}},
+    "score": {
+        "$cond": [
+            {"$isNumber": "$report.overall_score"},
+            "$report.overall_score",
+            None,
+        ]
+    },
 }
+
+TOPIC_GROUP = [
+    {"$group": {"_id": "$topic", "count": {"$sum": 1}}},
+    {"$sort": {"count": -1, "_id": 1}},
+]
 
 
 class InterviewRepository:
@@ -60,14 +69,127 @@ class InterviewRepository:
         )
         return [self._shape(doc) async for doc in cursor]
 
-    async def all_for_user(self, db: AsyncIOMotorDatabase, user_id: str) -> list[dict]:
-        """Every interview for the dashboard, newest first, without bodies."""
-        cursor = (
-            db[self.collection_name]
-            .find({"user_id": user_id}, DASHBOARD_PROJECTION)
-            .sort("created_at", -1)
-        )
-        return [self._shape(doc) async for doc in cursor]
+    async def stats_for_user(
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        *,
+        recent_limit: int,
+        topic_limit: int,
+    ) -> dict:
+        """Aggregate the dashboard in one round trip, without loading bodies."""
+        pipeline = [
+            {"$match": {"user_id": user_id}},
+            {
+                "$facet": {
+                    "summary": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "total": {"$sum": 1},
+                                "completed": {
+                                    "$sum": {
+                                        "$cond": [
+                                            {"$eq": ["$status", "completed"]},
+                                            1,
+                                            0,
+                                        ]
+                                    }
+                                },
+                                "in_progress": {
+                                    "$sum": {
+                                        "$cond": [
+                                            {"$eq": ["$status", "in_progress"]},
+                                            1,
+                                            0,
+                                        ]
+                                    }
+                                },
+                                "not_started": {
+                                    "$sum": {
+                                        "$cond": [
+                                            {"$eq": ["$status", "created"]},
+                                            1,
+                                            0,
+                                        ]
+                                    }
+                                },
+                                "questions_answered": {
+                                    "$sum": {"$size": {"$ifNull": ["$answers", []]}}
+                                },
+                            }
+                        }
+                    ],
+                    "scores": [
+                        {
+                            "$match": {
+                                "status": "completed",
+                                "report.overall_score": {"$type": "number"},
+                            }
+                        },
+                        {
+                            "$group": {
+                                "_id": None,
+                                "scored_count": {"$sum": 1},
+                                "average_score": {"$avg": "$report.overall_score"},
+                            }
+                        },
+                    ],
+                    "strong_topics": [
+                        {"$match": {"status": "completed"}},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "topic": {"$ifNull": ["$report.strong_topics", []]},
+                            }
+                        },
+                        {"$unwind": "$topic"},
+                        *TOPIC_GROUP,
+                        {"$limit": topic_limit},
+                    ],
+                    "weak_topics": [
+                        {"$match": {"status": "completed"}},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "topic": {"$ifNull": ["$report.weak_topics", []]},
+                            }
+                        },
+                        {"$unwind": "$topic"},
+                        *TOPIC_GROUP,
+                        {"$limit": topic_limit},
+                    ],
+                    "recent": [
+                        {"$sort": {"created_at": -1, "_id": -1}},
+                        {"$limit": recent_limit},
+                        {"$project": RECENT_PROJECTION},
+                    ],
+                    "active": [
+                        {
+                            "$match": {
+                                "status": {"$in": ["created", "in_progress"]}
+                            }
+                        },
+                        {"$sort": {"created_at": -1, "_id": -1}},
+                        {"$limit": 1},
+                        {
+                            "$project": {
+                                "role": 1,
+                                "status": 1,
+                                "created_at": 1,
+                            }
+                        },
+                    ],
+                }
+            },
+        ]
+        rows = [row async for row in db[self.collection_name].aggregate(pipeline)]
+        if not rows:
+            return {}
+        facets = rows[0]
+        for key in ("recent", "active"):
+            facets[key] = [self._shape(doc) for doc in facets.get(key) or []]
+        return facets
 
     async def results_for_user(
         self,

@@ -1,20 +1,20 @@
 "use client";
 
-import { useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 import {
   ArrowRight,
   ChevronRight,
   CircleCheck,
   Mic,
+  Play,
   Sparkles,
   Target,
   TrendingUp,
   TriangleAlert,
 } from "lucide-react";
 
+import { RequireRole } from "@/components/auth/require-role";
 import { useAsync } from "@/hooks/use-async";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -25,13 +25,10 @@ import { SkeletonCard } from "@/components/ui/loading";
 import { StatCard } from "@/components/ui/stat-card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useAuth } from "@/hooks/use-auth";
-import {
-  STATUS_LABELS,
-  TYPE_LABELS,
-  TYPE_TONES,
-} from "@/lib/interview";
+import { TYPE_LABELS, TYPE_TONES } from "@/lib/interview";
 import { formatDate, greeting } from "@/lib/utils";
 import { getDashboardStats } from "@/services/dashboard";
+import type { TopicCount } from "@/types";
 
 const ONBOARDING_STEPS = [
   {
@@ -52,20 +49,21 @@ const ONBOARDING_STEPS = [
 ];
 
 export default function DashboardPage() {
-  const router = useRouter();
+  return (
+    <RequireRole roles={["candidate"]} redirectTo="/jobs">
+      <CandidateDashboard />
+    </RequireRole>
+  );
+}
+
+function CandidateDashboard() {
   const { user } = useAuth();
   const name = (user?.name ?? "").split(" ")[0];
-
-  // Staff land on their recruiting workspace, not the candidate dashboard.
-  useEffect(() => {
-    if (user && user.role !== "candidate") {
-      router.replace("/jobs");
-    }
-  }, [user, router]);
 
   const { data: stats, loading, error, reload } = useAsync(
     getDashboardStats,
     [],
+    { keepPreviousData: true },
   );
 
   if (loading && !stats) {
@@ -81,7 +79,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (error) {
+  if (error && !stats) {
     return (
       <div className="mx-auto max-w-xl py-16">
         <Alert tone="error">
@@ -97,11 +95,34 @@ export default function DashboardPage() {
   }
 
   const recent = stats?.recent ?? [];
-  const strongTopics = stats?.strong_topics ?? [];
-  const weakTopics = stats?.weak_topics ?? [];
+  const activeInterview = stats?.active_interview ?? null;
+  const activeCount =
+    (stats?.interviews_in_progress ?? 0) +
+    (stats?.interviews_not_started ?? 0);
+  const strongTopics: TopicCount[] =
+    stats?.strong_topic_counts?.length
+      ? stats.strong_topic_counts
+      : (stats?.strong_topics ?? []).map((topic) => ({ topic, count: 0 }));
+  const weakTopics: TopicCount[] =
+    stats?.weak_topic_counts?.length
+      ? stats.weak_topic_counts
+      : (stats?.weak_topics ?? []).map((topic) => ({ topic, count: 0 }));
 
   return (
     <div className="space-y-6">
+      {error ? (
+        <Alert tone="error">
+          {error.message || "Could not refresh your dashboard."}{" "}
+          <button
+            type="button"
+            onClick={reload}
+            className="font-semibold underline underline-offset-2"
+          >
+            Try again
+          </button>
+        </Alert>
+      ) : null}
+
       <section className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-sm text-ink-2">
@@ -109,17 +130,36 @@ export default function DashboardPage() {
             {name ? `, ${name}` : ""} 👋
           </p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-ink lg:text-[28px]">
-            Ready for your next interview?
+            {activeInterview
+              ? "Pick up where you left off"
+              : "Ready for your next interview?"}
           </h1>
           <p className="mt-1.5 max-w-xl text-sm text-ink-2">
-            Practice with an AI interviewer, get scored on observable
-            dimensions, and improve with every answer.
+            {activeInterview
+              ? `Your ${activeInterview.role} interview is still open. Resume it whenever you are ready.`
+              : "Practice with an AI interviewer, get scored on observable dimensions, and improve with every answer."}
           </p>
         </div>
-        <div className="flex gap-2.5">
-          <ButtonLink href="/practice" variant="primary" icon={<Mic className="h-4 w-4" />}>
-            Start Interview
-          </ButtonLink>
+        <div className="flex flex-wrap gap-2.5">
+          {activeInterview ? (
+            <ButtonLink
+              href={`/interviews/${activeInterview.id}`}
+              variant="primary"
+              icon={<Play className="h-4 w-4" />}
+            >
+              {activeInterview.status === "created"
+                ? "Start interview"
+                : "Resume interview"}
+            </ButtonLink>
+          ) : (
+            <ButtonLink
+              href="/practice"
+              variant="primary"
+              icon={<Mic className="h-4 w-4" />}
+            >
+              Start Interview
+            </ButtonLink>
+          )}
           <ButtonLink href="/interviews" variant="outline">
             My Interviews
           </ButtonLink>
@@ -144,7 +184,9 @@ export default function DashboardPage() {
               : "—"
           }
           icon={<TrendingUp className="h-4 w-4" />}
-          hint="across completed reports"
+          hint={`${stats?.scored_count ?? 0} scored ${
+            stats?.scored_count === 1 ? "report" : "reports"
+          }`}
         />
         <StatCard
           label="Questions Answered"
@@ -152,10 +194,12 @@ export default function DashboardPage() {
           icon={<Sparkles className="h-4 w-4" />}
         />
         <StatCard
-          label="In Progress"
-          value={stats?.interviews_in_progress ?? 0}
+          label="Active Sessions"
+          value={activeCount}
           icon={<ArrowRight className="h-4 w-4" />}
-          hint="resumable anytime"
+          hint={`${stats?.interviews_in_progress ?? 0} in progress · ${
+            stats?.interviews_not_started ?? 0
+          } not started`}
         />
       </section>
 
@@ -241,9 +285,6 @@ export default function DashboardPage() {
                         </td>
                         <td className="px-4 py-3.5">
                           <StatusBadge status={item.status} />
-                          <span className="sr-only">
-                            {STATUS_LABELS[item.status]}
-                          </span>
                         </td>
                         <td className="px-4 py-3.5 text-right">
                           <Link
@@ -252,6 +293,13 @@ export default function DashboardPage() {
                                 ? `/interviews/${item.id}/result`
                                 : `/interviews/${item.id}`
                             }
+                            aria-label={`${
+                              item.status === "completed"
+                                ? "View report"
+                                : item.status === "created"
+                                  ? "Start"
+                                  : "Resume"
+                            } ${item.role} interview`}
                             className="inline-flex items-center gap-1 rounded-btn px-2 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand-50"
                           >
                             {item.status === "completed" ? "Report" : "Open"}
@@ -269,6 +317,61 @@ export default function DashboardPage() {
 
         <div className="space-y-6">
           <Card>
+            <CardHeader title="Next step" />
+            <CardContent className="space-y-3">
+              {activeInterview ? (
+                <>
+                  <p className="text-sm leading-relaxed text-ink-2">
+                    Continue your{" "}
+                    <span className="font-medium text-ink">
+                      {activeInterview.role}
+                    </span>{" "}
+                    interview while the questions are fresh.
+                  </p>
+                  <ButtonLink
+                    href={`/interviews/${activeInterview.id}`}
+                    variant="primary"
+                    size="sm"
+                    icon={<Play className="h-3.5 w-3.5" />}
+                  >
+                    {activeInterview.status === "created"
+                      ? "Start interview"
+                      : "Resume interview"}
+                  </ButtonLink>
+                </>
+              ) : weakTopics.length > 0 ? (
+                <>
+                  <p className="text-sm leading-relaxed text-ink-2">
+                    Focus your next session on{" "}
+                    <span className="font-medium text-ink">
+                      {weakTopics[0].topic}
+                    </span>
+                    .
+                  </p>
+                  <ButtonLink href="/practice" variant="primary" size="sm">
+                    Practice now
+                  </ButtonLink>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm leading-relaxed text-ink-2">
+                    No interviews yet. Start a mock interview to get your first
+                    score and topic breakdown.
+                  </p>
+                  <ButtonLink
+                    href="/practice"
+                    variant="primary"
+                    size="sm"
+                    icon={<Mic className="h-3.5 w-3.5" />}
+                  >
+                    Start interview
+                  </ButtonLink>
+                </>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
             <CardHeader title="Strong topics" />
             <CardContent>
               {strongTopics.length === 0 ? (
@@ -277,13 +380,18 @@ export default function DashboardPage() {
                 </p>
               ) : (
                 <ul className="flex flex-wrap gap-2">
-                  {strongTopics.map((topic) => (
+                  {strongTopics.map((item) => (
                     <li
-                      key={topic}
+                      key={item.topic}
                       className="inline-flex items-center gap-1.5 rounded-full bg-success-soft px-3 py-1 text-xs font-medium text-success-ink ring-1 ring-inset ring-success-border"
                     >
                       <CircleCheck className="h-3.5 w-3.5" aria-hidden />
-                      {topic}
+                      {item.topic}
+                      {item.count > 0 ? (
+                        <span className="rounded-full bg-white/70 px-1.5 text-[11px] tabular-nums">
+                          {item.count}
+                        </span>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -300,13 +408,18 @@ export default function DashboardPage() {
                 </p>
               ) : (
                 <ul className="flex flex-wrap gap-2">
-                  {weakTopics.map((topic) => (
+                  {weakTopics.map((item) => (
                     <li
-                      key={topic}
+                      key={item.topic}
                       className="inline-flex items-center gap-1.5 rounded-full bg-warning-soft px-3 py-1 text-xs font-medium text-warning-ink ring-1 ring-inset ring-warning-border"
                     >
                       <TriangleAlert className="h-3.5 w-3.5" aria-hidden />
-                      {topic}
+                      {item.topic}
+                      {item.count > 0 ? (
+                        <span className="rounded-full bg-white/70 px-1.5 text-[11px] tabular-nums">
+                          {item.count}
+                        </span>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

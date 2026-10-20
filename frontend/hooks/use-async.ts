@@ -10,6 +10,11 @@ interface AsyncState<T> {
   error: ApiError | null;
 }
 
+interface AsyncOptions {
+  /** Keep the last successful data visible when a reload fails. */
+  keepPreviousData?: boolean;
+}
+
 /**
  * Runs `loader` on mount, whenever `deps` change and on every `reload()`.
  * Responses from superseded runs are discarded, so a slow first request can
@@ -18,6 +23,7 @@ interface AsyncState<T> {
 export function useAsync<T>(
   loader: () => Promise<T>,
   deps: React.DependencyList = [],
+  options: AsyncOptions = {},
 ): AsyncState<T> & { reload: () => void } {
   const [state, setState] = useState<AsyncState<T>>({
     data: null,
@@ -26,11 +32,16 @@ export function useAsync<T>(
   });
 
   const loaderRef = useRef(loader);
+  const keepPreviousDataRef = useRef(options.keepPreviousData ?? false);
   const runIdRef = useRef(0);
 
   useEffect(() => {
     loaderRef.current = loader;
   }, [loader]);
+
+  useEffect(() => {
+    keepPreviousDataRef.current = options.keepPreviousData ?? false;
+  }, [options.keepPreviousData]);
 
   const start = useCallback(() => {
     const runId = ++runIdRef.current;
@@ -44,7 +55,11 @@ export function useAsync<T>(
       })
       .catch((error: unknown) => {
         if (runId === runIdRef.current) {
-          setState({ data: null, loading: false, error: toApiError(error) });
+          setState((prev) => ({
+            data: keepPreviousDataRef.current ? prev.data : null,
+            loading: false,
+            error: toApiError(error),
+          }));
         }
       });
   }, []);

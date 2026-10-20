@@ -421,6 +421,7 @@ export interface Report {
 export interface DashboardInterview {
   id: string;
   role: string;
+  kind: InterviewKind;
   type: InterviewType;
   difficulty: Difficulty;
   status: InterviewStatus;
@@ -430,15 +431,32 @@ export interface DashboardInterview {
   created_at: string;
 }
 
+export interface DashboardActiveInterview {
+  id: string;
+  role: string;
+  status: InterviewStatus;
+  created_at: string;
+}
+
+export interface TopicCount {
+  topic: string;
+  count: number;
+}
+
 /** Response of `GET /api/dashboard/stats`. */
 export interface DashboardStats {
   interviews_total: number;
   interviews_completed: number;
   interviews_in_progress: number;
+  interviews_not_started: number;
   questions_answered: number;
+  scored_count: number;
   average_score: number | null;
   strong_topics: string[];
   weak_topics: string[];
+  strong_topic_counts: TopicCount[];
+  weak_topic_counts: TopicCount[];
+  active_interview: DashboardActiveInterview | null;
   recent: DashboardInterview[];
 }
 
