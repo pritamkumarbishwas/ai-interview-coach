@@ -44,9 +44,7 @@ logger = logging.getLogger(__name__)
 ANALYSIS_VERSION = "resume-v2"
 RESUME_PROCESS_JOB = "resume.process"
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-PHONE_RE = re.compile(
-    r"(?<!\d)(?:\+\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-])\d{3,4}[\s.-]\d{4}(?!\d)"
-)
+PHONE_RE = re.compile(r"(?<![\w])\+?\(?\d(?:[ \t().-]*\d){7,14}(?![\w])")
 URL_RE = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
 
 
@@ -205,9 +203,18 @@ def _convert_docx_to_pdf(file_bytes: bytes) -> bytes | None:
         return output.read_bytes()
 
 
+def _valid_phone(value: str) -> bool:
+    digits = re.sub(r"\D", "", value)
+    return 10 <= len(digits) <= 15
+
+
 def _extract_contact(text: str) -> ContactInfo:
     emails = [match.group(0) for match in EMAIL_RE.finditer(text)]
-    phones = [match.group(0).strip() for match in PHONE_RE.finditer(text)]
+    phones = [
+        match.group(0).strip(" .-")
+        for match in PHONE_RE.finditer(text)
+        if _valid_phone(match.group(0))
+    ]
     links: list[ContactLink] = []
     seen: set[str] = set()
     for match in URL_RE.finditer(text):
@@ -224,7 +231,12 @@ def _extract_contact(text: str) -> ContactInfo:
 
 def _redact_contact_pii(text: str) -> str:
     text = EMAIL_RE.sub("[email redacted]", text)
-    text = PHONE_RE.sub("[phone redacted]", text)
+    text = PHONE_RE.sub(
+        lambda match: (
+            "[phone redacted]" if _valid_phone(match.group(0)) else match.group(0)
+        ),
+        text,
+    )
     return text
 
 
@@ -309,7 +321,7 @@ def _merge_structured(
 ) -> ResumeStructuredData:
     merged: dict[str, Any] = {
         "version": 2,
-        "contact": contact.model_dump(),
+        "contact": {"name": "", "email": "", "phone": "", "location": "", "links": []},
         "summary": "",
         "skills": [],
         "experience": [],
@@ -325,6 +337,12 @@ def _merge_structured(
     }
     for result in results:
         data = result.model_dump()
+        extracted_contact = data.get("contact") or {}
+        for field in ("name", "email", "phone", "location"):
+            value = str(extracted_contact.get(field) or "").strip()
+            if value and not merged["contact"][field]:
+                merged["contact"][field] = value
+        merged["contact"]["links"].extend(extracted_contact.get("links") or [])
         if data.get("summary") and not merged["summary"]:
             merged["summary"] = data["summary"]
         for field in ("skills", "interests"):
@@ -359,11 +377,24 @@ def _merge_structured(
         merged["additional_sections"], ("heading",)
     )
     # Keep deterministic contact details even when the LLM was given redacted
-    # text and could not see them.
+    # text and could not see them. The LLM still supplies the name, location
+    # and profile links that local regexes cannot reliably identify.
+    deterministic = contact.model_dump()
+    deterministic_links = deterministic.pop("links", [])
     merged["contact"] = {
         **merged["contact"],
-        **{k: v for k, v in contact.model_dump().items() if v},
+        **{k: v for k, v in deterministic.items() if v},
     }
+    seen_links: set[str] = set()
+    links: list[dict[str, str]] = []
+    for link in [*merged["contact"].get("links", []), *deterministic_links]:
+        url = str(link.get("url") or "").strip()
+        key = url.rstrip("/").lower()
+        if not key or key in seen_links:
+            continue
+        seen_links.add(key)
+        links.append({"label": str(link.get("label") or ""), "url": url})
+    merged["contact"]["links"] = links[:20]
     return ResumeStructuredData.model_validate(merged)
 
 

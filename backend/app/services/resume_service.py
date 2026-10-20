@@ -193,9 +193,15 @@ class ResumeService:
         self, db: AsyncIOMotorDatabase, user_id: str, doc: dict
     ) -> ResumeUploadResponse:
         status = _analysis_status(doc)
-        if status == "pending":
-            await self._process_or_enqueue(db, str(doc["_id"]), user_id)
-            refreshed = await self._resumes.find_owned(db, str(doc["_id"]), user_id)
+        resume_id = str(doc["_id"])
+        if status in {"pending", "partial", "failed"}:
+            if status == "pending":
+                await self._process_or_enqueue(db, resume_id, user_id)
+            else:
+                # Re-uploading is the user's natural way to retry; never hand
+                # back a stale partial/failed analysis for the same file.
+                await self.retry_analysis(db, user_id, resume_id)
+            refreshed = await self._resumes.find_owned(db, resume_id, user_id)
             if refreshed is not None:
                 doc = refreshed
         return self._upload_response(doc, deduplicated=True)

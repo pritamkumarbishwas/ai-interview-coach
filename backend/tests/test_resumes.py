@@ -2,6 +2,7 @@ import io
 from datetime import UTC, datetime
 
 import pytest
+from bson import ObjectId
 from docx import Document
 from fastapi.testclient import TestClient
 
@@ -127,6 +128,8 @@ def test_upload_valid_pdf_is_listed_fetched_and_deleted(
 
     detail = client.get(f"/api/resumes/{resume_id}", headers=auth_headers)
     assert detail.status_code == 200
+    assert detail.json()["id"] == resume_id
+    assert "_id" not in detail.json()
     assert detail.json()["raw_text"]
     assert detail.json()["analysis"]["status"] == "ready"
     # Storage identifiers are implementation details and never leave the API.
@@ -209,6 +212,53 @@ def test_duplicate_upload_reuses_the_stored_resume(
     assert second.status_code == 200, second.text
     assert second.json()["deduplicated"] is True
     assert second.json()["id"] == first.json()["id"]
+
+
+def test_duplicate_upload_retries_a_partial_analysis(
+    client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+
+    async def counting_extraction(prompt: str, schema, **kwargs):
+        nonlocal calls
+        calls += 1
+        return schema(skills=["Python"], experience=[], projects=[], education=[])
+
+    monkeypatch.setattr(RESUME_SERVICE_LLM, counting_extraction)
+    payload = make_pdf("Jane Doe - partial retry check.")
+    created = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={"file": ("resume.pdf", payload, "application/pdf")},
+    )
+    assert created.status_code == 201, created.text
+    resume_id = created.json()["id"]
+    assert calls == 1
+
+    async def mark_partial(db) -> None:
+        await db.resumes.update_one(
+            {"_id": ObjectId(resume_id)},
+            {
+                "$set": {
+                    "analysis.status": "partial",
+                    "analysis.failed_chunks": 1,
+                    "structured_data.skills": ["stale"],
+                }
+            },
+        )
+
+    _with_mongo(mark_partial)
+
+    retried = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={"file": ("resume.pdf", payload, "application/pdf")},
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["deduplicated"] is True
+    assert retried.json()["analysis_status"] == "ready"
+    assert retried.json()["structured_data"]["skills"] == ["Python"]
+    assert calls == 2
 
 
 def test_large_resumes_are_extracted_in_bounded_chunks(
@@ -478,6 +528,53 @@ def test_chunk_merge_preserves_link_objects() -> None:
     assert merged[0]["links"] == [
         {"label": "GitHub", "url": "https://github.com/a"},
         {"label": "Demo", "url": "https://example.com/demo"},
+    ]
+
+
+def test_contact_extraction_handles_common_phone_formats() -> None:
+    from app.services.resume_processing import _extract_contact, _redact_contact_pii
+
+    contact = _extract_contact(
+        "Jane Doe\n+91 98765 43210\njane@example.com\nBuilt APIs in 2024."
+    )
+    assert contact.email == "jane@example.com"
+    assert contact.phone == "+91 98765 43210"
+
+    no_phone = _extract_contact("Jane Doe\n15-10-2026\njane@example.com")
+    assert no_phone.phone == ""
+    # Dates must not be mistaken for phone numbers and redacted from prompts.
+    assert _redact_contact_pii("15-10-2026") == "15-10-2026"
+    assert "[phone redacted]" in _redact_contact_pii("+91 98765 43210")
+
+
+def test_chunk_merge_keeps_llm_contact_name_and_local_contact_details() -> None:
+    from app.schemas.resume import ContactInfo, ContactLink, ResumeStructuredData
+    from app.services.resume_processing import _merge_structured
+
+    merged = _merge_structured(
+        [
+            ResumeStructuredData(
+                contact=ContactInfo(
+                    name="Jane Doe",
+                    location="Pune, India",
+                    links=[ContactLink(label="LinkedIn", url="https://linkedin.com/in/jane")],
+                )
+            )
+        ],
+        ContactInfo(
+            email="jane@example.com",
+            phone="+91 98765 43210",
+            links=[ContactLink(label="Portfolio", url="https://jane.dev")],
+        ),
+    )
+
+    assert merged.contact.name == "Jane Doe"
+    assert merged.contact.location == "Pune, India"
+    assert merged.contact.email == "jane@example.com"
+    assert merged.contact.phone == "+91 98765 43210"
+    assert [link.url for link in merged.contact.links] == [
+        "https://linkedin.com/in/jane",
+        "https://jane.dev",
     ]
 
 

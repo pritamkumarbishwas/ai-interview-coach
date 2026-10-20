@@ -90,6 +90,7 @@ async def list_resumes(
 @router.get(
     "/{resume_id}",
     response_model=Resume,
+    response_model_by_alias=False,
     response_model_exclude={
         "storage_key": True,
         "original_file_id": True,
