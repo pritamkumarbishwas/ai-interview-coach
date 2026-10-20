@@ -1,27 +1,49 @@
-"""Resume use-cases: file validation, parsing, AI extraction and persistence."""
+"""Resume use-cases: validation, durable storage, analysis and retrieval."""
 
+import hashlib
 import logging
-import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.concurrency import run_in_threadpool
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import DuplicateKeyError
 
-from app.core.config import resolve_storage_dir
-from app.core.exceptions import BadRequestError, NotFoundError, ServiceUnavailableError
+from app.core.config import resolve_storage_dir, settings
+from app.core.exceptions import (
+    BadRequestError,
+    ConflictError,
+    NotFoundError,
+)
+from app.core.jobs import job_queue
 from app.models.resume import Resume
-from app.prompts.templates import EXTRACT_RESUME_INFO_PROMPT, MAX_PROMPT_CHARS
-from app.repositories.resume_repository import ResumeRepository
-from app.schemas.resume import ResumeStructuredData, ResumeSummary, ResumeUploadResponse
-from app.services.llm_service import llm_service
+from app.repositories.resume_repository import ResumeRepository, resume_repository
+from app.schemas.resume import (
+    ResumeStructuredData,
+    ResumeSummary,
+    ResumeTextResponse,
+    ResumeUploadResponse,
+)
 from app.services.parsers import parse_docx, parse_pdf
+from app.services.resume_processing import (
+    RESUME_PROCESS_JOB,
+    ResumeProcessingError,
+    resume_processing_service,
+    validate_document,
+)
+from app.services.resume_storage import ResumeStorage, resume_storage
 
 logger = logging.getLogger(__name__)
 
 PDF_MAGIC = b"%PDF-"
 DOCX_MAGIC = b"PK\x03\x04"
 SUPPORTED_EXTENSIONS = {".pdf": PDF_MAGIC, ".docx": DOCX_MAGIC}
+SUPPORTED_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
 SKILLS_IN_SUMMARY = 8
+TERMINAL_STATUSES = {"ready", "partial", "failed"}
 
 
 def _extension_for(filename: str | None) -> str:
@@ -39,11 +61,11 @@ def _assert_magic_bytes(data: bytes, extension: str) -> None:
 
 
 async def _extract_text(extension: str, file_bytes: bytes) -> str:
-    """Parse the upload (blocking work runs in the thread pool)."""
+    """Compatibility helper retained for callers that only need plain text."""
     parser = parse_pdf if extension == ".pdf" else parse_docx
     try:
         raw_text = await run_in_threadpool(parser, file_bytes)
-    except Exception as exc:  # parser raises library-specific errors
+    except Exception as exc:
         logger.warning("Failed to parse %s upload: %s", extension, exc)
         raise BadRequestError(
             "Failed to parse file: the document may be corrupt or password protected."
@@ -53,16 +75,8 @@ async def _extract_text(extension: str, file_bytes: bytes) -> str:
     return raw_text
 
 
-def _store_file(data: bytes, user_id: str, extension: str) -> Path:
-    directory = resolve_storage_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{user_id}_{uuid.uuid4().hex}{extension}"
-    path.write_bytes(data)
-    return path
-
-
 def _remove_stored_file(storage_key: str, user_id: str) -> None:
-    """Best-effort removal of a stored upload, only if it belongs to this user."""
+    """Best-effort removal of a legacy local upload, only if it belongs to this user."""
     if not storage_key or "/" in storage_key or "\\" in storage_key:
         return
     directory = resolve_storage_dir()
@@ -78,9 +92,23 @@ def _skills_summary(doc: dict) -> list[str]:
     return [str(skill) for skill in skills][:SKILLS_IN_SUMMARY]
 
 
+def _analysis_status(doc: dict) -> str:
+    status = (doc.get("analysis") or {}).get("status")
+    if status:
+        return str(status)
+    # Documents created before analysis status existed have already been
+    # extracted synchronously.
+    return "ready" if doc.get("structured_data") else "failed"
+
+
 class ResumeService:
-    def __init__(self, resumes: ResumeRepository) -> None:
+    def __init__(
+        self,
+        resumes: ResumeRepository,
+        storage: ResumeStorage | None = None,
+    ) -> None:
         self._resumes = resumes
+        self._storage = storage or resume_storage
 
     async def upload(
         self,
@@ -89,71 +117,274 @@ class ResumeService:
         *,
         filename: str | None,
         file_bytes: bytes,
+        content_type: str | None = None,
     ) -> ResumeUploadResponse:
         extension = _extension_for(filename)
+        display_name = Path(filename or "resume").name
         if not file_bytes:
             raise BadRequestError("The file is empty.")
         _assert_magic_bytes(file_bytes, extension)
+        try:
+            await run_in_threadpool(validate_document, display_name, file_bytes)
+        except ResumeProcessingError as exc:
+            raise BadRequestError(exc.message) from exc
 
-        raw_text = await _extract_text(extension, file_bytes)
-        structured_data = await self._extract_structured_data(raw_text)
-        storage_path = await run_in_threadpool(_store_file, file_bytes, user_id, extension)
+        sha256 = hashlib.sha256(file_bytes).hexdigest()
+        existing = await self._resumes.find_by_sha(db, user_id, sha256)
+        if existing is not None:
+            return await self._handle_duplicate(db, user_id, existing)
 
+        mime_type = SUPPORTED_MIME_TYPES[extension]
+        if content_type and content_type.split(";", 1)[0] == mime_type:
+            mime_type = content_type
         resume = Resume(
             user_id=user_id,
-            filename=filename,
+            filename=display_name,
+            mime_type=mime_type,
             file_size=len(file_bytes),
-            storage_key=storage_path.name,
-            raw_text=raw_text,
-            structured_data=structured_data.model_dump(),
+            sha256=sha256,
+            storage_backend="gridfs",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
         )
         try:
-            resume.id = await self._resumes.insert(db, resume)
+            resume_id = await self._resumes.insert(db, resume)
+        except DuplicateKeyError:
+            # Another concurrent request stored the same content first.
+            existing = await self._resumes.find_by_sha(db, user_id, sha256)
+            if existing is None:
+                raise
+            return await self._handle_duplicate(db, user_id, existing)
+
+        file_id = ""
+        try:
+            file_id = await self._storage.put_original(
+                db,
+                resume_id=resume_id,
+                user_id=user_id,
+                filename=display_name,
+                data=file_bytes,
+                sha256=sha256,
+                content_type=mime_type,
+            )
+            await self._resumes.update_fields(
+                db,
+                resume_id,
+                user_id,
+                {
+                    "original_file_id": file_id,
+                    "analysis.status": "pending",
+                    "updated_at": datetime.now(UTC),
+                },
+            )
         except Exception:
-            # Do not leave an orphaned file behind when persistence fails.
-            storage_path.unlink(missing_ok=True)
+            if file_id:
+                await self._storage.delete_original(db, file_id)
+            await self._resumes.delete(db, resume_id, user_id)
             raise
 
+        await self._process_or_enqueue(db, resume_id, user_id)
+        doc = await self._resumes.find_owned(db, resume_id, user_id)
+        if doc is None:
+            raise NotFoundError("Resume not found")
+        return self._upload_response(doc)
+
+    async def _handle_duplicate(
+        self, db: AsyncIOMotorDatabase, user_id: str, doc: dict
+    ) -> ResumeUploadResponse:
+        status = _analysis_status(doc)
+        if status == "pending":
+            await self._process_or_enqueue(db, str(doc["_id"]), user_id)
+            refreshed = await self._resumes.find_owned(db, str(doc["_id"]), user_id)
+            if refreshed is not None:
+                doc = refreshed
+        return self._upload_response(doc, deduplicated=True)
+
+    async def _process_or_enqueue(
+        self, db: AsyncIOMotorDatabase, resume_id: str, user_id: str
+    ) -> None:
+        if settings.resume_processing_inline:
+            await resume_processing_service.process(db, resume_id, user_id)
+            return
+        try:
+            await job_queue.enqueue(
+                db,
+                RESUME_PROCESS_JOB,
+                {"resume_id": resume_id, "user_id": user_id},
+                max_attempts=3,
+            )
+        except Exception:
+            # Never strand a stored resume because the queue is unavailable.
+            logger.exception("Could not enqueue resume processing; running inline")
+            await resume_processing_service.process(db, resume_id, user_id)
+
+    def _upload_response(
+        self, doc: dict, *, deduplicated: bool = False
+    ) -> ResumeUploadResponse:
+        structured = ResumeStructuredData.model_validate(
+            doc.get("structured_data") or {}
+        )
         return ResumeUploadResponse(
-            id=resume.id,
-            filename=resume.filename,
-            structured_data=structured_data,
+            id=str(doc["_id"]),
+            filename=str(doc.get("filename", "resume")),
+            structured_data=structured,
+            analysis_status=_analysis_status(doc),
+            page_count=int(doc.get("page_count") or 0),
+            ocr_used=bool(doc.get("ocr_pages")),
+            deduplicated=deduplicated,
         )
 
-    async def list(self, db: AsyncIOMotorDatabase, user_id: str, limit: int) -> list[ResumeSummary]:
+    async def list(
+        self, db: AsyncIOMotorDatabase, user_id: str, limit: int
+    ) -> list[ResumeSummary]:
         docs = await self._resumes.list_for_user(db, user_id, limit)
         return [
             ResumeSummary(
                 id=doc["_id"],
                 filename=doc.get("filename", "resume"),
                 file_size=doc.get("file_size", 0),
+                mime_type=doc.get("mime_type", ""),
                 skills=_skills_summary(doc),
+                analysis_status=_analysis_status(doc),
+                page_count=int(doc.get("page_count") or 0),
+                has_preview=bool(doc.get("previews")),
+                ocr_used=bool(doc.get("ocr_pages")),
                 created_at=doc["created_at"],
             )
             for doc in docs
         ]
 
-    async def get(self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str) -> Resume:
+    async def get(
+        self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str
+    ) -> Resume:
         doc = await self._require(db, user_id, resume_id)
         return Resume(**doc)
 
-    async def delete(self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str) -> None:
+    async def get_text(
+        self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str
+    ) -> ResumeTextResponse:
         doc = await self._require(db, user_id, resume_id)
+        text = await resume_processing_service.load_full_text(db, doc)
+        return ResumeTextResponse(
+            id=str(doc["_id"]),
+            text=text,
+            page_count=int(doc.get("page_count") or 0),
+            ocr_pages=[int(page) for page in doc.get("ocr_pages") or []],
+        )
+
+    async def get_original(
+        self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str
+    ) -> tuple[bytes, str, str]:
+        doc = await self._require(db, user_id, resume_id)
+        data = await self._storage.get_original(
+            db, str(doc.get("original_file_id") or "")
+        )
+        if data is None:
+            # Legacy local-disk fallback.
+            storage_key = str(doc.get("storage_key") or "")
+            if storage_key and "/" not in storage_key and "\\" not in storage_key:
+                path = resolve_storage_dir() / storage_key
+                if path.exists():
+                    data = await run_in_threadpool(path.read_bytes)
+        if data is None:
+            raise NotFoundError("Stored resume file not found")
+        return data, str(doc.get("filename") or "resume"), str(
+            doc.get("mime_type") or "application/octet-stream"
+        )
+
+    async def get_preview(
+        self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str, page: int
+    ) -> bytes:
+        doc = await self._require(db, user_id, resume_id)
+        preview = next(
+            (
+                item
+                for item in doc.get("previews") or []
+                if int(item.get("page", 0)) == page
+            ),
+            None,
+        )
+        if preview is None:
+            raise NotFoundError("Preview not found")
+        data = await self._storage.get_preview(db, str(preview.get("file_id") or ""))
+        if data is None:
+            raise NotFoundError("Preview not found")
+        return data
+
+    async def retry_analysis(
+        self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str
+    ) -> str:
+        doc = await self._require(db, user_id, resume_id)
+        status = _analysis_status(doc)
+        if status in {"pending", "processing"}:
+            raise ConflictError("Resume analysis is already running")
+        if status == "deleting":
+            raise NotFoundError("Resume not found")
+        await self._resumes.update_fields(
+            db,
+            resume_id,
+            user_id,
+            {
+                "analysis.status": "pending",
+                "analysis.error_code": "",
+                "analysis.error_message": "",
+                "updated_at": datetime.now(UTC),
+            },
+        )
+        await self._process_or_enqueue(db, resume_id, user_id)
+        refreshed = await self._resumes.find_owned(db, resume_id, user_id)
+        return _analysis_status(refreshed or doc)
+
+    async def delete(
+        self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str
+    ) -> None:
+        doc = await self._require(db, user_id, resume_id)
+        active = await db.interviews.count_documents(
+            {
+                "user_id": user_id,
+                "resume_id": resume_id,
+                "status": {"$in": ["created", "in_progress"]},
+            }
+        )
+        if active:
+            raise ConflictError(
+                "This resume is used by an active interview. Finish or abandon "
+                "that interview before deleting it."
+            )
+        await self._resumes.update_fields(
+            db,
+            resume_id,
+            user_id,
+            {"analysis.status": "deleting", "deleted_at": datetime.now(UTC)},
+        )
+        file_ids = [doc.get("original_file_id"), doc.get("content_file_id")]
+        file_ids.extend(
+            item.get("file_id") for item in (doc.get("previews") or [])
+        )
+        for file_id in file_ids:
+            if not file_id:
+                continue
+            try:
+                if file_id == doc.get("content_file_id"):
+                    await self._storage.delete_original(db, str(file_id))
+                elif file_id == doc.get("original_file_id"):
+                    await self._storage.delete_original(db, str(file_id))
+                else:
+                    await self._storage.delete_preview(db, str(file_id))
+            except Exception:
+                logger.warning("Could not remove resume asset %s", file_id)
+        legacy_key = str(doc.get("storage_key") or "")
+        if legacy_key:
+            await run_in_threadpool(_remove_stored_file, legacy_key, user_id)
         await self._resumes.delete(db, resume_id, user_id)
-        await run_in_threadpool(_remove_stored_file, doc.get("storage_key", ""), user_id)
 
-    async def _extract_structured_data(self, raw_text: str) -> ResumeStructuredData:
-        prompt = EXTRACT_RESUME_INFO_PROMPT.format(text=raw_text[:MAX_PROMPT_CHARS])
-        try:
-            return await llm_service.generate_structured(prompt, ResumeStructuredData)
-        except Exception as exc:
-            logger.error("Resume analysis failed: %s: %s", type(exc).__name__, exc)
-            raise ServiceUnavailableError(
-                "AI analysis of the resume is unavailable right now. Please try again later."
-            ) from exc
-
-    async def _require(self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str) -> dict:
+    async def _require(
+        self, db: AsyncIOMotorDatabase, user_id: str, resume_id: str
+    ) -> dict:
         doc = await self._resumes.find_owned(db, resume_id, user_id)
         if doc is None:
             raise NotFoundError("Resume not found")
         return doc
+
+
+resume_service = ResumeService(resume_repository, resume_storage)

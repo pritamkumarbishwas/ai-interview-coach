@@ -3,10 +3,11 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from tests.conftest import RESUME_SERVICE_LLM, insert_job_description, make_pdf
 
 JD_SERVICE_LLM = "app.services.job_description_service.llm_service.generate_structured"
-RESUME_SERVICE_TEXT = "app.services.resume_service._extract_text"
+RESUME_PARSE_PAGES = "app.services.resume_processing.parse_pdf_pages"
 
 
 async def fake_resume_extraction(prompt: str, schema, **kwargs):
@@ -78,50 +79,100 @@ def test_upload_valid_pdf_is_listed_fetched_and_deleted(
     client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(RESUME_SERVICE_LLM, fake_resume_extraction)
+    payload = make_pdf()
 
     created = client.post(
         "/api/resumes/upload",
         headers=auth_headers,
-        files={"file": ("resume.pdf", make_pdf(), "application/pdf")},
+        files={"file": ("resume.pdf", payload, "application/pdf")},
     )
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["filename"] == "resume.pdf"
     assert body["structured_data"]["skills"] == ["Python", "FastAPI"]
+    assert body["analysis_status"] == "ready"
+    assert body["ocr_used"] is False
     resume_id = body["id"]
 
     listed = client.get("/api/resumes", headers=auth_headers)
     assert listed.status_code == 200
     summaries = listed.json()
-    assert any(item["id"] == resume_id for item in summaries)
+    summary = next(item for item in summaries if item["id"] == resume_id)
+    assert summary["analysis_status"] == "ready"
+    assert summary["has_preview"] is True
     assert all("raw_text" not in item for item in summaries)
 
     detail = client.get(f"/api/resumes/{resume_id}", headers=auth_headers)
     assert detail.status_code == 200
     assert detail.json()["raw_text"]
-    # The stored file name is an implementation detail and never leaves the API.
+    assert detail.json()["analysis"]["status"] == "ready"
+    # Storage identifiers are implementation details and never leave the API.
     assert "storage_key" not in detail.json()
+    assert "original_file_id" not in detail.json()
+    assert all("file_id" not in preview for preview in detail.json()["previews"])
+
+    text = client.get(f"/api/resumes/{resume_id}/text", headers=auth_headers)
+    assert text.status_code == 200
+    assert "Jane Doe" in text.json()["text"]
+
+    download = client.get(f"/api/resumes/{resume_id}/file", headers=auth_headers)
+    assert download.status_code == 200
+    assert download.content == payload
+    assert "resume.pdf" in download.headers["content-disposition"]
+    assert download.headers["x-content-type-options"] == "nosniff"
+
+    preview = client.get(f"/api/resumes/{resume_id}/preview/1", headers=auth_headers)
+    assert preview.status_code == 200
+    assert preview.headers["content-type"] == "image/png"
+    assert preview.content.startswith(b"\x89PNG")
+
+    missing_preview = client.get(
+        f"/api/resumes/{resume_id}/preview/99", headers=auth_headers
+    )
+    assert missing_preview.status_code == 404
 
     assert client.delete(f"/api/resumes/{resume_id}", headers=auth_headers).status_code == 204
     assert client.get(f"/api/resumes/{resume_id}", headers=auth_headers).status_code == 404
+    assert client.get(f"/api/resumes/{resume_id}/file", headers=auth_headers).status_code == 404
 
 
-def test_extraction_prompt_is_bounded_for_large_resumes(
+def test_duplicate_upload_reuses_the_stored_resume(
     client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A long document is truncated so one request fits the provider token budget."""
-    from app.prompts.templates import MAX_PROMPT_CHARS
+    monkeypatch.setattr(RESUME_SERVICE_LLM, fake_resume_extraction)
+    payload = make_pdf("Jane Doe - duplicate upload check.")
 
-    captured: dict[str, object] = {}
+    first = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={"file": ("resume.pdf", payload, "application/pdf")},
+    )
+    assert first.status_code == 201, first.text
 
-    async def huge_text(extension: str, file_bytes: bytes) -> str:
-        return "Experience: backend services.\n" * 5000
+    second = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={"file": ("resume.pdf", payload, "application/pdf")},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["deduplicated"] is True
+    assert second.json()["id"] == first.json()["id"]
+
+
+def test_large_resumes_are_extracted_in_bounded_chunks(
+    client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Long documents are split so no single provider request exceeds the budget."""
+    prompts: list[str] = []
+
+    def huge_pages(file_bytes: bytes):
+        return [{"page": 0, "text": "Experience: backend services.\n" * 5000}]
 
     async def capturing_extraction(prompt: str, schema, **kwargs):
-        captured["prompt_chars"] = len(prompt)
+        prompts.append(prompt)
         return schema(skills=[], experience=[], projects=[], education=[])
 
-    monkeypatch.setattr(RESUME_SERVICE_TEXT, huge_text)
+    monkeypatch.setattr(RESUME_PARSE_PAGES, huge_pages)
     monkeypatch.setattr(RESUME_SERVICE_LLM, capturing_extraction)
 
     created = client.post(
@@ -130,12 +181,13 @@ def test_extraction_prompt_is_bounded_for_large_resumes(
         files={"file": ("resume.pdf", make_pdf(), "application/pdf")},
     )
     assert created.status_code == 201, created.text
-    assert isinstance(captured["prompt_chars"], int)
-    assert captured["prompt_chars"] < MAX_PROMPT_CHARS + 1000
+    assert len(prompts) > 1
+    assert max(len(prompt) for prompt in prompts) < (
+        settings.resume_extraction_chunk_chars + 15_000
+    )
 
 
-
-def test_upload_returns_service_unavailable_when_llm_is_down(
+def test_upload_survives_llm_failure_and_can_be_retried(
     client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def boom(prompt: str, schema, **kwargs):
@@ -148,8 +200,27 @@ def test_upload_returns_service_unavailable_when_llm_is_down(
         headers=auth_headers,
         files={"file": ("resume.pdf", make_pdf(), "application/pdf")},
     )
-    assert response.status_code == 503
-    assert response.json()["code"] == "service_unavailable"
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["analysis_status"] == "failed"
+    resume_id = body["id"]
+
+    # The original, previews and full text remain available for manual use.
+    detail = client.get(f"/api/resumes/{resume_id}", headers=auth_headers)
+    assert detail.status_code == 200
+    assert detail.json()["raw_text"]
+    assert detail.json()["previews"]
+    assert detail.json()["analysis"]["error_code"] == "llm_failed"
+
+    monkeypatch.setattr(RESUME_SERVICE_LLM, fake_resume_extraction)
+    retried = client.post(f"/api/resumes/{resume_id}/analyze", headers=auth_headers)
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["analysis_status"] == "ready"
+    assert (
+        client.get(f"/api/resumes/{resume_id}", headers=auth_headers)
+        .json()["structured_data"]["skills"]
+        == ["Python", "FastAPI"]
+    )
 
 
 def test_get_resume_with_invalid_id_is_404(client: TestClient, auth_headers: dict) -> None:

@@ -20,6 +20,10 @@ from app.models.job import Job
 from app.repositories.interview_repository import interview_repository
 from app.repositories.invitation_repository import invitation_repository
 from app.repositories.job_repository import job_repository
+from app.services.resume_processing import (
+    RESUME_PROCESS_JOB,
+    resume_processing_service,
+)
 from app.services.retention_service import RETENTION_PURGE_JOB, retention_service
 from app.services.scorecard_service import scorecard_service
 
@@ -91,7 +95,16 @@ async def run_retention_purge(db: AsyncIOMotorDatabase, payload: dict) -> None:
     await retention_service.purge_expired(db)
 
 
+async def process_resume_assets(db: AsyncIOMotorDatabase, payload: dict) -> None:
+    """Extract full content, previews, OCR and structured data for a resume."""
+    resume_id = str(payload.get("resume_id") or "")
+    user_id = str(payload.get("user_id") or "")
+    if resume_id and user_id:
+        await resume_processing_service.process(db, resume_id, user_id)
+
+
 def register_default_handlers(worker: JobWorker | None = None) -> None:
     target = worker or job_worker
     target.register(ATS_WEBHOOK_JOB, deliver_ats_webhook)
     target.register(RETENTION_PURGE_JOB, run_retention_purge)
+    target.register(RESUME_PROCESS_JOB, process_resume_assets)

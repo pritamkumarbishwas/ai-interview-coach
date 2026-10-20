@@ -40,9 +40,34 @@ class Settings(BaseSettings):
     mongo_uri: str = "mongodb://localhost:27017"
     mongo_db_name: str = "ai_interview_coach"
 
+    # Legacy local resume storage. New uploads live in GridFS; this remains so
+    # pre-migration documents can still be downloaded.
     storage_dir: str = "data/resumes"
     max_upload_bytes: int = 5 * 1024 * 1024
     max_body_bytes: int = 10 * 1024 * 1024
+
+    # --- Resume content storage -------------------------------------------
+    # Original files, full extracted content and page previews live in GridFS
+    # so a resume document never approaches MongoDB's 16MB document limit.
+    resume_bucket_name: str = "resume_files"
+    resume_preview_bucket_name: str = "resume_previews"
+    resume_preview_dpi: int = Field(default=144, ge=72, le=300)
+    resume_max_previews: int = Field(default=40, ge=1, le=200)
+    resume_max_pages: int = Field(default=60, ge=1, le=500)
+    resume_max_inline_text_chars: int = Field(default=200_000, ge=10_000)
+    resume_max_extraction_chunks: int = Field(default=40, ge=1, le=200)
+    resume_extraction_chunk_chars: int = Field(default=7_000, ge=2_000, le=12_000)
+    # Inline is the safe local-development default; Compose turns it off and
+    # uses the durable background worker for OCR/LLM processing.
+    resume_processing_inline: bool = True
+    resume_ocr_enabled: bool = True
+    resume_ocr_languages: str = "eng"
+    resume_ocr_dpi: int = Field(default=200, ge=96, le=400)
+    resume_ocr_min_chars: int = Field(default=40, ge=0)
+    resume_ocr_timeout_seconds: int = Field(default=60, ge=5, le=300)
+    tesseract_cmd: str = "tesseract"
+    libreoffice_cmd: str = "soffice"
+    resume_docx_preview_conversion: bool = True
 
     # Interview session recordings (GridFS). Chunked upload: each chunk is
     # capped, and the total per-kind recording is capped to bound storage.

@@ -284,6 +284,13 @@ class InterviewService:
             resume = await self._resumes.find_owned(db, resume_id, user_id)
             if resume is None:
                 raise NotFoundError("Resume not found")
+            status = (resume.get("analysis") or {}).get("status")
+            if status in {"pending", "processing"}:
+                raise ConflictError(
+                    "Resume analysis is still running. Try again when it is ready."
+                )
+            if status == "deleting":
+                raise NotFoundError("Resume not found")
         jd = await self._job_descriptions.find_owned(db, payload.jd_id, user_id)
         if jd is None:
             raise NotFoundError("Job description not found")
@@ -732,7 +739,15 @@ class InterviewService:
         if jd is None:
             raise NotFoundError("Job description no longer exists")
 
-        resume_context = _context_block(resume.get("structured_data") or {}) if resume else "{}"
+        resume_context = "{}"
+        if resume:
+            structured = resume.get("structured_data") or {}
+            status = (resume.get("analysis") or {}).get("status")
+            raw_text = str(resume.get("raw_text") or "")
+            if structured and status not in {"failed"}:
+                resume_context = _context_block(structured)
+            elif raw_text:
+                resume_context = _context_block({"resume_text": raw_text})
         jd_context = _context_block(
             {
                 "title": jd.get("title", ""),

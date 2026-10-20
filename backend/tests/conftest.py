@@ -22,7 +22,7 @@ from app.core.security import hash_password
 from app.main import app
 from app.models.user import User
 
-RESUME_SERVICE_LLM = "app.services.resume_service.llm_service.generate_structured"
+RESUME_SERVICE_LLM = "app.services.resume_processing.llm_service.generate_structured"
 # The interview flow shares one `llm_service` singleton with resume/JD
 # extraction, so one patched method must dispatch every schema in the flow.
 INTERVIEW_LLM = "app.services.interview_service.llm_service.generate_structured"

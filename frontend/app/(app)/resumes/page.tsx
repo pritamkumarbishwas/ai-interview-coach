@@ -1,11 +1,18 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+} from "react";
 
 import { FileText, FileUp, Trash, Upload } from "lucide-react";
 
+import { ResumeDetailDialog } from "@/components/resumes/resume-detail-dialog";
 import { Alert } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -13,14 +20,26 @@ import { SkeletonList } from "@/components/ui/loading";
 import { useAsync } from "@/hooks/use-async";
 import { toApiError } from "@/lib/api";
 import * as resumeService from "@/services/resumes";
-import { cx, formatBytes, formatDate } from "@/lib/utils";
-import type { ResumeSummary } from "@/types";
+import { formatBytes, formatDate } from "@/lib/utils";
+import type { ResumeAnalysisStatus, ResumeSummary } from "@/types";
 
 const ACCEPTED_TYPES = [
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
 const MAX_SIZE = 5 * 1024 * 1024;
+
+const STATUS_META: Record<
+  ResumeAnalysisStatus,
+  { label: string; tone: BadgeTone }
+> = {
+  pending: { label: "Queued", tone: "brand" },
+  processing: { label: "Analysing", tone: "ai" },
+  ready: { label: "Ready", tone: "success" },
+  partial: { label: "Partially ready", tone: "warning" },
+  failed: { label: "Analysis failed", tone: "danger" },
+  deleting: { label: "Deleting", tone: "muted" },
+};
 
 export default function ResumesPage() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -30,6 +49,7 @@ export default function ResumesPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [openResumeId, setOpenResumeId] = useState<string | null>(null);
 
   const {
     data: resumes,
@@ -37,6 +57,17 @@ export default function ResumesPage() {
     error: listError,
     reload,
   } = useAsync(() => resumeService.listResumes(), []);
+
+  const items = resumes ?? [];
+  const hasProcessing = items.some((resume) =>
+    resumeService.isResumeProcessing(resume.analysis_status),
+  );
+
+  useEffect(() => {
+    if (!hasProcessing) return;
+    const timer = window.setInterval(reload, resumeService.RESUME_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [hasProcessing, reload]);
 
   const pickFile = (file: File | null | undefined) => {
     setError(null);
@@ -77,9 +108,22 @@ export default function ResumesPage() {
     setSuccess(null);
     try {
       const created = await resumeService.uploadResume(selected);
-      setSuccess(`"${created.filename}" was uploaded and processed.`);
+      if (created.deduplicated) {
+        setSuccess(`"${created.filename}" is already in your library.`);
+      } else if (created.analysis_status === "failed") {
+        setSuccess(
+          `"${created.filename}" was saved. AI analysis failed, but you can retry it from the resume card.`,
+        );
+      } else if (resumeService.isResumeProcessing(created.analysis_status)) {
+        setSuccess(`"${created.filename}" was uploaded and is being analysed.`);
+      } else {
+        setSuccess(`"${created.filename}" was uploaded and processed.`);
+      }
       setSelected(null);
       reload();
+      if (created.deduplicated || !resumeService.isResumeProcessing(created.analysis_status)) {
+        setOpenResumeId(created.id);
+      }
     } catch (caught) {
       setError(toApiError(caught).message);
     } finally {
@@ -101,21 +145,21 @@ export default function ResumesPage() {
   };
 
   const showListSkeleton = loading && resumes === null;
-  const items = resumes ?? [];
 
   return (
     <div className="space-y-6">
       <section>
         <h2 className="text-2xl font-bold tracking-tight text-ink">Resumes</h2>
         <p className="mt-1.5 text-sm text-ink-2">
-          Ground interview questions in your real experience.
+          Ground interview questions in your real experience. Snapshots, text and
+          the original file are kept together.
         </p>
       </section>
 
       <Card>
         <CardHeader
           title="Upload a resume"
-          description="PDF or DOCX, up to 5 MB. We extract the text and structure it for interview questions."
+          description="PDF or DOCX, up to 5 MB. We keep the original, extract every section, render page previews and read scanned pages with OCR."
         />
         <CardContent className="space-y-4">
           {error ? <Alert tone="error">{error}</Alert> : null}
@@ -128,12 +172,11 @@ export default function ResumesPage() {
             }}
             onDragLeave={() => setDragging(false)}
             onDrop={onDrop}
-            className={cx(
-              "flex flex-col items-center justify-center rounded-card border-2 border-dashed px-6 py-10 text-center transition-colors",
+            className={`flex flex-col items-center justify-center rounded-card border-2 border-dashed px-6 py-10 text-center transition-colors ${
               dragging
                 ? "border-brand bg-brand-50"
-                : "border-line bg-surface hover:border-brand-border",
-            )}
+                : "border-line bg-surface hover:border-brand-border"
+            }`}
           >
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-card text-brand shadow-sm">
               <FileUp className="h-5 w-5" aria-hidden />
@@ -164,10 +207,7 @@ export default function ResumesPage() {
           {selected ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3">
               <div className="flex min-w-0 items-center gap-3">
-                <FileText
-                  className="h-5 w-5 shrink-0 text-brand"
-                  aria-hidden
-                />
+                <FileText className="h-5 w-5 shrink-0 text-brand" aria-hidden />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-ink">
                     {selected.name}
@@ -192,7 +232,7 @@ export default function ResumesPage() {
                   loading={uploading}
                   icon={<Upload className="h-4 w-4" aria-hidden />}
                 >
-                  {uploading ? "Processing…" : "Upload resume"}
+                  {uploading ? "Uploading..." : "Upload resume"}
                 </Button>
               </div>
             </div>
@@ -209,11 +249,7 @@ export default function ResumesPage() {
         {listError ? (
           <Alert tone="error">
             {listError.message}{" "}
-            <button
-              type="button"
-              onClick={reload}
-              className="font-medium underline"
-            >
+            <button type="button" onClick={reload} className="font-medium underline">
               Retry
             </button>
           </Alert>
@@ -226,6 +262,7 @@ export default function ResumesPage() {
                 key={resume.id}
                 resume={resume}
                 busy={deletingId === resume.id}
+                onView={() => setOpenResumeId(resume.id)}
                 onRemove={() => void removeResume(resume.id)}
               />
             ))}
@@ -238,6 +275,12 @@ export default function ResumesPage() {
           />
         )}
       </section>
+
+      <ResumeDetailDialog
+        resumeId={openResumeId}
+        onClose={() => setOpenResumeId(null)}
+        onDeleted={reload}
+      />
     </div>
   );
 }
@@ -245,16 +288,21 @@ export default function ResumesPage() {
 function ResumeCard({
   resume,
   busy,
+  onView,
   onRemove,
 }: {
   resume: ResumeSummary;
   busy: boolean;
+  onView: () => void;
   onRemove: () => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
   const extension =
     resume.filename.split(".").pop()?.toUpperCase() ?? "FILE";
   const skills = resume.skills.slice(0, 3);
   const remaining = resume.skills.length - skills.length;
+  const meta = STATUS_META[resume.analysis_status];
+  const processing = resumeService.isResumeProcessing(resume.analysis_status);
 
   return (
     <Card>
@@ -263,11 +311,29 @@ function ResumeCard({
           <FileText className="h-5 w-5" aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-ink">
+          <button
+            type="button"
+            onClick={onView}
+            className="block max-w-full truncate text-left text-sm font-medium text-ink hover:underline"
+          >
             {resume.filename}
-          </p>
+          </button>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <Badge tone={meta.tone}>
+              {processing ? (
+                <span className="mr-1 h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+              ) : null}
+              {meta.label}
+            </Badge>
             <Badge tone="brand">{extension}</Badge>
+            {resume.page_count > 0 ? (
+              <span className="text-xs text-ink-2">
+                {resume.page_count} page{resume.page_count === 1 ? "" : "s"}
+              </span>
+            ) : null}
+            {resume.ocr_used ? (
+              <span className="text-xs text-ink-2">OCR</span>
+            ) : null}
             {resume.file_size > 0 ? (
               <span className="text-xs text-ink-2">
                 {formatBytes(resume.file_size)}
@@ -289,16 +355,45 @@ function ResumeCard({
               ) : null}
             </div>
           ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={onView}>
+              View details
+            </Button>
+            {confirming ? (
+              <>
+                <span className="text-xs font-medium text-danger-ink">
+                  Delete permanently?
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirming(false)}
+                  disabled={busy}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={onRemove}
+                  loading={busy}
+                >
+                  Delete
+                </Button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirming(true)}
+                disabled={busy}
+                aria-label={`Delete ${resume.filename}`}
+                className="rounded-btn p-2 text-ink-3 transition-colors hover:bg-danger-soft hover:text-danger-ink disabled:opacity-50"
+              >
+                <Trash className="h-4 w-4" aria-hidden />
+              </button>
+            )}
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={onRemove}
-          disabled={busy}
-          aria-label={`Delete ${resume.filename}`}
-          className="rounded-btn p-2 text-ink-3 transition-colors hover:bg-danger-soft hover:text-danger-ink disabled:opacity-50"
-        >
-          <Trash className="h-4 w-4" aria-hidden />
-        </button>
       </CardContent>
     </Card>
   );

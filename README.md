@@ -122,7 +122,9 @@ completed. Treat the link as sensitive.
 ### Candidate
 
 - Registration/login, JWT session, profile update
-- Resume upload/list/detail/delete with magic-byte and size validation
+- Resume upload/list/detail/delete with magic-byte/size validation and SHA-256 dedupe
+- Original files, full extracted text, page previews, OCR for scans, and structured extraction for every resume section
+- Durable resume analysis status (`pending`, `processing`, `ready`, `partial`, `failed`) with retry, download, and preview APIs
 - Job-description create/list/detail/delete
 - Practice interview lifecycle, adaptive questions, answer evaluation, final report
 - Dashboard stats and interview history
@@ -150,7 +152,8 @@ completed. Treat the link as sensitive.
 - Staff seat cap
 - API keys for the owner-scoped public API
 - Audit log, compliance record, secure webhook secret storage
-- Mongo-backed background queue for webhooks and retention jobs
+- Mongo-backed background queue for webhooks, resume ingestion, and retention jobs
+- GridFS-backed resume originals, extracted content, and page previews
 - CI: backend lint/format/tests, frontend typecheck/build
 
 ## Tech stack
@@ -214,6 +217,10 @@ The examples contain the full annotated list; the most important settings are:
 | `TRANSCRIPTION_PROVIDER` | `none`, `openai`, or `groq` | `none` |
 | `MAIL_PROVIDER` | Currently only `console` | `console` |
 | `JOBS_ENABLED` | Run the background worker in this process | `false` (Compose: `true`) |
+| `RESUME_PROCESSING_INLINE` | Analyze uploads on the request instead of the job worker | `true` (Compose: `false`) |
+| `RESUME_OCR_ENABLED` / `RESUME_OCR_LANGUAGES` | Read scanned pages with Tesseract | `true` / `eng` |
+| `RESUME_PREVIEW_DPI` / `RESUME_MAX_PREVIEWS` | Page-preview quality and cap | `144` / `40` |
+| `TESSERACT_CMD` / `LIBREOFFICE_CMD` | Binary names/paths for OCR and DOCX previews | `tesseract` / `soffice` |
 | `INVITATION_TTL_DAYS` | Default candidate link lifetime | `7` |
 | `MAX_STAFF_SEATS` | Provisioned staff cap, `0` = unlimited | `0` |
 | `MONTHLY_LLM_BUDGET_USD` | AI spend cap, `0` = unlimited | `0` |
@@ -251,6 +258,26 @@ npm run dev
 - API: `http://localhost:8000/api`
 - Health: `GET /api/health`
 - Docs: `http://localhost:8000/api/docs` (disabled in production)
+- Resume OCR/previews: install Tesseract and LibreOffice, or accept the
+  text-only fallback. On Windows, set `TESSERACT_CMD`/`LIBREOFFICE_CMD` if the
+  binaries are not on `PATH`.
+
+### Migrating legacy resume files
+
+Older deployments stored uploads under `backend/data/resumes` and kept only a
+`storage_key` in MongoDB. Move them into GridFS before removing that volume:
+
+```bash
+cd backend
+python -m scripts.migrate_resume_storage
+# Re-run OCR/preview/structured extraction as part of the migration:
+python -m scripts.migrate_resume_storage --analyze
+# Delete each local file after its GridFS copy is written:
+python -m scripts.migrate_resume_storage --analyze --delete-local
+```
+
+The script is idempotent and skips documents that already have an
+`original_file_id`. Duplicate content is reported and left untouched.
 
 ## API surface
 
@@ -260,7 +287,7 @@ The main groups are:
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/auth/register`, `POST /api/auth/login`, `GET/PATCH /api/auth/me` |
-| Practice | `/api/resumes`, `/api/job-descriptions`, `/api/interviews`, `/api/questions/{id}/answer`, `/api/dashboard/stats` |
+| Practice | `/api/resumes`, `/api/resumes/{id}/text`, `/api/resumes/{id}/file`, `/api/resumes/{id}/preview/{page}`, `/api/resumes/{id}/analyze`, `/api/job-descriptions`, `/api/interviews`, `/api/questions/{id}/answer`, `/api/dashboard/stats` |
 | Jobs | `GET/POST /api/jobs`, `GET/PATCH/DELETE /api/jobs/{id}`, `PUT /api/jobs/{id}/reviewers` |
 | Templates | `GET/POST /api/templates`, `GET/PATCH/DELETE /api/templates/{id}`, `POST /api/templates/{id}/preview` |
 | Staff | `/api/staff/invitations`, `POST /api/staff/invitations/accept`, `/api/staff/users`, `PATCH /api/staff/users/{id}/role`, `GET /api/staff/reviewers` |
@@ -275,9 +302,20 @@ The main groups are:
   Invitations are returned to the recruiter in the API response and shown in the
   UI; copy the link and send it manually. Adding SMTP/SES requires implementing
   the `Mailer` interface.
-- **Webhooks need a worker.** Delivery uses the MongoDB-backed queue. Docker
-  Compose enables it (`JOBS_ENABLED=true`); for a non-Docker run, enable it in
-  `backend/.env`. With no worker, decisions are recorded but webhooks stay queued.
+- **Webhooks and resume ingestion need a worker.** Both use the MongoDB-backed
+  queue. Docker Compose enables it (`JOBS_ENABLED=true`) and sets
+  `RESUME_PROCESSING_INLINE=false`. For a non-Docker run, either enable the
+  worker in `backend/.env` or keep `RESUME_PROCESSING_INLINE=true`. With no
+  worker and inline processing disabled, uploads stay `pending` and webhooks
+  stay queued.
+- **OCR and DOCX previews need CLI tools.** Scanned PDFs use Tesseract; DOCX
+  previews use LibreOffice. The Docker image installs both. Without them the
+  original, text, and structured analysis still work, and the resume records a
+  warning instead of failing.
+- **Resume storage is durable and owner-scoped.** Originals, extracted content,
+  and previews live in GridFS and are served only through authenticated routes.
+  Deleting a resume is blocked while an active interview references it. AI
+  failure keeps the upload and text; use retry analysis instead of re-uploading.
 - **Retention is manual.** `POST /api/invitations/retention/purge` erases expired
   session data and anonymizes invitation rows, but no scheduler enqueues it
   automatically. Run it from an admin/cron process if automatic retention is required.
@@ -330,8 +368,12 @@ typecheck and build.
   server-side, and cross-owner admin mutations are audited.
 - Candidate magic-link and staff-invite tokens are stored as SHA-256 hashes.
   Raw tokens exist only in the link.
-- Resume uploads are validated by extension, magic bytes, and size and stored
-  outside the web root.
+- Resume uploads are validated by extension, magic bytes, and size, deduplicated
+  by SHA-256 per user, and stored in owner-scoped GridFS collections. Original
+  downloads and previews require the owner's Bearer token; no storage path or
+  GridFS id is exposed by the API.
+- Contact email/phone values are redacted before resume text is sent to the
+  configured LLM; deterministic contact fields are extracted locally.
 - Request bodies above `MAX_BODY_BYTES` are rejected before being read.
 - CORS is an explicit allow-list with credentials disabled; the SPA uses a
   Bearer token.

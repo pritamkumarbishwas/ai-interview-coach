@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type DragEvent } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -19,7 +19,12 @@ import { Field, Input, Textarea } from "@/components/ui/input";
 import { toApiError } from "@/lib/api";
 import { cx } from "@/lib/utils";
 import { createJobDescription } from "@/services/job-descriptions";
-import { uploadResume } from "@/services/resumes";
+import {
+  isResumeProcessing,
+  listResumes,
+  uploadResume,
+  waitForResume,
+} from "@/services/resumes";
 import {
   createInterview,
   startInterview,
@@ -28,6 +33,7 @@ import type {
   Difficulty,
   ExperienceLevel,
   InterviewType,
+  ResumeSummary,
 } from "@/types";
 
 const INTERVIEW_TYPES: { value: InterviewType; label: string }[] = [
@@ -53,6 +59,15 @@ const EXPERIENCE_LEVELS: { value: ExperienceLevel; label: string }[] = [
 const ACCEPTED_EXTENSIONS = [".pdf", ".docx"];
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+const ANALYSIS_LABELS: Record<string, string> = {
+  pending: "queued",
+  processing: "analysing",
+  ready: "ready",
+  partial: "partially ready",
+  failed: "analysis failed",
+  deleting: "deleting",
+};
+
 function clampQuestionCount(value: number): number {
   if (!Number.isFinite(value)) return 10;
   return Math.min(15, Math.max(5, Math.round(value)));
@@ -71,7 +86,28 @@ export default function PracticePage() {
   const [questionCount, setQuestionCount] = useState(10);
   const [fileError, setFileError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [startingLabel, setStartingLabel] = useState("Creating...");
   const [startError, setStartError] = useState<string | null>(null);
+  const [savedResumes, setSavedResumes] = useState<ResumeSummary[]>([]);
+  const [savedResumeId, setSavedResumeId] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    listResumes()
+      .then((items) => {
+        if (active) {
+          setSavedResumes(
+            items.filter((item) => item.analysis_status !== "deleting"),
+          );
+        }
+      })
+      .catch(() => {
+        // The upload path still works if the saved-resume list is unavailable.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const acceptFile = (next?: File) => {
     if (!next) return;
@@ -88,11 +124,20 @@ export default function PracticePage() {
     }
     setFileError(null);
     setFile(next);
+    setSavedResumeId("");
   };
 
   const removeFile = () => {
     setFile(null);
     setFileError(null);
+  };
+
+  const chooseSavedResume = (id: string) => {
+    setSavedResumeId(id);
+    if (id) {
+      setFile(null);
+      setFileError(null);
+    }
   };
 
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -109,13 +154,27 @@ export default function PracticePage() {
     const target = clampQuestionCount(questionCount);
     setQuestionCount(target);
     setStarting(true);
+    setStartingLabel("Preparing...");
     setStartError(null);
     try {
       let resumeId: string | undefined;
       if (file) {
+        setStartingLabel("Uploading resume...");
         const uploaded = await uploadResume(file);
         resumeId = uploaded.id;
+        if (isResumeProcessing(uploaded.analysis_status)) {
+          setStartingLabel("Reading every resume section...");
+          await waitForResume(uploaded.id);
+        }
+      } else if (savedResumeId) {
+        const saved = savedResumes.find((item) => item.id === savedResumeId);
+        if (saved && isResumeProcessing(saved.analysis_status)) {
+          setStartingLabel("Waiting for resume analysis...");
+          await waitForResume(saved.id);
+        }
+        resumeId = savedResumeId;
       }
+      setStartingLabel("Creating interview...");
       const jd = await createJobDescription({
         title: role.trim(),
         company: "Not specified",
@@ -257,13 +316,46 @@ export default function PracticePage() {
                 </>
               )}
             </div>
+            {savedResumes.length > 0 ? (
+              <div className="mt-4">
+                <Field
+                  label="Or use a saved resume"
+                  htmlFor="saved-resume"
+                  hint="No need to upload the same file twice."
+                >
+                  <select
+                    id="saved-resume"
+                    value={savedResumeId}
+                    onChange={(event) => chooseSavedResume(event.target.value)}
+                    disabled={starting}
+                    className="block w-full rounded-btn border border-line bg-card px-3.5 py-2.5 text-sm text-ink shadow-sm transition-colors focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand-100"
+                  >
+                    <option value="">Upload a new file / no resume</option>
+                    {savedResumes.map((resume) => (
+                      <option key={resume.id} value={resume.id}>
+                        {resume.filename} (
+                        {ANALYSIS_LABELS[resume.analysis_status] ??
+                          resume.analysis_status}
+                        )
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {savedResumeId ? (
+                  <p className="mt-2 text-xs text-ink-2">
+                    This interview will use the stored copy, including its
+                    original file and extracted sections.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             {fileError ? (
               <Alert tone="error" className="mt-3">
                 {fileError}
               </Alert>
             ) : null}
             <p className="mt-3 text-center text-xs text-ink-3">
-              Optional — you can skip this and still start an interview.
+              Optional �?" you can skip this and still start an interview.
             </p>
           </CardContent>
         </Card>
@@ -427,7 +519,7 @@ export default function PracticePage() {
             loading={starting}
             icon={<Mic className="h-4 w-4" />}
           >
-            {starting ? "Creating…" : "Start AI Interview"}
+            {starting ? startingLabel : "Start AI Interview"}
           </Button>
         )}
       </div>

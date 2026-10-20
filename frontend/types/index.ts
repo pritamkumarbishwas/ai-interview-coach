@@ -41,27 +41,175 @@ export interface LoginInput {
   password: string;
 }
 
+export type ResumeAnalysisStatus =
+  | "pending"
+  | "processing"
+  | "ready"
+  | "partial"
+  | "failed"
+  | "deleting";
+
+export interface ResumeAnalysis {
+  status: ResumeAnalysisStatus;
+  error_code: string;
+  error_message: string;
+  warnings: string[];
+  model: string;
+  failed_chunks: number;
+  version: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ResumePreview {
+  page: number;
+  width: number;
+  height: number;
+  dpi: number;
+}
+
+export interface ResumeLink {
+  label: string;
+  url: string;
+}
+
+export interface ResumeContact {
+  name: string;
+  email: string;
+  phone: string;
+  location: string;
+  links: ResumeLink[];
+}
+
+export interface ResumeExperience {
+  company: string;
+  role: string;
+  location: string;
+  duration: string;
+  start_date: string;
+  end_date: string;
+  description: string;
+  achievements: string[];
+}
+
+export interface ResumeProject {
+  name: string;
+  description: string;
+  technologies: string[];
+  links: ResumeLink[];
+  achievements: string[];
+}
+
+export interface ResumeEducation {
+  institution: string;
+  degree: string;
+  field_of_study: string;
+  year: string;
+  start_date: string;
+  end_date: string;
+  grade: string;
+  details: string[];
+}
+
+export interface ResumeCertification {
+  name: string;
+  issuer: string;
+  issue_date: string;
+  credential_id: string;
+  url: string;
+}
+
+export interface ResumeAward {
+  title: string;
+  issuer: string;
+  date: string;
+  description: string;
+}
+
+export interface ResumePublication {
+  title: string;
+  publisher: string;
+  date: string;
+  url: string;
+  description: string;
+}
+
+export interface ResumeLanguage {
+  language: string;
+  proficiency: string;
+}
+
+export interface ResumeAdditionalSection {
+  heading: string;
+  content: string;
+}
+
+export interface ResumeStructuredData {
+  version?: number;
+  contact: ResumeContact;
+  summary: string;
+  skills: string[];
+  experience: ResumeExperience[];
+  projects: ResumeProject[];
+  education: ResumeEducation[];
+  certifications: ResumeCertification[];
+  awards: ResumeAward[];
+  publications: ResumePublication[];
+  languages: ResumeLanguage[];
+  volunteer: ResumeExperience[];
+  interests: string[];
+  additional_sections: ResumeAdditionalSection[];
+}
+
 export interface Resume {
   id: string;
   filename: string;
-  file_size?: number;
-  raw_text?: string;
-  structured_data?: Record<string, unknown> | null;
+  file_size: number;
+  mime_type: string;
+  raw_text: string;
+  structured_data: ResumeStructuredData;
+  analysis: ResumeAnalysis;
+  previews: ResumePreview[];
+  page_count: number;
+  ocr_pages: number[];
+  has_text_layer: boolean;
   created_at: string;
+  updated_at: string;
 }
 
 export interface ResumeSummary {
   id: string;
   filename: string;
   file_size: number;
+  mime_type: string;
   skills: string[];
+  analysis_status: ResumeAnalysisStatus;
+  page_count: number;
+  has_preview: boolean;
+  ocr_used: boolean;
   created_at: string;
 }
 
 export interface ResumeUploadResponse {
   id: string;
   filename: string;
-  structured_data: Record<string, unknown>;
+  structured_data: ResumeStructuredData;
+  analysis_status: ResumeAnalysisStatus;
+  page_count: number;
+  ocr_used: boolean;
+  deduplicated: boolean;
+}
+
+export interface ResumeTextResponse {
+  id: string;
+  text: string;
+  page_count: number;
+  ocr_pages: number[];
+}
+
+export interface ResumeActionResponse {
+  id: string;
+  analysis_status: ResumeAnalysisStatus;
 }
 
 export interface JobDescription {

@@ -3,10 +3,42 @@ import fitz  # PyMuPDF
 from app.services.parsers.text_cleaner import clean_text
 
 
+def validate_pdf(file_bytes: bytes) -> None:
+    """Open the document once so corrupt/encrypted PDFs are rejected early."""
+    with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+        if doc.needs_pass:
+            raise ValueError("PDF is password protected")
+        if doc.page_count == 0:
+            raise ValueError("PDF contains no pages")
+        doc.load_page(0)
+
+
+def parse_pdf_pages(file_bytes: bytes) -> list[dict]:
+    """Extract page text and block text without flattening the document."""
+    pages: list[dict] = []
+    with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+        if doc.needs_pass:
+            raise ValueError("PDF is password protected")
+        for number, page in enumerate(doc, start=1):
+            text = clean_text(page.get_text("text"))
+            blocks = [
+                clean_text(block[4])
+                for block in page.get_text("blocks")
+                if len(block) >= 5 and block[4].strip()
+            ]
+            pages.append(
+                {
+                    "number": number,
+                    "text": text,
+                    "blocks": blocks,
+                    "width": round(float(page.rect.width), 2),
+                    "height": round(float(page.rect.height), 2),
+                    "method": "text_layer" if text else "none",
+                }
+            )
+    return pages
+
+
 def parse_pdf(file_bytes: bytes) -> str:
     """Extract text from a PDF file using PyMuPDF."""
-    pages: list[str] = []
-    with fitz.open(stream=file_bytes, filetype="pdf") as doc:
-        for page in doc:
-            pages.append(page.get_text())
-    return clean_text("\n\n".join(pages))
+    return clean_text("\n\n".join(page["text"] for page in parse_pdf_pages(file_bytes)))

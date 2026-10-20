@@ -9,9 +9,14 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me}
-      # Deliver queued ATS webhooks in this single backend process. Set to
-      # false only when a separate worker owns the queue.
+      # Deliver queued ATS webhooks and resume-ingestion jobs in this single
+      # backend process. Set to false only when a separate worker owns the queue.
       JOBS_ENABLED: ${JOBS_ENABLED:-true}
+      # Keep OCR/preview work off the upload request in Compose. The UI polls
+      # the resume status until the worker finishes. Set true for a single-
+      # process/local setup without a running worker.
+      RESUME_PROCESSING_INLINE: ${RESUME_PROCESSING_INLINE:-false}
+      RESUME_OCR_LANGUAGES: ${RESUME_OCR_LANGUAGES:-eng}
       # LLM keys are read from backend/.env (mounted into /app) or from these vars:
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
@@ -77,7 +82,8 @@ services:
     restart: unless-stopped
 
   # Deliberately no Redis: rate limiting is per-process in-memory (one backend
-  # instance) and there are no background jobs — slow LLM calls stay on the
+  # instance) and background work uses the MongoDB-backed queue. Resume OCR and
+  # preview rendering run in the worker; interactive LLM calls stay on the
   # request path with long timeouts. See README "Operational decisions".
 
 volumes:

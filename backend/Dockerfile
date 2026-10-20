@@ -6,6 +6,17 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Resume ingestion uses CLI tools: Tesseract for scanned pages and
+# LibreOffice for DOCX -> PDF page previews. Missing tools degrade gracefully,
+# but the container ships with both so previews/OCR work out of the box.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        libreoffice-writer \
+        fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

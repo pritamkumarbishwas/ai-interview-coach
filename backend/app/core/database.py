@@ -37,6 +37,27 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         await db.resumes.create_index(
             [("user_id", 1), ("created_at", -1)], name="ix_resumes_user_created"
         )
+        # Content-addressed deduplication is per user. Legacy documents have no
+        # sha256 and are deliberately excluded from the unique index.
+        await db.resumes.create_index(
+            [("user_id", 1), ("sha256", 1)],
+            unique=True,
+            name="ux_resumes_user_sha256",
+            partialFilterExpression={"sha256": {"$type": "string"}},
+        )
+        await db.resumes.create_index(
+            [("analysis.status", 1), ("created_at", 1)],
+            name="ix_resumes_analysis_status",
+        )
+        # GridFS assets carry the owning resume id in metadata for cleanup and
+        # orphan reconciliation.
+        for bucket in (
+            settings.resume_bucket_name,
+            settings.resume_preview_bucket_name,
+        ):
+            await db[f"{bucket}.files"].create_index(
+                "metadata.resume_id", name="ix_resume_assets_resume_id"
+            )
         await db.job_descriptions.create_index("user_id", name="ix_job_descriptions_user_id")
         await db.job_descriptions.create_index(
             [("user_id", 1), ("created_at", -1)], name="ix_jd_user_created"

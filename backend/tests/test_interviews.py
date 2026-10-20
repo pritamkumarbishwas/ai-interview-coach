@@ -275,6 +275,23 @@ def test_start_leaves_interview_created_when_llm_is_down(
     assert detail["questions"] == []
 
 
+def test_active_interview_blocks_resume_deletion(
+    client: TestClient,
+    auth_headers: dict,
+    interview_context: dict,
+) -> None:
+    interview = client.post(
+        "/api/interviews", headers=auth_headers, json=interview_payload(interview_context)
+    )
+    assert interview.status_code == 201, interview.text
+
+    response = client.delete(
+        f"/api/resumes/{interview_context['resume_id']}", headers=auth_headers
+    )
+    assert response.status_code == 409
+    assert "active interview" in response.json()["detail"]
+
+
 def test_start_interview_of_another_user_is_404(
     client: TestClient,
     auth_headers: dict,
