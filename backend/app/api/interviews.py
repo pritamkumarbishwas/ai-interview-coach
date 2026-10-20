@@ -51,6 +51,17 @@ async def get_interview(
     return await service.get(db, current_user.id, interview_id)
 
 
+@router.delete("/{interview_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_interview(
+    interview_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: InterviewService = Depends(get_interview_service),
+) -> None:
+    """Discard an unfinished interview (and its recordings)."""
+    await service.delete(db, current_user.id, interview_id)
+
+
 @router.post("/{interview_id}/start", response_model=CurrentQuestionOut)
 async def start_interview(
     interview_id: str,

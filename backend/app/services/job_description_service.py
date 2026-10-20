@@ -3,6 +3,7 @@
 import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pydantic import ValidationError
 
 from app.core.exceptions import ConflictError, NotFoundError
 from app.models.job_description import JobDescription
@@ -33,10 +34,40 @@ def _stored_snippet(doc: dict) -> str:
         return snippet
     # Documents saved before the `snippet` field existed: rebuild one from
     # the stored structure.
-    responsibilities = (doc.get("structured_data") or {}).get("responsibilities")
+    structured = doc.get("structured_data")
+    responsibilities = (
+        structured.get("responsibilities") if isinstance(structured, dict) else None
+    )
     if not isinstance(responsibilities, list):
         return ""
     return _snippet(", ".join(str(item) for item in responsibilities))
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def _structured_data(jd: JobDescription) -> JobDescriptionStructuredData:
+    """Parse stored enrichment, tolerating pre-schema documents.
+
+    Legacy rows may store null lists or omit fields entirely; a detail read
+    must not fail because of old data.
+    """
+    raw = jd.structured_data if isinstance(jd.structured_data, dict) else {}
+    try:
+        return JobDescriptionStructuredData.model_validate(raw)
+    except ValidationError:
+        logger.warning("Job description %s has legacy structured_data", jd.id)
+    role_title = raw.get("role_title")
+    return JobDescriptionStructuredData(
+        role_title=role_title.strip()
+        if isinstance(role_title, str) and role_title.strip()
+        else jd.title,
+        required_skills=_string_list(raw.get("required_skills")),
+        responsibilities=_string_list(raw.get("responsibilities")),
+    )
 
 
 class JobDescriptionService:
@@ -98,9 +129,7 @@ class JobDescriptionService:
             company=jd.company,
             raw_text=jd.raw_text,
             snippet=jd.snippet,
-            structured_data=JobDescriptionStructuredData.model_validate(
-                jd.structured_data
-            ),
+            structured_data=_structured_data(jd),
             created_at=jd.created_at,
         )
 
@@ -109,8 +138,8 @@ class JobDescriptionService:
         active = await self._interviews.count_active_for_jd(db, jd_id)
         if active:
             raise ConflictError(
-                "This job description is used by an interview that is still in "
-                "progress. Finish that interview before deleting the posting."
+                "This job description is used by an interview that has not been "
+                "completed. Finish or discard that interview before deleting the posting."
             )
         await self._job_descriptions.delete(db, jd_id, user_id)
 

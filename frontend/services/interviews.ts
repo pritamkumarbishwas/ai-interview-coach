@@ -43,6 +43,15 @@ export async function createInterview(
   }
 }
 
+/** Discards an unfinished interview (completed reports are retained). */
+export async function deleteInterview(id: string): Promise<void> {
+  try {
+    await api.delete(`/interviews/${id}`);
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
 /** Records proctoring consent; required before start when mode != "off". */
 export async function recordProctoringConsent(
   id: string,

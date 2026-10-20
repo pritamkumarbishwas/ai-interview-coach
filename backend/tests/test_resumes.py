@@ -532,10 +532,16 @@ def test_job_description_with_active_interview_cannot_be_deleted(
         },
     )
     assert interview.status_code == 201, interview.text
+    interview_id = interview.json()["id"]
 
     blocked = client.delete(f"/api/job-descriptions/{jd_id}", headers=auth_headers)
     assert blocked.status_code == 409
-    assert "in progress" in blocked.json()["detail"].lower()
+    assert "not been completed" in blocked.json()["detail"].lower()
+
+    # Discarding the unused interview releases the posting for deletion.
+    discarded = client.delete(f"/api/interviews/{interview_id}", headers=auth_headers)
+    assert discarded.status_code == 204, discarded.text
+    assert client.delete(f"/api/job-descriptions/{jd_id}", headers=auth_headers).status_code == 204
 
 
 def test_job_description_saved_when_llm_unavailable(
@@ -577,6 +583,14 @@ def test_job_description_list_handles_legacy_documents(
     assert response.status_code == 200
     legacy = next(item for item in response.json() if item["title"] == "Legacy Role")
     assert legacy["snippet"] == ""
+
+    detail = client.get(f"/api/job-descriptions/{legacy['id']}", headers=auth_headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["structured_data"] == {
+        "role_title": "Legacy Role",
+        "required_skills": [],
+        "responsibilities": [],
+    }
 
 
 def test_chunk_merge_preserves_link_objects() -> None:

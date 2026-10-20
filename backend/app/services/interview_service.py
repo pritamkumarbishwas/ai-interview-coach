@@ -43,6 +43,7 @@ from app.schemas.interview import (
 from app.schemas.report import ReportGeneration, ReportOut
 from app.services.llm_service import llm_service
 from app.services.rag_service import rag_service
+from app.services.recording_service import RecordingService
 
 logger = logging.getLogger(__name__)
 
@@ -271,10 +272,12 @@ class InterviewService:
         interviews: InterviewRepository,
         resumes: ResumeRepository,
         job_descriptions: JobDescriptionRepository,
+        recordings: RecordingService,
     ) -> None:
         self._interviews = interviews
         self._resumes = resumes
         self._job_descriptions = job_descriptions
+        self._recordings = recordings
 
     async def create(
         self, db: AsyncIOMotorDatabase, user_id: str, payload: InterviewCreate
@@ -333,6 +336,26 @@ class InterviewService:
     async def get(self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str) -> InterviewOut:
         interview = await self._require(db, user_id, interview_id)
         return _interview_out(interview)
+
+    async def delete(
+        self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str
+    ) -> None:
+        """Discard an unfinished interview and its recordings.
+
+        Completed interviews are kept as reports/evidence. Discarding an
+        abandoned `created`/`in_progress` session releases its job description
+        for deletion.
+        """
+        interview = await self._require(db, user_id, interview_id)
+        if interview.status == "completed":
+            raise ConflictError(
+                "Completed interviews are kept as reports and cannot be discarded."
+            )
+        try:
+            await self._recordings.purge_interview_recordings(db, interview_id)
+        except Exception:
+            logger.warning("Could not remove recordings for discarded interview %s", interview_id)
+        await self._interviews.delete_by_id(db, interview_id)
 
     async def start(
         self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str

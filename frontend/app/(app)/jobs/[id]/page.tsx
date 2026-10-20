@@ -781,9 +781,9 @@ function InviteForm({ jobId, templateId, onInvited }: InviteFormProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setRoundKey("");
     if (!templateId) {
       setRounds([]);
-      setRoundKey("");
       return;
     }
     let active = true;
@@ -1045,9 +1045,11 @@ function InvitationRow({ invitation, canManage, onChanged, onLink }: InvitationR
   };
 
   const revocable =
-    invitation.status === "pending" ||
-    invitation.status === "started" ||
-    invitation.status === "expired";
+    !invitation.link_revoked_at &&
+    (invitation.status === "pending" ||
+      invitation.status === "started" ||
+      invitation.status === "expired" ||
+      invitation.status === "completed");
   const extendable =
     invitation.status === "pending" ||
     invitation.status === "started" ||
@@ -1070,6 +1072,9 @@ function InvitationRow({ invitation, canManage, onChanged, onLink }: InvitationR
         <Badge tone={INVITATION_TONES[invitation.status]}>
           {INVITATION_LABELS[invitation.status]}
         </Badge>
+        {invitation.link_revoked_at ? (
+          <span className="text-xs font-medium text-danger">Link revoked</span>
+        ) : null}
         {hasSession ? (
           <Button
             variant="ghost"

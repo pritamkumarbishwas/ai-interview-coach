@@ -556,6 +556,7 @@ export interface Invitation {
   decision: Decision;
   decision_note: string;
   decided_at: string | null;
+  link_revoked_at: string | null;
   created_at: string;
   accept_url: string | null;
 }

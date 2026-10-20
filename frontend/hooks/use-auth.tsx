@@ -34,7 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
 
   useEffect(() => {
-    if (!getToken()) {
+    const token = getToken();
+    if (!token) {
       setStatus("unauthenticated");
       return;
     }
@@ -43,16 +44,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .fetchMe()
       .then((me) => {
         if (cancelled) return;
+        // A newer session (e.g. staff invite accept) replaced the token while
+        // this request was in flight; its result belongs to the old user.
+        if (getToken() !== token) return;
         setUser(me);
         setStatus("authenticated");
       })
       .catch((error) => {
         if (cancelled) return;
         // Only an actual 401 invalidates the session — a network failure
-        // (status 0) must not log the user out.
-        if (toApiError(error).status === 401) {
+        // (status 0) must not log the user out. Never clear a token that was
+        // replaced while this request was in flight.
+        if (toApiError(error).status === 401 && getToken() === token) {
           clearToken();
         }
+        if (getToken() !== token) return;
         setStatus("unauthenticated");
       });
     return () => {

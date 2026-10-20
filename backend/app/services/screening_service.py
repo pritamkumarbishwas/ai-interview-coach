@@ -66,6 +66,9 @@ DEFAULT_ROUND = RoundConfig(key="screen", label="Screening")
 SNIPPET_LENGTH = 180
 # Bounded shortlist so a huge pipeline cannot load unbounded interviews.
 SHORTLIST_LIMIT = 200
+# A completed magic link keeps working long enough for the final recording
+# chunk to arrive, but never indefinitely.
+COMPLETED_LINK_GRACE = timedelta(hours=24)
 
 
 def _hash_token(token: str) -> str:
@@ -85,6 +88,18 @@ def _is_past(value: datetime | None) -> bool:
     if value is None:
         return False
     return _naive_utc(value) < _now().replace(tzinfo=None)
+
+
+def _completed_link_expired(invitation: ScreeningInvitation) -> bool:
+    """Bound how long a completed link can be used.
+
+    The original invitation expiry applies, unless the candidate completed
+    after it — then a short grace period covers the final upload.
+    """
+    expires_at = _naive_utc(invitation.expires_at)
+    completed_at = _naive_utc(invitation.completed_at or invitation.expires_at)
+    cutoff = max(expires_at, completed_at + COMPLETED_LINK_GRACE)
+    return cutoff < _now().replace(tzinfo=None)
 
 
 def _interview_url(token: str) -> str:
@@ -187,6 +202,7 @@ class ScreeningService:
                 decision=doc.get("decision", "pending"),
                 decision_note=doc.get("decision_note", ""),
                 decided_at=doc.get("decided_at"),
+                link_revoked_at=doc.get("link_revoked_at"),
                 created_at=doc["created_at"],
             )
             for doc in docs
@@ -197,11 +213,15 @@ class ScreeningService:
     ) -> None:
         doc = await self._require_invitation(db, recruiter, invitation_id)
         invitation = ScreeningInvitation(**doc)
-        if invitation.status in ("completed", "revoked"):
-            raise ConflictError(
-                "Only pending, started, or expired invitations can be revoked."
-            )
-        await self._invitations.set_status(db, invitation_id, "revoked")
+        # Revoking a completed invitation kills the candidate's link without
+        # touching the evidence or its completed status; repeat calls are a
+        # no-op.
+        if invitation.status == "revoked" or invitation.link_revoked_at:
+            return
+        if invitation.status == "completed":
+            await self._invitations.revoke_link(db, invitation_id)
+        else:
+            await self._invitations.set_status(db, invitation_id, "revoked")
         await audit_service.record(
             db,
             action="invitation.revoked",
@@ -255,9 +275,13 @@ class ScreeningService:
             if updated is None:  # pragma: no cover - the row existed a moment ago
                 raise NotFoundError("Invitation not found")
             invitation = ScreeningInvitation(**updated)
-            if invitation.status == "expired":
-                await self._invitations.set_status(db, invitation_id, "pending")
+            if invitation.status == "expired" or _is_past(invitation.expires_at):
+                # The link itself had lapsed; reopen it for a fresh TTL so the
+                # candidate can actually use the extra time.
+                expires_at = _now() + timedelta(days=settings.invitation_ttl_days)
+                await self._invitations.reopen_pending(db, invitation_id, expires_at)
                 invitation.status = "pending"
+                invitation.expires_at = expires_at
         else:
             base = invitation.round_deadline or _now()
             new_deadline = _naive_utc(base) + timedelta(minutes=minutes)
@@ -629,6 +653,18 @@ class ScreeningService:
         invitation = await self._require_token(db, token, allow_completed=True)
         if not invitation.interview_id:
             raise ConflictError("The interview has not been started yet.")
+        if invitation.status == "completed":
+            # Preserve the evidence: a completed session may only finish an
+            # in-flight recording, never restart (seq=0 wipes GridFS) or
+            # overwrite a sealed recording.
+            if seq <= 0:
+                raise ConflictError(
+                    "A completed interview's recording cannot be restarted."
+                )
+            doc = await self._interviews.get_by_id(db, invitation.interview_id)
+            meta = ((doc or {}).get("recordings") or {}).get(kind) or {}
+            if meta.get("finalized"):
+                raise ConflictError("This recording has already been finalized.")
         await self._recordings.append_chunk(
             db,
             invitation.guest_user_id,
@@ -649,7 +685,7 @@ class ScreeningService:
         details: dict,
     ) -> None:
         """Record one advisory integrity signal (camera_off, tab_blur, ...)."""
-        invitation = await self._require_token(db, token, allow_completed=True)
+        invitation = await self._require_token(db, token)
         if not invitation.interview_id:
             raise ConflictError("The interview has not been started yet.")
         await self._interview_service.record_proctoring_event(
@@ -683,13 +719,15 @@ class ScreeningService:
         if doc is None:
             raise NotFoundError("Invitation not found")
         invitation = ScreeningInvitation(**doc)
-        if invitation.status == "revoked":
+        if invitation.status == "revoked" or invitation.link_revoked_at:
             raise ConflictError("This invitation has been revoked.")
         if invitation.status == "completed" and not allow_completed:
             raise ConflictError("This interview has already been completed.")
         if invitation.status == "expired" or (
             invitation.status == "pending" and _is_past(invitation.expires_at)
         ):
+            raise ConflictError("This invitation has expired.")
+        if invitation.status == "completed" and _completed_link_expired(invitation):
             raise ConflictError("This invitation has expired.")
         return invitation
 
@@ -805,6 +843,7 @@ class ScreeningService:
             decision=invitation.decision,
             decision_note=invitation.decision_note,
             decided_at=invitation.decided_at,
+            link_revoked_at=invitation.link_revoked_at,
             created_at=invitation.created_at,
             accept_url=accept_url,
         )

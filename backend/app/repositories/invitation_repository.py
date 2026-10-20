@@ -17,6 +17,7 @@ LIST_PROJECTION = {
     "created_at": 1,
     "round_minutes": 1,
     "round_deadline": 1,
+    "link_revoked_at": 1,
     "pass_threshold": 1,
     "decision": 1,
     "decision_note": 1,
@@ -122,6 +123,30 @@ class InvitationRepository:
             return
         await db[self.collection_name].update_one(
             {"_id": object_id}, {"$set": {"round_deadline": round_deadline}}
+        )
+
+    async def reopen_pending(
+        self,
+        db: AsyncIOMotorDatabase,
+        invitation_id: str,
+        expires_at: datetime,
+    ) -> None:
+        """Reactivate a lapsed, unstarted invitation with a fresh link expiry."""
+        object_id = to_object_id(invitation_id)
+        if object_id is None:
+            return
+        await db[self.collection_name].update_one(
+            {"_id": object_id},
+            {"$set": {"status": "pending", "expires_at": expires_at}},
+        )
+
+    async def revoke_link(self, db: AsyncIOMotorDatabase, invitation_id: str) -> None:
+        """Invalidate a completed invitation's magic link without changing status."""
+        object_id = to_object_id(invitation_id)
+        if object_id is None:
+            return
+        await db[self.collection_name].update_one(
+            {"_id": object_id}, {"$set": {"link_revoked_at": datetime.now(UTC)}}
         )
 
     async def add_round_minutes(

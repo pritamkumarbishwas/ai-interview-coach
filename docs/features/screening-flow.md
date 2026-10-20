@@ -48,7 +48,9 @@ pending ──start──> started ──complete──> completed
 - A reminder rotates/returns a usable link; extend moves the expiry and deadline;
   revoke makes the token unusable.
 - The link is resumable: it is not single-use. It remains usable until it
-  expires, is revoked, or the interview is completed.
+  expires or is revoked. After completion it stays readable for review for at
+  least 24 hours (longer if the original expiry has not passed), but no new
+  session actions are allowed and the link can still be revoked.
 
 ## Candidate session
 
@@ -66,8 +68,11 @@ pending ──start──> started ──complete──> completed
    `completed` and the invitation follows.
 6. The browser uploads recording chunks to
    `POST /api/screening/{token}/recordings/chunk`; recording uploads are not
-   blocked by the deadline so the last chunk is retained.
+   blocked by the deadline so the last chunk is retained. After completion only
+   the in-flight recording may be finalized: `seq=0` (which restarts and would
+   delete the GridFS recording) and appends after finalization are rejected.
 7. Advisory integrity events go to `POST /api/screening/{token}/proctoring/events`.
+   Events are rejected once the interview is completed.
 8. Optional server-side transcription uses `POST /api/screening/{token}/transcribe`.
    With `TRANSCRIPTION_PROVIDER=none`, the browser Web Speech API is the only
    speech-to-text path.

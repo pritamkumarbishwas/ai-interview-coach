@@ -67,7 +67,12 @@ def get_template_service() -> TemplateService:
 
 
 def get_interview_service() -> InterviewService:
-    return InterviewService(interview_repository, resume_repository, job_description_repository)
+    return InterviewService(
+        interview_repository,
+        resume_repository,
+        job_description_repository,
+        recording_service,
+    )
 
 
 def get_recording_service() -> RecordingService:

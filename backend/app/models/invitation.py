@@ -61,6 +61,9 @@ class ScreeningInvitation(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    # Completed sessions keep their status for reporting; this only kills the
+    # candidate's magic link.
+    link_revoked_at: datetime | None = None
     # Set when the candidate's session data has been destroyed (GDPR erasure or
     # the retention purge). The record itself stays, anonymized, for analytics.
     erased_at: datetime | None = None

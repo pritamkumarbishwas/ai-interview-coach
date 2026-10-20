@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
-import { ArrowRight, ClipboardList, Mic, Plus, Search } from "lucide-react";
+import { ArrowRight, ClipboardList, Mic, Plus, Search, Trash } from "lucide-react";
 
 import { Alert } from "@/components/ui/alert";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
@@ -11,8 +11,10 @@ import { Button, ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { SkeletonList } from "@/components/ui/loading";
+import { Modal } from "@/components/ui/modal";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useAsync } from "@/hooks/use-async";
+import { toApiError } from "@/lib/api";
 import {
   DIFFICULTY_LABELS,
   STATUS_LABELS,
@@ -20,7 +22,7 @@ import {
   TYPE_TONES,
 } from "@/lib/interview";
 import { cx, formatDate } from "@/lib/utils";
-import { listInterviews } from "@/services/interviews";
+import { deleteInterview, listInterviews } from "@/services/interviews";
 import type { Difficulty, InterviewSummary, InterviewType } from "@/types";
 
 const DIFFICULTY_TONES: Record<Difficulty, BadgeTone> = {
@@ -41,6 +43,11 @@ const TYPE_FILTERS = [
 export default function InterviewsPage() {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"all" | InterviewType>("all");
+  const [pendingDelete, setPendingDelete] = useState<InterviewSummary | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const {
     data: interviews,
@@ -48,6 +55,27 @@ export default function InterviewsPage() {
     error,
     reload,
   } = useAsync(listInterviews, []);
+
+  const closeDeleteDialog = () => {
+    if (deleting) return;
+    setPendingDelete(null);
+    setDeleteError(null);
+  };
+
+  const discard = async () => {
+    if (!pendingDelete || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteInterview(pendingDelete.id);
+      setPendingDelete(null);
+      reload();
+    } catch (caught) {
+      setDeleteError(toApiError(caught).message);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const filtered = useMemo(() => {
     const items = interviews ?? [];
@@ -140,17 +168,65 @@ export default function InterviewsPage() {
           ) : (
             <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
               {filtered.map((item) => (
-                <InterviewCard key={item.id} interview={item} />
+                <InterviewCard
+                  key={item.id}
+                  interview={item}
+                  onDiscard={() => {
+                    setDeleteError(null);
+                    setPendingDelete(item);
+                  }}
+                />
               ))}
             </ul>
           )}
         </>
       )}
+
+      <Modal
+        open={pendingDelete !== null}
+        onClose={closeDeleteDialog}
+        title="Discard this interview?"
+        description={
+          pendingDelete
+            ? `${pendingDelete.role} · ${TYPE_LABELS[pendingDelete.type]}`
+            : undefined
+        }
+      >
+        <div className="space-y-4">
+          {deleteError ? <Alert tone="error">{deleteError}</Alert> : null}
+          <p className="text-sm leading-relaxed text-ink-2">
+            Its answers and any saved recording will be deleted. This cannot be
+            undone. Completed interviews are kept as reports.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={closeDeleteDialog}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              loading={deleting}
+              onClick={() => void discard()}
+            >
+              Discard interview
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
 
-function InterviewCard({ interview }: { interview: InterviewSummary }) {
+function InterviewCard({
+  interview,
+  onDiscard,
+}: {
+  interview: InterviewSummary;
+  onDiscard: () => void;
+}) {
   const completed = interview.status === "completed";
   const href =
     interview.status === "completed"
@@ -181,7 +257,7 @@ function InterviewCard({ interview }: { interview: InterviewSummary }) {
         </Badge>
       </div>
 
-      <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
+      <div className="mt-4 flex items-center justify-between gap-2 border-t border-line pt-4">
         <div>
           <p className="text-[13px] font-medium text-ink-2">
             {STATUS_LABELS[interview.status]}
@@ -190,17 +266,29 @@ function InterviewCard({ interview }: { interview: InterviewSummary }) {
             {formatDate(interview.created_at)}
           </p>
         </div>
-        <Link
-          href={href}
-          className="inline-flex items-center gap-1.5 rounded-btn border border-line bg-card px-3.5 py-2 text-[13px] font-medium text-ink-2 transition-colors group-hover:border-brand group-hover:bg-brand-50 group-hover:text-brand"
-        >
-          {interview.status === "created"
-            ? "Start"
-            : completed
-              ? "View report"
-              : "Resume"}
-          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-        </Link>
+        <div className="flex items-center gap-2">
+          {!completed ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Trash className="h-3.5 w-3.5" aria-hidden />}
+              onClick={onDiscard}
+            >
+              Discard
+            </Button>
+          ) : null}
+          <Link
+            href={href}
+            className="inline-flex items-center gap-1.5 rounded-btn border border-line bg-card px-3.5 py-2 text-[13px] font-medium text-ink-2 transition-colors group-hover:border-brand group-hover:bg-brand-50 group-hover:text-brand"
+          >
+            {interview.status === "created"
+              ? "Start"
+              : completed
+                ? "View report"
+                : "Resume"}
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+          </Link>
+        </div>
       </div>
     </li>
   );

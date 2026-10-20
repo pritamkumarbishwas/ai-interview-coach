@@ -63,6 +63,7 @@ class InvitationOut(BaseModel):
     decision: Decision = "pending"
     decision_note: str = ""
     decided_at: ISTDateTime | None = None
+    link_revoked_at: ISTDateTime | None = None
     created_at: ISTDateTime
     # Returned to the recruiter so the link can be shared if email is not
     # configured; never derivable from the stored record.

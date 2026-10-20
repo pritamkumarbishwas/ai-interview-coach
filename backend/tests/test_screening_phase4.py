@@ -309,13 +309,139 @@ def test_completed_invitation_is_terminal(
         client.post(f"/api/screening/{token}/start", json={"consent": False}).status_code
         == 409
     )
-    # Completed sessions are review artifacts and cannot be revoked.
+    # Completed sessions stay reviewable, but their link can be revoked.
     assert (
         client.delete(
             f"/api/invitations/{invitation['id']}", headers=staff_headers
         ).status_code
-        == 409
+        == 204
     )
+    assert client.get(f"/api/screening/{token}").status_code == 409
+    listed = client.get(
+        "/api/invitations", headers=staff_headers, params={"job_id": job_id}
+    ).json()
+    row = next(item for item in listed if item["id"] == invitation["id"])
+    assert row["status"] == "completed"
+    assert row["link_revoked_at"] is not None
+
+
+def test_completed_recording_cannot_be_restarted_or_overwritten(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    _patch_llm(monkeypatch)
+    job_id = _job_with_template(
+        client, staff_headers, proctoring_mode="strict", target=1
+    )
+    invitation = _invite(client, staff_headers, job_id)
+    token = _token(invitation)
+    question_id = _start(client, token)
+
+    endpoint = f"/api/screening/{token}/recordings/chunk"
+    first = client.post(
+        endpoint,
+        data={"kind": "camera", "seq": "0", "finalize": "false", "content_type": "video/webm"},
+        files={"chunk": ("0.webm", b"original", "video/webm")},
+    )
+    assert first.status_code == 204, first.text
+
+    answered = client.post(
+        f"/api/screening/{token}/questions/{question_id}/answer",
+        json={"answer": "A concise answer."},
+    )
+    assert answered.json()["status"] == "completed"
+
+    # Restarting would delete the GridFS recording: not allowed after completion.
+    restart = client.post(
+        endpoint,
+        data={"kind": "camera", "seq": "0", "finalize": "false", "content_type": "video/webm"},
+        files={"chunk": ("0.webm", b"replacement", "video/webm")},
+    )
+    assert restart.status_code == 409, restart.text
+
+    # The in-flight tail and the finalize marker may still land.
+    tail = client.post(
+        endpoint,
+        data={"kind": "camera", "seq": "1", "finalize": "false", "content_type": "video/webm"},
+        files={"chunk": ("1.webm", b"-tail", "video/webm")},
+    )
+    assert tail.status_code == 204, tail.text
+    sealed = client.post(
+        endpoint,
+        data={"kind": "camera", "seq": "2", "finalize": "true", "content_type": "video/webm"},
+        files={"chunk": ("2.webm", b"", "video/webm")},
+    )
+    assert sealed.status_code == 204, sealed.text
+
+    # Once sealed, neither bytes nor proctoring events can be appended.
+    after = client.post(
+        endpoint,
+        data={"kind": "camera", "seq": "3", "finalize": "false", "content_type": "video/webm"},
+        files={"chunk": ("3.webm", b"x", "video/webm")},
+    )
+    assert after.status_code == 409, after.text
+    event = client.post(
+        f"/api/screening/{token}/proctoring/events",
+        json={"type": "tab_blur", "details": {}},
+    )
+    assert event.status_code == 409, event.text
+
+    download = client.get(
+        f"/api/invitations/{invitation['id']}/recordings/camera", headers=staff_headers
+    )
+    assert download.status_code == 200, download.text
+    assert download.content == b"original-tail"
+
+
+def test_completed_link_eventually_expires(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    _patch_llm(monkeypatch)
+    job_id = _job_with_template(
+        client, staff_headers, proctoring_mode="off", target=1
+    )
+    invitation = _invite(client, staff_headers, job_id)
+    token = _token(invitation)
+    question_id = _start(client, token, consent=False)
+    client.post(
+        f"/api/screening/{token}/questions/{question_id}/answer",
+        json={"answer": "A concise answer."},
+    )
+
+    _set_invitation(
+        invitation["id"],
+        {
+            "expires_at": datetime.now(UTC) - timedelta(days=8),
+            "completed_at": datetime.now(UTC) - timedelta(days=7),
+        },
+    )
+    assert client.get(f"/api/screening/{token}").status_code == 409
+
+
+def test_extend_reopens_an_expired_pending_link(
+    client: TestClient, staff_headers: dict
+) -> None:
+    job_id = _job_with_template(client, staff_headers)
+    invitation = _invite(client, staff_headers, job_id)
+    token = _token(invitation)
+    _set_invitation(
+        invitation["id"],
+        {"status": "expired", "expires_at": datetime.now(UTC) - timedelta(days=1)},
+    )
+    assert client.get(f"/api/screening/{token}").status_code == 409
+
+    extended = client.post(
+        f"/api/invitations/{invitation['id']}/extend",
+        headers=staff_headers,
+        json={"minutes": 15},
+    )
+    assert extended.status_code == 200, extended.text
+    body = extended.json()
+    assert body["status"] == "pending"
+    assert datetime.fromisoformat(body["expires_at"]) > datetime.now(UTC)
+
+    reopened = client.get(f"/api/screening/{token}")
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["status"] == "pending"
 
 
 def test_extend_requires_recruiter_and_rejects_revoked(
