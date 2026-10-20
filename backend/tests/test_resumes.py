@@ -480,6 +480,9 @@ def test_job_description_create_list_get_delete(
     body = created.json()
     assert body["title"] == "Backend Engineer"
     assert body["structured_data"]["required_skills"] == ["FastAPI"]
+    assert body["raw_text"] == payload["raw_text"]
+    assert body["created_at"]
+    assert "user_id" not in body
     jd_id = body["id"]
 
     listed = client.get("/api/job-descriptions", headers=auth_headers)
@@ -492,9 +495,47 @@ def test_job_description_create_list_get_delete(
     detail = client.get(f"/api/job-descriptions/{jd_id}", headers=auth_headers)
     assert detail.status_code == 200
     assert detail.json()["raw_text"] == payload["raw_text"]
+    assert "user_id" not in detail.json()
 
     assert client.delete(f"/api/job-descriptions/{jd_id}", headers=auth_headers).status_code == 204
     assert client.get(f"/api/job-descriptions/{jd_id}", headers=auth_headers).status_code == 404
+
+
+def test_job_description_with_active_interview_cannot_be_deleted(
+    client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_extract(prompt: str, schema, **kwargs):
+        return schema(role_title="Backend Engineer", required_skills=[], responsibilities=[])
+
+    monkeypatch.setattr(JD_SERVICE_LLM, fake_extract)
+
+    created = client.post(
+        "/api/job-descriptions",
+        headers=auth_headers,
+        json={
+            "title": "Backend Engineer",
+            "company": "Acme",
+            "raw_text": "Own our FastAPI services.",
+        },
+    )
+    jd_id = created.json()["id"]
+    interview = client.post(
+        "/api/interviews",
+        headers=auth_headers,
+        json={
+            "jd_id": jd_id,
+            "role": "Backend Engineer",
+            "level": "mid",
+            "type": "technical",
+            "difficulty": "intermediate",
+            "target_questions": 5,
+        },
+    )
+    assert interview.status_code == 201, interview.text
+
+    blocked = client.delete(f"/api/job-descriptions/{jd_id}", headers=auth_headers)
+    assert blocked.status_code == 409
+    assert "in progress" in blocked.json()["detail"].lower()
 
 
 def test_job_description_saved_when_llm_unavailable(

@@ -16,10 +16,15 @@ class JobDescriptionInput(BaseModel):
 
 
 class JobDescriptionResponse(BaseModel):
+    """Full saved posting, excluding ownership metadata."""
+
     id: str
     title: str
     company: str
+    raw_text: str
+    snippet: str = ""
     structured_data: JobDescriptionStructuredData
+    created_at: ISTDateTime
 
 
 class JobDescriptionSummary(BaseModel):

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.core.timeutil import ISTDateTime
 from app.models.interview import Difficulty, InterviewType, ProctoringMode
@@ -21,6 +21,19 @@ class InvitationCreate(BaseModel):
     expires_in_days: int | None = Field(default=None, ge=1, le=30)
     # Extra time added to the round (accessibility accommodation), in minutes.
     extra_minutes: int = Field(default=0, ge=0, le=180)
+
+    @model_validator(mode="after")
+    def _validate_window(self) -> "InvitationCreate":
+        start = self.start_window_start
+        end = self.start_window_end
+        if start and end:
+            if (start.tzinfo is None) != (end.tzinfo is None):
+                raise ValueError(
+                    "start_window_start and start_window_end must use the same timezone"
+                )
+            if end <= start:
+                raise ValueError("start_window_end must be after start_window_start")
+        return self
 
 
 class InvitationExtend(BaseModel):

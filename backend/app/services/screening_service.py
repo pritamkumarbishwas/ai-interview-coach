@@ -195,7 +195,12 @@ class ScreeningService:
     async def revoke(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str
     ) -> None:
-        await self._require_invitation(db, recruiter, invitation_id)
+        doc = await self._require_invitation(db, recruiter, invitation_id)
+        invitation = ScreeningInvitation(**doc)
+        if invitation.status in ("completed", "revoked"):
+            raise ConflictError(
+                "Only pending, started, or expired invitations can be revoked."
+            )
         await self._invitations.set_status(db, invitation_id, "revoked")
         await audit_service.record(
             db,
@@ -232,26 +237,37 @@ class ScreeningService:
     async def extend(
         self, db: AsyncIOMotorDatabase, recruiter: User, invitation_id: str, minutes: int
     ) -> InvitationOut:
-        """Grant extra time (accommodation) by pushing the round deadline out.
+        """Grant extra time (accommodation) to an invitation.
 
-        Works on pending and started invitations; the interview itself is
-        unchanged — the deadline lives on the invitation, so the extension
-        applies to the candidate's remaining time.
+        A started round gets its deadline pushed out. A pending round has no
+        deadline yet, so the extra time is added to the round budget that
+        ``start`` will use.
         """
         doc = await self._require_invitation(db, recruiter, invitation_id)
         invitation = ScreeningInvitation(**doc)
         if invitation.status in ("revoked", "completed"):
             raise ConflictError("This invitation can no longer be extended.")
 
-        base = invitation.round_deadline or _now()
-        new_deadline = _naive_utc(base) + timedelta(minutes=minutes)
-        await self._invitations.set_deadline(db, invitation_id, new_deadline)
-        # Enforcing an expired deadline flips the status to "expired"; an
-        # extension must reopen the invitation so the candidate can continue.
-        if invitation.status == "expired":
-            restored = "started" if invitation.interview_id else "pending"
-            await self._invitations.set_status(db, invitation_id, restored)
-            invitation.status = restored
+        if not invitation.interview_id:
+            updated = await self._invitations.add_round_minutes(
+                db, invitation_id, minutes
+            )
+            if updated is None:  # pragma: no cover - the row existed a moment ago
+                raise NotFoundError("Invitation not found")
+            invitation = ScreeningInvitation(**updated)
+            if invitation.status == "expired":
+                await self._invitations.set_status(db, invitation_id, "pending")
+                invitation.status = "pending"
+        else:
+            base = invitation.round_deadline or _now()
+            new_deadline = _naive_utc(base) + timedelta(minutes=minutes)
+            await self._invitations.set_deadline(db, invitation_id, new_deadline)
+            # Enforcing an expired deadline flips the status to "expired"; an
+            # extension must reopen the invitation so the candidate can continue.
+            if invitation.status == "expired":
+                await self._invitations.set_status(db, invitation_id, "started")
+                invitation.status = "started"
+            invitation.round_deadline = new_deadline
         await audit_service.record(
             db,
             action="invitation.extended",
@@ -260,7 +276,6 @@ class ScreeningService:
             target_id=invitation_id,
             metadata={"minutes": minutes},
         )
-        invitation.round_deadline = new_deadline
         return self._to_out(invitation)
 
     async def integrity(
@@ -501,7 +516,7 @@ class ScreeningService:
 
     # --- Candidate-facing (token) ------------------------------------------
     async def session(self, db: AsyncIOMotorDatabase, token: str) -> InvitationSessionOut:
-        invitation = await self._require_token(db, token)
+        invitation = await self._require_token(db, token, allow_completed=True)
         return InvitationSessionOut(
             status=invitation.status,
             role=invitation.role,
@@ -525,6 +540,7 @@ class ScreeningService:
 
         # Idempotent: a refresh resumes the existing session instead of failing.
         if invitation.interview_id:
+            await self._enforce_deadline(db, invitation)
             return await self._interview_service.current_question(
                 db, invitation.guest_user_id, invitation.interview_id
             )
@@ -607,10 +623,10 @@ class ScreeningService:
         """Store one recorded chunk for the guest's interview (token-addressed).
 
         Recording is a diagnostic side channel, so the round deadline is not
-        enforced here: a chunk that arrives just as time expires must still be
-        kept rather than discarded.
+        enforced here: a chunk that arrives just as time expires (or after the
+        final answer completes the interview) must still be kept.
         """
-        invitation = await self._require_token(db, token)
+        invitation = await self._require_token(db, token, allow_completed=True)
         if not invitation.interview_id:
             raise ConflictError("The interview has not been started yet.")
         await self._recordings.append_chunk(
@@ -633,7 +649,7 @@ class ScreeningService:
         details: dict,
     ) -> None:
         """Record one advisory integrity signal (camera_off, tab_blur, ...)."""
-        invitation = await self._require_token(db, token)
+        invitation = await self._require_token(db, token, allow_completed=True)
         if not invitation.interview_id:
             raise ConflictError("The interview has not been started yet.")
         await self._interview_service.record_proctoring_event(
@@ -657,7 +673,11 @@ class ScreeningService:
 
     # --- Helpers -----------------------------------------------------------
     async def _require_token(
-        self, db: AsyncIOMotorDatabase, token: str
+        self,
+        db: AsyncIOMotorDatabase,
+        token: str,
+        *,
+        allow_completed: bool = False,
     ) -> ScreeningInvitation:
         doc = await self._invitations.find_by_token_hash(db, _hash_token(token))
         if doc is None:
@@ -665,6 +685,8 @@ class ScreeningService:
         invitation = ScreeningInvitation(**doc)
         if invitation.status == "revoked":
             raise ConflictError("This invitation has been revoked.")
+        if invitation.status == "completed" and not allow_completed:
+            raise ConflictError("This interview has already been completed.")
         if invitation.status == "expired" or (
             invitation.status == "pending" and _is_past(invitation.expires_at)
         ):

@@ -405,6 +405,8 @@ export interface DashboardStats {
 
 export type JobStatus = "draft" | "open" | "closed";
 
+export type WebhookProvider = "generic" | "greenhouse" | "lever";
+
 export interface JobSummary {
   id: string;
   title: string;
@@ -426,6 +428,11 @@ export interface Job {
   template_id: string | null;
   reviewer_ids: string[];
   owner_id: string | null;
+  webhook_url: string;
+  webhook_provider: WebhookProvider;
+  webhook_enabled: boolean;
+  /** True when a signing secret is stored; the secret itself is never returned. */
+  webhook_configured: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -439,7 +446,12 @@ export interface CreateJobInput {
   template_id?: string | null;
 }
 
-export type UpdateJobInput = Partial<CreateJobInput>;
+export interface UpdateJobInput extends Partial<CreateJobInput> {
+  webhook_url?: string;
+  webhook_provider?: WebhookProvider;
+  webhook_secret?: string;
+  webhook_enabled?: boolean;
+}
 
 /* ---- Recruiter: interview templates ------------------------------------- */
 

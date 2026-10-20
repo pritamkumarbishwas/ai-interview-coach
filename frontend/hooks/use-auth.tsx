@@ -12,7 +12,7 @@ import {
 
 import { clearToken, getToken, toApiError } from "@/lib/api";
 import * as authService from "@/services/auth";
-import type { LoginInput, RegisterInput, User } from "@/types";
+import type { LoginInput, RegisterInput, TokenResponse, User } from "@/types";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -21,6 +21,8 @@ interface AuthContextValue {
   status: AuthStatus;
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
+  /** Adopt a session issued outside the login form (e.g. staff invite accept). */
+  establishSession: (response: TokenResponse) => void;
   updateProfile: (input: { name: string }) => Promise<void>;
   logout: () => void;
 }
@@ -70,6 +72,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus("authenticated");
   }, []);
 
+  const establishSession = useCallback((response: TokenResponse) => {
+    setUser(response.user);
+    setStatus("authenticated");
+  }, []);
+
   const updateProfile = useCallback(async (input: { name: string }) => {
     const updated = await authService.updateProfile(input);
     setUser(updated);
@@ -83,8 +90,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, status, login, register, updateProfile, logout }),
-    [user, status, login, register, updateProfile, logout],
+    () => ({
+      user,
+      status,
+      login,
+      register,
+      establishSession,
+      updateProfile,
+      logout,
+    }),
+    [user, status, login, register, establishSession, updateProfile, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -15,10 +15,10 @@ import {
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Field, Input, Textarea } from "@/components/ui/input";
+import { Field, Input, Textarea, inputClasses } from "@/components/ui/input";
 import { toApiError } from "@/lib/api";
 import { cx } from "@/lib/utils";
-import { createJobDescription } from "@/services/job-descriptions";
+import { createJobDescription, listJobDescriptions } from "@/services/job-descriptions";
 import {
   isResumeProcessing,
   listResumes,
@@ -33,6 +33,7 @@ import type {
   Difficulty,
   ExperienceLevel,
   InterviewType,
+  JobDescriptionSummary,
   ResumeSummary,
 } from "@/types";
 
@@ -90,6 +91,8 @@ export default function PracticePage() {
   const [startError, setStartError] = useState<string | null>(null);
   const [savedResumes, setSavedResumes] = useState<ResumeSummary[]>([]);
   const [savedResumeId, setSavedResumeId] = useState("");
+  const [savedJds, setSavedJds] = useState<JobDescriptionSummary[]>([]);
+  const [savedJdId, setSavedJdId] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -103,6 +106,13 @@ export default function PracticePage() {
       })
       .catch(() => {
         // The upload path still works if the saved-resume list is unavailable.
+      });
+    listJobDescriptions()
+      .then((items) => {
+        if (active) setSavedJds(items);
+      })
+      .catch(() => {
+        // Saving a new description still works if the list is unavailable.
       });
     return () => {
       active = false;
@@ -146,7 +156,19 @@ export default function PracticePage() {
     acceptFile(event.dataTransfer.files?.[0]);
   };
 
-  const canContinue = step === 1 || (step === 2 && jobDescription.trim().length > 0);
+  const chooseSavedJd = (id: string) => {
+    setSavedJdId(id);
+    if (!id) return;
+    const saved = savedJds.find((item) => item.id === id);
+    if (saved) {
+      setRole(saved.title);
+      setJobDescription("");
+    }
+  };
+
+  const canContinue =
+    step === 1 ||
+    (step === 2 && (savedJdId !== "" || jobDescription.trim().length > 0));
   const canStart = role.trim().length > 0;
 
   const handleStart = async () => {
@@ -175,14 +197,18 @@ export default function PracticePage() {
         resumeId = savedResumeId;
       }
       setStartingLabel("Creating interview...");
-      const jd = await createJobDescription({
-        title: role.trim(),
-        company: "Not specified",
-        raw_text: jobDescription.trim(),
-      });
+      const jdId =
+        savedJdId ||
+        (
+          await createJobDescription({
+            title: role.trim(),
+            company: "Not specified",
+            raw_text: jobDescription.trim(),
+          })
+        ).id;
       const interview = await createInterview({
         resume_id: resumeId,
-        jd_id: jd.id,
+        jd_id: jdId,
         role: role.trim(),
         level: experience,
         type,
@@ -368,19 +394,56 @@ export default function PracticePage() {
             description="Paste the posting you are preparing for so questions match the role."
           />
           <CardContent>
-            <Field
-              label="Job description"
-              htmlFor="jd"
-              hint={`${jobDescription.length} characters`}
-            >
-              <Textarea
-                id="jd"
-                rows={9}
-                value={jobDescription}
-                onChange={(event) => setJobDescription(event.target.value)}
-                placeholder="Paste the job description here…"
-              />
-            </Field>
+            {savedJds.length > 0 ? (
+              <Field
+                label="Use a saved job description"
+                htmlFor="jd-saved"
+                hint="Reuse a posting you saved earlier, or write a new one."
+              >
+                <select
+                  id="jd-saved"
+                  className={inputClasses}
+                  value={savedJdId}
+                  onChange={(event) => chooseSavedJd(event.target.value)}
+                >
+                  <option value="">Write a new description</option>
+                  {savedJds.map((saved) => (
+                    <option key={saved.id} value={saved.id}>
+                      {saved.title}
+                      {saved.company ? ` · ${saved.company}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            ) : null}
+
+            {savedJdId ? (
+              <div className="mt-4 rounded-btn border border-line bg-surface p-3.5">
+                <p className="text-[13px] leading-relaxed text-ink-2">
+                  {savedJds.find((item) => item.id === savedJdId)?.snippet ||
+                    "Saved job description selected."}
+                </p>
+                <p className="mt-2 text-xs text-ink-3">
+                  Questions will use this saved posting.
+                </p>
+              </div>
+            ) : (
+              <div className={savedJds.length > 0 ? "mt-4" : undefined}>
+                <Field
+                  label="Job description"
+                  htmlFor="jd"
+                  hint={`${jobDescription.length} characters`}
+                >
+                  <Textarea
+                    id="jd"
+                    rows={9}
+                    value={jobDescription}
+                    onChange={(event) => setJobDescription(event.target.value)}
+                    placeholder="Paste the job description here…"
+                  />
+                </Field>
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : null}

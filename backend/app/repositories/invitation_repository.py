@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import ReturnDocument
 
 from app.models.invitation import ScreeningInvitation
 from app.repositories.base import find_owned_document, stringify_id, to_object_id
@@ -122,6 +123,25 @@ class InvitationRepository:
         await db[self.collection_name].update_one(
             {"_id": object_id}, {"$set": {"round_deadline": round_deadline}}
         )
+
+    async def add_round_minutes(
+        self, db: AsyncIOMotorDatabase, invitation_id: str, minutes: int
+    ) -> dict | None:
+        """Increase the per-round budget before the round has started.
+
+        A pending invitation has no deadline yet — the budget is applied when
+        the candidate starts, so extending it must change `round_minutes`
+        rather than a deadline that `start` would overwrite.
+        """
+        object_id = to_object_id(invitation_id)
+        if object_id is None:
+            return None
+        doc = await db[self.collection_name].find_one_and_update(
+            {"_id": object_id},
+            {"$inc": {"round_minutes": minutes}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return stringify_id(doc) if doc else None
 
     async def set_decision(
         self,

@@ -4,7 +4,6 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.api.deps import get_current_user, get_job_description_service
 from app.core.database import get_db
 from app.core.rate_limit import rate_limit
-from app.models.job_description import JobDescription
 from app.models.user import User
 from app.schemas.job_description import (
     JobDescriptionInput,
@@ -37,13 +36,13 @@ async def list_job_descriptions(
     return await service.list(db, current_user.id, limit)
 
 
-@router.get("/{jd_id}", response_model=JobDescription)
+@router.get("/{jd_id}", response_model=JobDescriptionResponse)
 async def get_job_description(
     jd_id: str,
     current_user: User = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: JobDescriptionService = Depends(get_job_description_service),
-) -> JobDescription:
+) -> JobDescriptionResponse:
     return await service.get(db, current_user.id, jd_id)
 
 

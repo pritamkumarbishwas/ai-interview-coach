@@ -4,9 +4,10 @@ import logging
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.models.job_description import JobDescription
 from app.prompts.templates import EXTRACT_JD_INFO_PROMPT, MAX_PROMPT_CHARS
+from app.repositories.interview_repository import InterviewRepository
 from app.repositories.job_description_repository import JobDescriptionRepository
 from app.schemas.job_description import (
     JobDescriptionInput,
@@ -39,8 +40,13 @@ def _stored_snippet(doc: dict) -> str:
 
 
 class JobDescriptionService:
-    def __init__(self, job_descriptions: JobDescriptionRepository) -> None:
+    def __init__(
+        self,
+        job_descriptions: JobDescriptionRepository,
+        interviews: InterviewRepository,
+    ) -> None:
         self._job_descriptions = job_descriptions
+        self._interviews = interviews
 
     async def create(
         self, db: AsyncIOMotorDatabase, user_id: str, payload: JobDescriptionInput
@@ -58,10 +64,13 @@ class JobDescriptionService:
         jd.id = await self._job_descriptions.insert(db, jd)
 
         return JobDescriptionResponse(
-            id=jd.id,
+            id=jd.id or "",
             title=jd.title,
             company=jd.company,
+            raw_text=jd.raw_text,
+            snippet=jd.snippet,
             structured_data=structured_data,
+            created_at=jd.created_at,
         )
 
     async def list(
@@ -79,12 +88,30 @@ class JobDescriptionService:
             for doc in docs
         ]
 
-    async def get(self, db: AsyncIOMotorDatabase, user_id: str, jd_id: str) -> JobDescription:
-        doc = await self._require(db, user_id, jd_id)
-        return JobDescription(**doc)
+    async def get(
+        self, db: AsyncIOMotorDatabase, user_id: str, jd_id: str
+    ) -> JobDescriptionResponse:
+        jd = JobDescription(**await self._require(db, user_id, jd_id))
+        return JobDescriptionResponse(
+            id=jd.id or "",
+            title=jd.title,
+            company=jd.company,
+            raw_text=jd.raw_text,
+            snippet=jd.snippet,
+            structured_data=JobDescriptionStructuredData.model_validate(
+                jd.structured_data
+            ),
+            created_at=jd.created_at,
+        )
 
     async def delete(self, db: AsyncIOMotorDatabase, user_id: str, jd_id: str) -> None:
         await self._require(db, user_id, jd_id)
+        active = await self._interviews.count_active_for_jd(db, jd_id)
+        if active:
+            raise ConflictError(
+                "This job description is used by an interview that is still in "
+                "progress. Finish that interview before deleting the posting."
+            )
         await self._job_descriptions.delete(db, jd_id, user_id)
 
     async def _extract_structured_data(

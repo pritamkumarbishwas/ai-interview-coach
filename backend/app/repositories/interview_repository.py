@@ -71,6 +71,12 @@ class InterviewRepository:
     ) -> dict | None:
         return await find_owned_document(db, self.collection_name, interview_id, user_id)
 
+    async def count_active_for_jd(self, db: AsyncIOMotorDatabase, jd_id: str) -> int:
+        """Interviews still using a job description (created or in progress)."""
+        return await db[self.collection_name].count_documents(
+            {"jd_id": jd_id, "status": {"$in": ["created", "in_progress"]}}
+        )
+
     async def get_by_id(
         self, db: AsyncIOMotorDatabase, interview_id: str
     ) -> dict | None:

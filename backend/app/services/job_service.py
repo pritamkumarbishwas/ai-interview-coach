@@ -117,7 +117,7 @@ class JobService:
         reviewer_ids: list[str],
     ) -> JobOut:
         """Replace the reviewer assignment list (owner/admin only)."""
-        await self._require_manageable(db, actor, job_id)
+        current = await self._require_manageable(db, actor, job_id)
         unique = list(dict.fromkeys(reviewer_ids))
         for reviewer_id in unique:
             user = await self._users.get_by_id(db, reviewer_id)
@@ -128,13 +128,16 @@ class JobService:
         doc = await self._jobs.set_reviewers(db, job_id, unique)
         if doc is None:  # pragma: no cover - the row existed a moment ago
             raise NotFoundError("Job not found")
+        metadata: dict = {"reviewer_ids": unique}
+        if actor.role == "admin" and current.get("user_id") != actor.id:
+            metadata["cross_owner"] = True
         await audit_service.record(
             db,
             action="job.reviewers_changed",
             actor_id=actor.id,
             target_type="job",
             target_id=job_id,
-            metadata={"reviewer_ids": unique},
+            metadata=metadata,
         )
         return self._to_out(Job(**doc))
 

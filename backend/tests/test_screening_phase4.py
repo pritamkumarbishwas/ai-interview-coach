@@ -257,6 +257,67 @@ def test_extend_revives_an_expired_round(
     assert client.get(f"/api/screening/{token}/current-question").status_code == 200
 
 
+def test_extend_pending_adds_to_the_round_budget(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    _patch_llm(monkeypatch)
+    job_id = _job_with_template(client, staff_headers, proctoring_mode="off")
+    invitation = _invite(client, staff_headers, job_id)
+    assert invitation["round_deadline"] is None
+
+    extended = client.post(
+        f"/api/invitations/{invitation['id']}/extend",
+        headers=staff_headers,
+        json={"minutes": 15},
+    )
+    assert extended.status_code == 200, extended.text
+    body = extended.json()
+    assert body["round_minutes"] == 45
+    assert body["round_deadline"] is None
+
+    token = _token(invitation)
+    _start(client, token, consent=False)
+    deadline = datetime.fromisoformat(
+        client.get(f"/api/screening/{token}").json()["round_deadline"]
+    )
+    remaining = deadline - datetime.now(UTC)
+    assert timedelta(minutes=44) < remaining < timedelta(minutes=46)
+
+
+def test_completed_invitation_is_terminal(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    _patch_llm(monkeypatch)
+    job_id = _job_with_template(
+        client, staff_headers, proctoring_mode="off", target=1
+    )
+    invitation = _invite(client, staff_headers, job_id)
+    token = _token(invitation)
+    question_id = _start(client, token, consent=False)
+
+    answered = client.post(
+        f"/api/screening/{token}/questions/{question_id}/answer",
+        json={"answer": "A concise answer."},
+    )
+    assert answered.json()["status"] == "completed"
+    assert _read_invitation(invitation["id"])["status"] == "completed"
+
+    # The candidate can still see the terminal session, but cannot act on it.
+    assert client.get(f"/api/screening/{token}").status_code == 200
+    assert client.get(f"/api/screening/{token}/current-question").status_code == 409
+    assert (
+        client.post(f"/api/screening/{token}/start", json={"consent": False}).status_code
+        == 409
+    )
+    # Completed sessions are review artifacts and cannot be revoked.
+    assert (
+        client.delete(
+            f"/api/invitations/{invitation['id']}", headers=staff_headers
+        ).status_code
+        == 409
+    )
+
+
 def test_extend_requires_recruiter_and_rejects_revoked(
     client: TestClient, staff_headers: dict, auth_headers: dict
 ) -> None:

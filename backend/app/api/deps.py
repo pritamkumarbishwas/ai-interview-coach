@@ -55,7 +55,7 @@ def get_resume_service() -> ResumeService:
 
 
 def get_job_description_service() -> JobDescriptionService:
-    return JobDescriptionService(job_description_repository)
+    return JobDescriptionService(job_description_repository, interview_repository)
 
 
 def get_job_service() -> JobService:

@@ -10,11 +10,13 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, Input, PasswordInput } from "@/components/ui/input";
 import { toApiError } from "@/lib/api";
+import { useAuth } from "@/hooks/use-auth";
 import * as staffService from "@/services/staff";
 
 function AcceptForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { establishSession } = useAuth();
   const token = searchParams.get("token") ?? "";
 
   const [name, setName] = useState("");
@@ -44,11 +46,14 @@ function AcceptForm() {
     setSubmitting(true);
     setError(null);
     try {
-      await staffService.acceptStaffInvitation({
+      const session = await staffService.acceptStaffInvitation({
         token,
         name: name.trim(),
         password,
       });
+      // The service persisted the token; adopt the returned profile so the
+      // route guard sees an authenticated staff member immediately.
+      establishSession(session);
       router.replace("/jobs");
     } catch (caught) {
       const apiError = toApiError(caught);

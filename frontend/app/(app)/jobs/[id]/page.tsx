@@ -42,7 +42,8 @@ import {
   JOB_STATUS_TONES,
   STAFF_ROLES,
 } from "@/lib/recruiting";
-import { cx, formatDate, formatTime } from "@/lib/utils";import * as invitationService from "@/services/invitations";
+import { cx, formatDate, formatTime } from "@/lib/utils";
+import * as invitationService from "@/services/invitations";
 import * as jobService from "@/services/jobs";
 import * as staffService from "@/services/staff";
 import * as templateService from "@/services/templates";
@@ -54,9 +55,11 @@ import type {
   InvitationStatus,
   Job,
   JobStatus,
+  RoundConfig,
   Scorecard,
   ShadowReport,
   ShortlistEntry,
+  WebhookProvider,
 } from "@/types";
 
 const INVITATION_TONES: Record<InvitationStatus, BadgeTone> = {
@@ -263,7 +266,12 @@ function JobDetail() {
     description: string;
     status: JobStatus;
     template_id: string;
+    webhook_url: string;
+    webhook_provider: WebhookProvider;
+    webhook_enabled: boolean;
   } | null>(null);
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [clearWebhookSecret, setClearWebhookSecret] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -291,7 +299,12 @@ function JobDetail() {
       description: job.description,
       status: job.status,
       template_id: job.template_id ?? "",
+      webhook_url: job.webhook_url,
+      webhook_provider: job.webhook_provider,
+      webhook_enabled: job.webhook_enabled,
     });
+    setWebhookSecret("");
+    setClearWebhookSecret(false);
   }, [job]);
 
   if (loading && !job) return <FullScreenLoader label="Loading job" />;
@@ -316,6 +329,10 @@ function JobDetail() {
       setSaveError("A job title is required.");
       return;
     }
+    if (form.webhook_enabled && !form.webhook_url.trim()) {
+      setSaveError("Add a webhook URL before enabling the ATS integration.");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     setSaved(false);
@@ -327,6 +344,15 @@ function JobDetail() {
         description: form.description,
         status: form.status,
         template_id: form.template_id || null,
+        webhook_url: form.webhook_url.trim(),
+        webhook_provider: form.webhook_provider,
+        webhook_enabled: form.webhook_enabled,
+        // An empty secret clears it; omit the field to keep the stored one.
+        ...(clearWebhookSecret
+          ? { webhook_secret: "" }
+          : webhookSecret.trim()
+            ? { webhook_secret: webhookSecret.trim() }
+            : {}),
       });
       setSaved(true);
       reload();
@@ -472,6 +498,105 @@ function JobDetail() {
                   </Field>
                 </div>
 
+                <fieldset className="space-y-3 rounded-btn border border-line p-3.5">
+                  <legend className="px-1 text-[13px] font-semibold text-ink">
+                    ATS webhook
+                  </legend>
+                  <p className="text-xs leading-relaxed text-ink-2">
+                    When enabled, every candidate decision is POSTed to your ATS
+                    with an HMAC signature. Delivery is asynchronous and retried
+                    on failure.
+                  </p>
+                  <label className="flex items-center gap-2 text-sm text-ink">
+                    <input
+                      type="checkbox"
+                      checked={form.webhook_enabled}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          webhook_enabled: event.target.checked,
+                        })
+                      }
+                      className="h-4 w-4 shrink-0 rounded border-line text-brand focus:ring-brand"
+                    />
+                    Enable webhook
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Provider" htmlFor="edit-webhook-provider">
+                      <select
+                        id="edit-webhook-provider"
+                        className={inputClasses}
+                        value={form.webhook_provider}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            webhook_provider: event.target
+                              .value as WebhookProvider,
+                          })
+                        }
+                      >
+                        <option value="generic">Generic</option>
+                        <option value="greenhouse">Greenhouse</option>
+                        <option value="lever">Lever</option>
+                      </select>
+                    </Field>
+                    <Field
+                      label="Endpoint URL"
+                      htmlFor="edit-webhook-url"
+                      optional
+                    >
+                      <Input
+                        id="edit-webhook-url"
+                        type="url"
+                        placeholder="https://ats.example.com/hooks/interviews"
+                        value={form.webhook_url}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            webhook_url: event.target.value,
+                          })
+                        }
+                      />
+                    </Field>
+                  </div>
+                  <Field
+                    label="Signing secret"
+                    htmlFor="edit-webhook-secret"
+                    optional
+                    hint={
+                      job.webhook_configured && !clearWebhookSecret
+                        ? "A secret is stored. Leave blank to keep it."
+                        : "Used to sign each request with HMAC-SHA256."
+                    }
+                  >
+                    <Input
+                      id="edit-webhook-secret"
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={
+                        job.webhook_configured ? "••••••••" : "Optional"
+                      }
+                      value={webhookSecret}
+                      disabled={clearWebhookSecret}
+                      onChange={(event) => setWebhookSecret(event.target.value)}
+                    />
+                  </Field>
+                  {job.webhook_configured ? (
+                    <label className="flex items-center gap-2 text-xs text-ink-2">
+                      <input
+                        type="checkbox"
+                        checked={clearWebhookSecret}
+                        onChange={(event) => {
+                          setClearWebhookSecret(event.target.checked);
+                          if (event.target.checked) setWebhookSecret("");
+                        }}
+                        className="h-3.5 w-3.5 shrink-0 rounded border-line text-brand focus:ring-brand"
+                      />
+                      Remove the stored signing secret
+                    </label>
+                  ) : null}
+                </fieldset>
+
                 <div className="flex items-center justify-between gap-3 pt-1">
                   <Button
                     variant="danger-soft"
@@ -528,6 +653,7 @@ function JobDetail() {
             {canManage ? (
               <InviteForm
                 jobId={job.id}
+                templateId={job.template_id}
                 onInvited={(invitation) => {
                   refreshCandidates();
                   setLink(invitation.accept_url);
@@ -638,21 +764,52 @@ function JobDetail() {
 
 interface InviteFormProps {
   jobId: string;
+  templateId: string | null;
   onInvited: (invitation: Invitation) => void;
 }
 
-function InviteForm({ jobId, onInvited }: InviteFormProps) {
+function InviteForm({ jobId, templateId, onInvited }: InviteFormProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [expiresDays, setExpiresDays] = useState("");
   const [extraMinutes, setExtraMinutes] = useState("");
+  const [rounds, setRounds] = useState<RoundConfig[]>([]);
+  const [roundKey, setRoundKey] = useState("");
+  const [windowStart, setWindowStart] = useState("");
+  const [windowEnd, setWindowEnd] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!templateId) {
+      setRounds([]);
+      setRoundKey("");
+      return;
+    }
+    let active = true;
+    templateService
+      .getTemplate(templateId)
+      .then((template) => {
+        if (!active) return;
+        setRounds(template.config.rounds ?? []);
+      })
+      .catch(() => {
+        // The invite still works with the template's default first round.
+        if (active) setRounds([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [templateId]);
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!email.trim()) {
       setError("A candidate email is required.");
+      return;
+    }
+    if (windowStart && windowEnd && new Date(windowEnd) <= new Date(windowStart)) {
+      setError("The interview window must end after it starts.");
       return;
     }
     setSubmitting(true);
@@ -662,6 +819,13 @@ function InviteForm({ jobId, onInvited }: InviteFormProps) {
         job_id: jobId,
         candidate_email: email.trim(),
         candidate_name: name.trim(),
+        round_key: roundKey || undefined,
+        start_window_start: windowStart
+          ? new Date(windowStart).toISOString()
+          : undefined,
+        start_window_end: windowEnd
+          ? new Date(windowEnd).toISOString()
+          : undefined,
         expires_in_days: expiresDays ? Number(expiresDays) : undefined,
         extra_minutes: extraMinutes ? Number(extraMinutes) : undefined,
       });
@@ -669,6 +833,9 @@ function InviteForm({ jobId, onInvited }: InviteFormProps) {
       setEmail("");
       setExpiresDays("");
       setExtraMinutes("");
+      setRoundKey("");
+      setWindowStart("");
+      setWindowEnd("");
       onInvited(invitation);
     } catch (caught) {
       setError(toApiError(caught).message);
@@ -707,7 +874,44 @@ function InviteForm({ jobId, onInvited }: InviteFormProps) {
           onChange={(event) => setEmail(event.target.value)}
         />
       </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <Field label="Window opens" htmlFor="invite-window-start" optional>
+          <Input
+            id="invite-window-start"
+            type="datetime-local"
+            value={windowStart}
+            onChange={(event) => setWindowStart(event.target.value)}
+          />
+        </Field>
+        <Field label="Window closes" htmlFor="invite-window-end" optional>
+          <Input
+            id="invite-window-end"
+            type="datetime-local"
+            value={windowEnd}
+            onChange={(event) => setWindowEnd(event.target.value)}
+          />
+        </Field>
+      </div>
       <div className="mt-3 flex flex-wrap items-end gap-3">
+        {rounds.length > 0 ? (
+          <div className="w-56">
+            <Field label="Round" htmlFor="invite-round">
+              <select
+                id="invite-round"
+                className={inputClasses}
+                value={roundKey}
+                onChange={(event) => setRoundKey(event.target.value)}
+              >
+                <option value="">First round (default)</option>
+                {rounds.map((round) => (
+                  <option key={round.key} value={round.key}>
+                    {round.label} · {round.duration_minutes} min
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        ) : null}
         <div className="w-40">
           <Field label="Link expires" htmlFor="invite-expires" optional>
             <select
@@ -840,7 +1044,10 @@ function InvitationRow({ invitation, canManage, onChanged, onLink }: InvitationR
     }
   };
 
-  const revocable = invitation.status === "pending";
+  const revocable =
+    invitation.status === "pending" ||
+    invitation.status === "started" ||
+    invitation.status === "expired";
   const extendable =
     invitation.status === "pending" ||
     invitation.status === "started" ||
@@ -918,26 +1125,26 @@ function InvitationRow({ invitation, canManage, onChanged, onLink }: InvitationR
           </div>
         ) : null}
         <div className="flex items-center gap-1.5">
+          {canManage && invitation.status === "pending" ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<BellRing className="h-3.5 w-3.5" aria-hidden />}
+              loading={busy === "remind"}
+              onClick={() => void remind()}
+            >
+              Remind
+            </Button>
+          ) : null}
           {canManage && revocable ? (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={<BellRing className="h-3.5 w-3.5" aria-hidden />}
-                loading={busy === "remind"}
-                onClick={() => void remind()}
-              >
-                Remind
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                loading={busy === "revoke"}
-                onClick={() => void revoke()}
-              >
-                Revoke
-              </Button>
-            </>
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={busy === "revoke"}
+              onClick={() => void revoke()}
+            >
+              Revoke
+            </Button>
           ) : null}
         </div>
       </div>
