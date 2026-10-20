@@ -93,6 +93,8 @@ class Settings(BaseSettings):
         # profile as authenticated recording, so the same headroom applies.
         "screening_recording": (60, 60),
         "screening_transcribe": (60, 60),
+        "interview_transcribe": (60, 60),
+        "interview_complete": (20, 60),
         # Recruiter playback of a finalized session (occasional, not bulk).
         "recording_download": (30, 60),
         # Programmatic API clients poll; give them a generous budget.

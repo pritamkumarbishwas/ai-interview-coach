@@ -130,6 +130,8 @@ function ScreeningInterview() {
 
   useIntegritySignals({ enabled: sessionActive && proctored, onSignal: reportSignal });
 
+  const handleSpeechEnd = useCallback(() => setAiStatus("listening"), []);
+
   const timeLabel = () => formatTime((Date.now() - startedAtRef.current) / 1000);
 
   const applyQuestion = useCallback((current: CurrentQuestion) => {
@@ -250,10 +252,10 @@ function ScreeningInterview() {
   };
 
   const onBegin = () => {
-    if (session?.proctoring_mode === "strict") {
-      setStage("device");
-    } else {
+    if (session?.proctoring_mode === "off") {
       void doStart(consent);
+    } else {
+      setStage("device");
     }
   };
 
@@ -353,7 +355,12 @@ function ScreeningInterview() {
             One quick setup step before your interview begins.
           </p>
         </header>
-        <DeviceCheck candidateName="Candidate" onNext={() => void doStart(true)} nexting={starting} />
+        <DeviceCheck
+          candidateName="Candidate"
+          onNext={() => void doStart(true)}
+          nexting={starting}
+          requireScreen={session.proctoring_mode === "strict"}
+        />
         {startError ? (
           <div className="mt-4">
             <Alert tone="error">{startError}</Alert>
@@ -517,7 +524,11 @@ function ScreeningInterview() {
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-3">
-          <InterviewProgress current={Math.min(questionNumber, total)} total={total} />
+          <InterviewProgress
+            current={Math.min(questionNumber, total)}
+            answered={Math.min(Math.max(questionNumber - 1, 0), total)}
+            total={total}
+          />
           {remaining !== null ? (
             <div
               className="flex items-center gap-2 rounded-btn border border-line bg-card px-3 py-2 shadow-sm"
@@ -568,7 +579,7 @@ function ScreeningInterview() {
           muted={muted}
           className="order-1 lg:order-none"
           onToggleMute={() => setMuted((value) => !value)}
-          onSpeechEnd={() => setAiStatus("listening")}
+          onSpeechEnd={handleSpeechEnd}
           onReplay={() => {
             setAiStatus("listening");
             window.setTimeout(() => setAiStatus("speaking"), 10);

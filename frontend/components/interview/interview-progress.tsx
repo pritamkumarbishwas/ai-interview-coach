@@ -3,11 +3,19 @@ import { ProgressBar } from "@/components/ui/progress-bar";
 interface InterviewProgressProps {
   current: number;
   total: number;
+  /** Completed answers; when omitted, `current` doubles as progress. */
+  answered?: number;
 }
 
-export function InterviewProgress({ current, total }: InterviewProgressProps) {
+export function InterviewProgress({
+  current,
+  total,
+  answered = current,
+}: InterviewProgressProps) {
   const safeTotal = Math.max(total, 1);
-  const percent = Math.round((Math.min(current, safeTotal) / safeTotal) * 100);
+  const percent = Math.round(
+    (Math.min(Math.max(answered, 0), safeTotal) / safeTotal) * 100,
+  );
 
   return (
     <div className="w-full max-w-sm">

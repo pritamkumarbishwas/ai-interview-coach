@@ -2,7 +2,7 @@
 
 An AI interview platform with two connected products:
 
-- **Practice:** a candidate uploads a resume and job description, runs an adaptive mock interview, and gets scored feedback plus a preparation plan.
+- **Practice:** a candidate uploads a resume and job description, runs a structured mock interview, and gets deferred scoring plus a preparation plan.
 - **Recruiting and screening:** a recruiter creates a requisition and interview template, invites candidates through magic links, reviews scorecards, integrity signals, recordings, and analytics, and records a human decision.
 
 The AI is advisory. It generates questions, evaluates answers, and surfaces signals; it never makes the hiring decision.
@@ -93,9 +93,10 @@ Design rules:
 
 1. A candidate registers and uploads a PDF/DOCX resume.
 2. They save a job description and create a practice interview.
-3. The first question is generated from the role, resume, and retrieved knowledge.
-4. Each answer is evaluated, and the next question adapts to the result.
-5. The final report contains scores, strengths, weaknesses, and a preparation plan.
+3. They consent, pass the camera/screen check, and the first question is generated.
+4. Each answer is stored during the session; evaluation is deferred until completion.
+5. The next question is generated without scoring the previous answer.
+6. Finishing normally or ending early evaluates all answers and produces scores, topic feedback, and a preparation plan.
 
 ### Recruiting and screening
 
@@ -126,7 +127,7 @@ completed. Treat the link as sensitive.
 - Original files, full extracted text, page previews, OCR for scans, and structured extraction for every resume section
 - Durable resume analysis status (`pending`, `processing`, `ready`, `partial`, `failed`) with retry, download, and preview APIs
 - Job-description create/list/detail/delete
-- Practice interview lifecycle, adaptive questions, answer evaluation, final report
+- Practice interview lifecycle, structured questions, deferred answer evaluation, final report
 - Dashboard stats and interview history
 
 ### Recruiting and screening
@@ -287,7 +288,7 @@ The main groups are:
 | Area | Endpoints |
 |---|---|
 | Auth | `POST /api/auth/register`, `POST /api/auth/login`, `GET/PATCH /api/auth/me` |
-| Practice | `/api/resumes`, `/api/resumes/{id}/text`, `/api/resumes/{id}/file`, `/api/resumes/{id}/preview/{page}`, `/api/resumes/{id}/analyze`, `/api/job-descriptions`, `/api/interviews`, `/api/questions/{id}/answer`, `/api/dashboard/stats` |
+| Practice | `/api/resumes`, `/api/resumes/{id}/text`, `/api/resumes/{id}/file`, `/api/resumes/{id}/preview/{page}`, `/api/resumes/{id}/analyze`, `/api/job-descriptions`, `/api/interviews`, `POST /api/interviews/{id}/complete`, `POST /api/interviews/{id}/transcribe`, `/api/questions/{id}/answer`, `/api/dashboard/stats` |
 | Jobs | `GET/POST /api/jobs`, `GET/PATCH/DELETE /api/jobs/{id}`, `PUT /api/jobs/{id}/reviewers` |
 | Templates | `GET/POST /api/templates`, `GET/PATCH/DELETE /api/templates/{id}`, `POST /api/templates/{id}/preview` |
 | Staff | `/api/staff/invitations`, `POST /api/staff/invitations/accept`, `/api/staff/users`, `PATCH /api/staff/users/{id}/role`, `GET /api/staff/reviewers` |

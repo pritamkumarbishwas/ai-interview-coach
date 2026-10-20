@@ -24,5 +24,5 @@ async def submit_answer(
     service: InterviewService = Depends(get_interview_service),
     _: None = Depends(rate_limit("answer_submission")),
 ) -> AnswerResultOut:
-    """Score the candidate's answer and return it with the next question."""
+    """Store the candidate's answer and return the next question (no scoring)."""
     return await service.answer_question(db, current_user.id, question_id, payload)

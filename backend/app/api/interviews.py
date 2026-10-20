@@ -1,9 +1,13 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import Response
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.api.deps import get_current_user, get_interview_service, get_recording_service
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.exceptions import PayloadTooLargeError
 from app.core.rate_limit import rate_limit
 from app.models.user import User
 from app.schemas.interview import (
@@ -15,6 +19,7 @@ from app.schemas.interview import (
     ProctoringEventCreate,
 )
 from app.schemas.report import ReportOut
+from app.schemas.transcript import TranscriptionOut
 from app.services.interview_service import InterviewService
 from app.services.recording_service import RecordingService
 
@@ -72,6 +77,18 @@ async def start_interview(
 ) -> CurrentQuestionOut:
     """Transition `created -> in_progress` and generate the first question."""
     return await service.start(db, current_user.id, interview_id)
+
+
+@router.post("/{interview_id}/complete", response_model=InterviewOut)
+async def complete_interview(
+    interview_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: InterviewService = Depends(get_interview_service),
+    _: None = Depends(rate_limit("interview_complete")),
+) -> InterviewOut:
+    """Finish an in-progress interview early and generate its report."""
+    return await service.complete(db, current_user.id, interview_id)
 
 
 @router.post("/{interview_id}/proctoring/consent", status_code=status.HTTP_204_NO_CONTENT)
@@ -138,13 +155,21 @@ async def _read_upload(file: UploadFile, max_bytes: int) -> bytes:
             break
         total += len(chunk)
         if total > max_bytes:
-            from app.core.exceptions import PayloadTooLargeError
-
             raise PayloadTooLargeError(
                 f"File size exceeds the {max_bytes // (1024 * 1024)}MB limit."
             )
         chunks.append(chunk)
     return b"".join(chunks)
+
+
+def _parse_optional_datetime(value: str | None) -> datetime | None:
+    """Parse a client ISO timestamp; ignore anything malformed."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 @router.post(
@@ -157,6 +182,7 @@ async def upload_recording_chunk(
     seq: int = Form(...),
     finalize: bool = Form(False),
     content_type: str = Form("video/webm"),
+    capture_started_at: str | None = Form(None),
     chunk: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
@@ -164,8 +190,6 @@ async def upload_recording_chunk(
     _: None = Depends(rate_limit("recording_upload")),
 ) -> None:
     """Append one recorded chunk; `finalize=true` seals the recording."""
-    from app.core.config import settings
-
     data = await _read_upload(chunk, settings.max_recording_chunk_bytes)
     await service.append_chunk(
         db,
@@ -176,7 +200,31 @@ async def upload_recording_chunk(
         data,
         content_type,
         finalize,
+        capture_started_at=_parse_optional_datetime(capture_started_at),
     )
+
+
+@router.post("/{interview_id}/transcribe", response_model=TranscriptionOut)
+async def transcribe_answer(
+    interview_id: str,
+    audio: UploadFile = File(...),
+    content_type: str = Form("audio/webm"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: InterviewService = Depends(get_interview_service),
+    _: None = Depends(rate_limit("interview_transcribe")),
+) -> TranscriptionOut:
+    """Server-side speech-to-text for one answer (Safari/Firefox path)."""
+    data = await _read_upload(audio, settings.max_recording_chunk_bytes)
+    text = await service.transcribe(
+        db,
+        current_user.id,
+        interview_id,
+        data,
+        audio.filename or "answer.webm",
+        content_type,
+    )
+    return TranscriptionOut(text=text)
 
 
 @router.get("/{interview_id}/recordings/{kind}")

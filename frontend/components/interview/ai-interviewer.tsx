@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Bot, RotateCcw, Volume2, VolumeX } from "lucide-react";
 
 import { AudioWaveform } from "@/components/interview/audio-waveform";
@@ -39,14 +39,29 @@ export function AIInterviewer({
 }: AIInterviewerProps) {
   const meta = STATUS_META[status];
   const { speak, stop, speaking } = useTTS(muted);
+  const onSpeechEndRef = useRef(onSpeechEnd);
+  const lastSpokenRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (status === "speaking" && question) {
-      speak(question, onSpeechEnd);
-    } else {
+    onSpeechEndRef.current = onSpeechEnd;
+  }, [onSpeechEnd]);
+
+  // Speak each question once per speaking turn. Parent clock re-renders must
+  // not restart the utterance; replay resets the marker via `listening`.
+  useEffect(() => {
+    if (status !== "speaking" || !question) {
+      lastSpokenRef.current = null;
       stop();
+      return;
     }
-  }, [status, question, speak, stop, onSpeechEnd]);
+    if (lastSpokenRef.current === question) return;
+    lastSpokenRef.current = question;
+    speak(question, () => onSpeechEndRef.current?.());
+  }, [status, question, speak, stop]);
+
+  useEffect(() => {
+    if (muted) stop();
+  }, [muted, stop]);
 
   // Use the actual speaking status from the TTS engine for the waveform animation
   const isSpeaking = status === "speaking" && speaking;

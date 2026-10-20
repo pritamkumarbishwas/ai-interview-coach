@@ -146,6 +146,34 @@ def test_report_backfills_when_completion_generation_fails(
     assert calls == 2  # backfill is cached
 
 
+def test_evaluation_failure_does_not_cache_a_partial_report(
+    client: TestClient, auth_headers: dict, env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def eval_down(prompt: str, schema, **kwargs):
+        if schema.__name__ == "EvaluationGeneration":
+            raise RuntimeError("evaluation down")
+        return await env.dispatcher(prompt, schema, **kwargs)
+
+    monkeypatch.setattr(INTERVIEW_LLM, eval_down)
+    ctx = env.setup(target=3)
+    assert answer(client, auth_headers, ctx["question_id"]).status_code == 200
+    assert (
+        client.post(
+            f"/api/interviews/{ctx['id']}/complete", headers=auth_headers
+        ).status_code
+        == 200
+    )
+
+    failed = get_report(client, auth_headers, ctx["id"])
+    assert failed.status_code == 503
+    assert failed.json()["code"] == "service_unavailable"
+
+    monkeypatch.setattr(INTERVIEW_LLM, env.dispatcher)
+    recovered = get_report(client, auth_headers, ctx["id"])
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["narrative"]
+
+
 def test_report_generation_failure_returns_503_then_recovers(
     client: TestClient, auth_headers: dict, env: Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:

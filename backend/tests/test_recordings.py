@@ -24,16 +24,20 @@ def upload_chunk(
     finalize: bool = False,
     content_type: str = "video/webm",
     blob: bytes = b"\x00\x01\x02",
+    capture_started_at: str | None = None,
 ):
+    data = {
+        "kind": kind,
+        "seq": str(seq),
+        "finalize": "true" if finalize else "false",
+        "content_type": content_type,
+    }
+    if capture_started_at is not None:
+        data["capture_started_at"] = capture_started_at
     return client.post(
         f"/api/interviews/{interview_id}/recordings/chunk",
         headers=headers,
-        data={
-            "kind": kind,
-            "seq": str(seq),
-            "finalize": "true" if finalize else "false",
-            "content_type": content_type,
-        },
+        data=data,
         files={"chunk": ("chunk.webm", blob, content_type)},
     )
 
@@ -229,3 +233,50 @@ def test_download_before_finalize_is_404(
         f"/api/interviews/{ctx['id']}/recordings/camera", headers=auth_headers
     )
     assert r.status_code == 404
+
+
+def test_capture_started_at_is_persisted(
+    client: TestClient, auth_headers: dict, env: Env
+) -> None:
+    ctx = env.setup()
+    started = "2026-10-20T10:00:00+00:00"
+    assert (
+        upload_chunk(
+            client,
+            auth_headers,
+            ctx["id"],
+            seq=0,
+            finalize=True,
+            blob=b"timed",
+            capture_started_at=started,
+        ).status_code
+        == 204
+    )
+    detail = client.get(f"/api/interviews/{ctx['id']}", headers=auth_headers).json()
+    assert detail["recordings"]["camera"]["capture_started_at"].startswith(
+        "2026-10-20T15:30:00"
+    )
+
+
+def test_duplicate_seq_does_not_duplicate_bytes(
+    client: TestClient, auth_headers: dict, env: Env
+) -> None:
+    ctx = env.setup()
+    base, blob = b"base", b"retry-me" * 20
+    assert upload_chunk(client, auth_headers, ctx["id"], seq=0, blob=base).status_code == 204
+    for _ in range(2):
+        assert (
+            upload_chunk(client, auth_headers, ctx["id"], seq=1, blob=blob).status_code
+            == 204
+        )
+    assert (
+        upload_chunk(
+            client, auth_headers, ctx["id"], seq=1, finalize=True, blob=blob
+        ).status_code
+        == 204
+    )
+    download = client.get(
+        f"/api/interviews/{ctx['id']}/recordings/camera", headers=auth_headers
+    )
+    assert download.status_code == 200
+    assert download.content == base + blob

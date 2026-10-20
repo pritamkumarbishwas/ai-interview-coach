@@ -25,10 +25,7 @@ import {
   uploadResume,
   waitForResume,
 } from "@/services/resumes";
-import {
-  createInterview,
-  startInterview,
-} from "@/services/interviews";
+import { createInterview } from "@/services/interviews";
 import type {
   Difficulty,
   ExperienceLevel,
@@ -213,15 +210,10 @@ export default function PracticePage() {
         level: experience,
         type,
         difficulty,
+        proctoring_mode: "strict",
         target_questions: target,
       });
-      // Best effort: pre-generate question 1. On failure the workspace page
-      // offers a Start button, so the session is never lost.
-      try {
-        await startInterview(interview.id);
-      } catch {
-        // handled by the workspace
-      }
+      // The workspace owns consent, the device check, and the actual start.
       router.push(`/interviews/${interview.id}`);
     } catch (error) {
       setStartError(toApiError(error).message);
@@ -582,7 +574,7 @@ export default function PracticePage() {
             loading={starting}
             icon={<Mic className="h-4 w-4" />}
           >
-            {starting ? startingLabel : "Start AI Interview"}
+            {starting ? startingLabel : "Continue to consent & device check"}
           </Button>
         )}
       </div>

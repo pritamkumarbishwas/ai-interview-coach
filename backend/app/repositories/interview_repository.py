@@ -13,6 +13,7 @@ from app.repositories.base import find_owned_document, stringify_id, to_object_i
 # the database and are loaded on demand by the detail endpoint.
 LIST_PROJECTION = {
     "role": 1,
+    "kind": 1,
     "type": 1,
     "difficulty": 1,
     "status": 1,
@@ -169,7 +170,7 @@ class InterviewRepository:
         next_question: Question | None,
         completing: bool,
     ) -> dict | None:
-        """Persist the scored answer, the next question, and/or completion.
+        """Persist the answer, the next question, and/or completion.
 
         The filter pins `current_question_id` to the answered question, so a
         duplicate submission (or a concurrent answer) loses the race and
@@ -204,15 +205,14 @@ class InterviewRepository:
         )
         return self._shape(doc) if doc else None
 
-    async def set_report(
-        self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str, report: Report
+    async def complete_early(
+        self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str
     ) -> dict | None:
-        """Cache the final report exactly once, on a completed interview.
+        """Atomically finish an in-progress interview before the target count.
 
-        `report: None` matches both a missing field and an explicit null, so
-        documents written before reports existed qualify too. A caller that
-        gets `None` back should re-read: another request stored its report
-        first (or the interview is gone / not completed).
+        The status filter makes completion and the final answer mutually
+        exclusive: whichever loses the race gets `None` and can re-read the
+        interview to return the idempotent completed state.
         """
         object_id = to_object_id(interview_id)
         if object_id is None:
@@ -221,9 +221,46 @@ class InterviewRepository:
             {
                 "_id": object_id,
                 "user_id": user_id,
-                "status": "completed",
-                "report": None,
+                "status": "in_progress",
             },
+            {
+                "$set": {
+                    "status": "completed",
+                    "completed_at": datetime.now(UTC),
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        return self._shape(doc) if doc else None
+
+    async def set_report(
+        self,
+        db: AsyncIOMotorDatabase,
+        interview_id: str,
+        user_id: str,
+        report: Report,
+        *,
+        replace: bool = False,
+    ) -> dict | None:
+        """Cache the final report on a completed interview.
+
+        By default the write is insert-only (`report: None`), so concurrent
+        callers generate at most one stored report. ``replace=True`` is used
+        only to repair a legacy partial report after its missing evaluations
+        have been backfilled successfully.
+        """
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return None
+        query: dict[str, object] = {
+            "_id": object_id,
+            "user_id": user_id,
+            "status": "completed",
+        }
+        if not replace:
+            query["report"] = None
+        doc = await db[self.collection_name].find_one_and_update(
+            query,
             {"$set": {"report": report.model_dump()}},
             return_document=ReturnDocument.AFTER,
         )
@@ -279,6 +316,20 @@ class InterviewRepository:
             return_document=ReturnDocument.AFTER,
         )
         return self._shape(doc) if doc else None
+
+    async def clear_recording_meta(
+        self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str, kind: str
+    ) -> bool:
+        """Remove a recording's sealed metadata when a fresh upload starts."""
+        object_id = to_object_id(interview_id)
+        if object_id is None:
+            return False
+        result = await db[self.collection_name].update_one(
+            {"_id": object_id, "user_id": user_id},
+            {"$unset": {f"recordings.{kind}": ""}},
+        )
+        return result.matched_count > 0
+
     async def update_proctoring_session(
         self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str, session: dict
     ) -> dict | None:

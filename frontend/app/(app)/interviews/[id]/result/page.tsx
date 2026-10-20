@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
@@ -51,6 +52,17 @@ export default function ResultPage() {
   const report = reportState.data;
   const reportError = reportState.error;
   const retryReport = reportState.reload;
+  const reloadInterview = interviewState.reload;
+  const syncedReportRef = useRef<string | null>(null);
+  // The report is fetched in parallel with the interview, so the interview
+  // snapshot can predate the persisted evaluations. Refresh it once the report
+  // arrives (keyed by generated_at to avoid a render loop).
+  useEffect(() => {
+    if (!report) return;
+    if (syncedReportRef.current === report.generated_at) return;
+    syncedReportRef.current = report.generated_at;
+    reloadInterview();
+  }, [report, reloadInterview]);
   // The report endpoint blocks (per-interview lock) until evaluation and
   // generation finish, so a single request covers the whole wait — this
   // loading flag stays true for as long as that request is in flight.
@@ -95,8 +107,8 @@ export default function ResultPage() {
       <div className="mx-auto max-w-2xl py-10">
         <EmptyState
           icon={<ClipboardList className="h-6 w-6" />}
-          title="Interview not finished yet"
-          description="The report is generated once every question has been answered. Your progress is saved — resume where you left off."
+          title="Interview still in progress"
+          description="This session hasn't been completed yet. Return to the interview to finish it, or use End Interview to score the answers given so far."
           action={
             <div className="flex justify-center gap-3">
               <ButtonLink
@@ -258,8 +270,8 @@ export default function ResultPage() {
       <section className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <Card>
           <CardHeader
-            title="Strong Areas"
-            description="Dimensions you scored well on."
+            title="Topics you did well on"
+            description="Subjects where your answers scored strongly."
           />
           <CardContent className="flex flex-wrap gap-2">
             {report.strong_topics.length === 0 ? (
@@ -282,8 +294,8 @@ export default function ResultPage() {
 
         <Card>
           <CardHeader
-            title="Needs Improvement"
-            description="Focus areas for your next session."
+            title="Topics to revisit"
+            description="Subjects to focus on in your next session."
           />
           <CardContent className="space-y-3">
             <div className="flex flex-wrap gap-2">

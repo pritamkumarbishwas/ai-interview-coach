@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import {
@@ -33,6 +33,7 @@ import { FullScreenLoader } from "@/components/ui/loading";
 import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
 import { useAuth } from "@/hooks/use-auth";
+import { useIntegritySignals } from "@/hooks/use-integrity-signals";
 import { useInterviewRecorder } from "@/hooks/use-interview-recorder";
 import { MediaProvider, useMedia } from "@/hooks/use-media";
 import { toApiError } from "@/lib/api";
@@ -43,12 +44,15 @@ import {
   TYPE_TONES,
 } from "@/lib/interview";
 import {
+  completeInterview,
+  deleteInterview,
   findCurrentQuestion,
   getInterview,
   recordProctoringConsent,
   recordProctoringEvent,
   startInterview,
   submitAnswer as submitAnswerApi,
+  transcribeAnswer,
 } from "@/services/interviews";
 import type { Difficulty, InterviewDetail, Question } from "@/types";
 import type { ChatMessage } from "@/data/mock";
@@ -127,6 +131,9 @@ function InterviewWorkspace() {
   const [aiStatus, setAiStatus] = useState<AIStatus>("listening");
   const [muted, setMuted] = useState(false);
   const [endOpen, setEndOpen] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
+  const [endError, setEndError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [completed, setCompleted] = useState(false);
@@ -149,6 +156,38 @@ function InterviewWorkspace() {
     cameraStream: media.cameraStream,
     screenStream: media.screenStream,
   });
+
+  const handleSpeechEnd = useCallback(() => setAiStatus("listening"), []);
+
+  const reportSignal = useCallback(
+    (type: string, details: Record<string, unknown> = {}) => {
+      if (!interview || interview.status !== "in_progress") return;
+      if (interview.proctoring_mode === "off") return;
+      void recordProctoringEvent(params.id, type, details).catch(() => {});
+    },
+    [interview, params.id],
+  );
+
+  useIntegritySignals({
+    enabled: inProgress && interview?.proctoring_mode !== "off",
+    onSignal: reportSignal,
+  });
+
+  // Browser-level camera/screen stop events bypass the in-app toggle handlers.
+  useEffect(() => {
+    if (!inProgress || interview?.proctoring_mode === "off") return;
+    const cleanups: Array<() => void> = [];
+    const watch = (stream: MediaStream | null, type: string) => {
+      const track = stream?.getVideoTracks()[0];
+      if (!track) return;
+      const onEnded = () => reportSignal(type, { source: "track_ended" });
+      track.addEventListener("ended", onEnded);
+      cleanups.push(() => track.removeEventListener("ended", onEnded));
+    };
+    watch(media.cameraStream, "camera_off");
+    watch(media.screenStream, "screen_off");
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [inProgress, interview?.proctoring_mode, media.cameraStream, media.screenStream, reportSignal]);
 
   // Seed session state from the loaded interview (first load or after start).
   useEffect(() => {
@@ -246,6 +285,40 @@ function InterviewWorkspace() {
     router.push(`/interviews/${params.id}/result`);
   };
 
+  /** Finish early: persist completion first, then upload the tail, then navigate. */
+  const endInterviewEarly = async () => {
+    if (ending || discarding || saving) return;
+    if (answeredCount === 0) {
+      setEndError("Answer at least one question before generating a report.");
+      return;
+    }
+    setEnding(true);
+    setEndError(null);
+    try {
+      await completeInterview(params.id);
+      setCompleted(true);
+      setEndOpen(false);
+      await finishAndGoToResult();
+    } catch (error) {
+      setEndError(toApiError(error).message);
+    } finally {
+      setEnding(false);
+    }
+  };
+
+  const discardInterview = async () => {
+    if (discarding || ending) return;
+    setDiscarding(true);
+    setEndError(null);
+    try {
+      await deleteInterview(params.id);
+      router.push("/interviews");
+    } catch (error) {
+      setEndError(toApiError(error).message);
+      setDiscarding(false);
+    }
+  };
+
   const submitAnswer = async (text: string): Promise<void> => {
     if (!currentQuestion || completed) {
       throw new Error("No question available.");
@@ -289,11 +362,6 @@ function InterviewWorkspace() {
     }
   };
 
-  const leaveInterview = async () => {
-    setEndOpen(false);
-    await finishAndGoToResult();
-  };
-
   const header = (
     <header className="flex flex-wrap items-center gap-4">
       <div className="min-w-0">
@@ -322,6 +390,7 @@ function InterviewWorkspace() {
           <>
             <InterviewProgress
               current={Math.min(questionNumber, targetQuestions)}
+              answered={Math.min(answeredCount, targetQuestions)}
               total={targetQuestions}
             />
             <div
@@ -336,7 +405,11 @@ function InterviewWorkspace() {
             <Button
               variant="danger-soft"
               size="sm"
-              onClick={() => setEndOpen(true)}
+              onClick={() => {
+                setEndError(null);
+                setEndOpen(true);
+              }}
+              disabled={aiStatus === "thinking" || ending || saving}
               icon={<Square className="h-3.5 w-3.5" />}
             >
               End Interview
@@ -365,6 +438,7 @@ function InterviewWorkspace() {
             candidateName={user?.name ?? "Candidate"}
             onNext={handleStart}
             nexting={starting}
+            requireScreen={interview.proctoring_mode === "strict"}
           />
           {startError ? <Alert tone="error">{startError}</Alert> : null}
           <div className="flex justify-center">
@@ -549,14 +623,15 @@ function InterviewWorkspace() {
           candidateName={user?.name ?? "Candidate"}
           recording={recorder.state === "recording"}
           elapsedSec={recorder.elapsedSec}
-          onDeviceChange={(kind, on) => {
-            if (interview?.status === "in_progress") {
-              void recordProctoringEvent(params.id, `${kind}_${on ? "on" : "off"}`).catch(
-                () => {},
-              );
+          onDeviceChange={(kind, on) =>
+            reportSignal(`${kind}_${on ? "on" : "off"}`, { device: kind })
+          }
+          onLeave={() => {
+            if (aiStatus !== "thinking" && !saving && !ending) {
+              setEndError(null);
+              setEndOpen(true);
             }
           }}
-          onLeave={() => setEndOpen(true)}
           className="order-3 lg:order-none"
         />
         <AIInterviewer
@@ -567,7 +642,7 @@ function InterviewWorkspace() {
           muted={muted}
           className="order-1 lg:order-none"
           onToggleMute={() => setMuted((value) => !value)}
-          onSpeechEnd={() => setAiStatus("listening")}
+          onSpeechEnd={handleSpeechEnd}
           onReplay={() => {
             setAiStatus("listening");
             setTimeout(() => setAiStatus("speaking"), 10);
@@ -598,6 +673,11 @@ function InterviewWorkspace() {
             onSubmit={submitAnswer}
             disabled={aiStatus === "thinking" || completed || saving}
             busy={aiStatus === "thinking"}
+            onTranscribe={
+              interview.transcription_enabled
+                ? (audio) => transcribeAnswer(params.id, audio)
+                : undefined
+            }
           />
         </div>
       </section>
@@ -617,21 +697,48 @@ function InterviewWorkspace() {
 
       <Modal
         open={endOpen}
-        onClose={() => setEndOpen(false)}
-        title="Leave this interview?"
-        description="Your answers are saved. The recording is uploaded and your full report is generated once every question is answered."
+        onClose={() => {
+          if (!ending && !discarding) setEndOpen(false);
+        }}
+        title="End and score this interview?"
+        description={
+          answeredCount === 0
+            ? "You haven't answered a question yet, so there is no report to generate. Discard this session or keep going."
+            : `We'll evaluate the ${answeredCount} answer${answeredCount === 1 ? "" : "s"} you've given so far and generate your report. You won't be able to resume this session.`
+        }
       >
-        <div className="flex items-center justify-end gap-3">
-          <Button variant="outline" onClick={() => setEndOpen(false)}>
-            Keep going
-          </Button>
-          <Button
-            variant="danger"
-            onClick={() => void leaveInterview()}
-            icon={<Square className="h-3.5 w-3.5" />}
-          >
-            Leave interview
-          </Button>
+        <div className="space-y-3">
+          {endError ? <Alert tone="error">{endError}</Alert> : null}
+          <div className="flex items-center justify-end gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setEndOpen(false)}
+              disabled={ending || discarding}
+            >
+              Keep going
+            </Button>
+            {answeredCount === 0 ? (
+              <Button
+                variant="danger"
+                onClick={() => void discardInterview()}
+                loading={discarding}
+                disabled={ending}
+                icon={<Square className="h-3.5 w-3.5" />}
+              >
+                Discard session
+              </Button>
+            ) : (
+              <Button
+                variant="danger"
+                onClick={() => void endInterviewEarly()}
+                loading={ending}
+                disabled={discarding}
+                icon={<Square className="h-3.5 w-3.5" />}
+              >
+                End &amp; generate report
+              </Button>
+            )}
+          </div>
         </div>
       </Modal>
     </div>

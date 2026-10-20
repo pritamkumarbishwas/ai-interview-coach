@@ -91,6 +91,20 @@ export async function startInterview(id: string): Promise<CurrentQuestion> {
   }
 }
 
+/** Finish an in-progress interview early and start report generation. */
+export async function completeInterview(id: string): Promise<InterviewDetail> {
+  try {
+    const { data } = await api.post<InterviewDetail>(
+      `/interviews/${id}/complete`,
+      undefined,
+      { timeout: LLM_TIMEOUT_MS },
+    );
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
 export async function getCurrentQuestion(
   id: string,
 ): Promise<CurrentQuestion> {
@@ -190,7 +204,28 @@ export async function getRecordingBlob(interviewId: string): Promise<Blob> {
   }
 }
 
-/** Whether a finalized session recording is present on an interview. */
+/** Server-side speech-to-text for one recorded answer. */
+export async function transcribeAnswer(
+  interviewId: string,
+  audio: Blob,
+): Promise<string> {
+  const form = new FormData();
+  form.append("content_type", audio.type.split(";")[0] || "audio/webm");
+  form.append("audio", audio, "answer.webm");
+  try {
+    const { data } = await api.post<{ text: string }>(
+      `/interviews/${interviewId}/transcribe`,
+      form,
+      { timeout: LLM_TIMEOUT_MS },
+    );
+    return data.text;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/** Whether a finalized, non-empty session recording is present. */
 export function hasSessionRecording(interview: InterviewDetail): boolean {
-  return Boolean(interview.recordings?.camera?.finalized);
+  const recording = interview.recordings?.camera;
+  return Boolean(recording?.finalized && recording.size_bytes > 0);
 }

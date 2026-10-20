@@ -7,6 +7,7 @@ export type InterviewType =
 export type ExperienceLevel = "junior" | "mid" | "senior";
 export type Difficulty = "beginner" | "intermediate" | "advanced";
 export type InterviewStatus = "created" | "in_progress" | "completed";
+export type InterviewKind = "practice" | "screening";
 export type ProctoringMode = "off" | "camera_only" | "strict";
 export type NextStep = "follow_up" | "harder" | "easier" | "new_topic";
 export type Role = "candidate" | "admin" | "recruiter" | "reviewer";
@@ -247,9 +248,11 @@ export interface CreateJobDescriptionInput {
 export interface InterviewSummary {
   id: string;
   role: string;
+  kind: InterviewKind;
   type: InterviewType;
   difficulty: Difficulty;
   status: InterviewStatus;
+  proctoring_mode: ProctoringMode;
   question_count: number;
   answered_count: number;
   target_questions: number;
@@ -258,11 +261,12 @@ export interface InterviewSummary {
 
 export interface CreateInterviewInput {
   resume_id?: string;
-  jd_id?: string;
+  jd_id: string;
   role: string;
   level: ExperienceLevel;
   type: InterviewType;
   difficulty: Difficulty;
+  proctoring_mode: ProctoringMode;
   target_questions: number;
 }
 
@@ -275,6 +279,15 @@ export interface Question {
 
 export interface ProctoringSession {
   consent_given_at: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  status: "pending" | "active" | "paused" | "completed" | "failed";
+  events: Array<{
+    id: string;
+    type: string;
+    timestamp: string;
+    details: Record<string, unknown>;
+  }>;
 }
 
 /** Metadata for the session recording (kind = "camera" composite). */
@@ -284,6 +297,7 @@ export interface RecordingMeta {
   size_bytes: number;
   chunk_count: number;
   finalized: boolean;
+  capture_started_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -294,6 +308,7 @@ export interface InterviewDetail {
   resume_id: string;
   jd_id: string;
   role: string;
+  kind: InterviewKind;
   level: ExperienceLevel;
   type: InterviewType;
   difficulty: Difficulty;
@@ -304,6 +319,7 @@ export interface InterviewDetail {
   questions: Question[];
   answers: AnswerRecord[];
   recordings: Partial<Record<string, RecordingMeta>>;
+  transcription_enabled: boolean;
   current_question_id: string | null;
   created_at: string;
   started_at: string | null;
@@ -326,6 +342,8 @@ export interface Evaluation {
   feedback: string;
   improved_answer: string;
   next_step: NextStep;
+  competency: string;
+  evidence: string[];
   created_at: string;
 }
 

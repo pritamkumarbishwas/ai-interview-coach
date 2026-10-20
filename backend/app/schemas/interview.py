@@ -67,6 +67,9 @@ class InterviewOut(BaseModel):
     answers: list[Answer] = []
     # Recording metadata by kind (bytes are in GridFS, never inline here).
     recordings: dict[str, RecordingMeta] = {}
+    # Whether this deployment has server-side speech-to-text configured. The
+    # frontend only offers the fallback mic path when this is true.
+    transcription_enabled: bool = False
     current_question_id: str | None = None
     created_at: ISTDateTime
     started_at: ISTDateTime | None = None

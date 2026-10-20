@@ -21,6 +21,8 @@ interface DeviceCheckProps {
   candidateName: string;
   onNext: () => void;
   nexting?: boolean;
+  /** Strict proctoring requires screen share; camera-only does not. */
+  requireScreen?: boolean;
   className?: string;
 }
 
@@ -58,6 +60,7 @@ export function DeviceCheck({
   candidateName,
   onNext,
   nexting,
+  requireScreen = true,
   className,
 }: DeviceCheckProps) {
   const {
@@ -73,12 +76,12 @@ export function DeviceCheck({
   // needs a gesture in Chrome, so the explicit button below covers that.
   useEffect(() => {
     void startCamera();
-    void startScreen();
-  }, [startCamera, startScreen]);
+    if (requireScreen) void startScreen();
+  }, [requireScreen, startCamera, startScreen]);
 
   const camState = stateOf(cameraStatus);
   const screenState = stateOf(screenStatus);
-  const allPassed = camState === "pass" && screenState === "pass";
+  const allPassed = camState === "pass" && (!requireScreen || screenState === "pass");
 
   return (
     <section
@@ -90,11 +93,12 @@ export function DeviceCheck({
     >
       <header className="border-b border-line px-6 py-5">
         <h2 className="text-lg font-bold tracking-tight text-ink">
-          Camera &amp; screen check
+          {requireScreen ? "Camera & screen check" : "Camera check"}
         </h2>
         <p className="mt-1 text-sm text-ink-2">
-          This is a proctored interview — your camera and screen must be
-          active before you begin. Everything below must show green.
+          This interview is proctored — your camera
+          {requireScreen ? " and screen" : ""} must be active before you begin.
+          Everything below must show green.
         </p>
       </header>
 
@@ -167,6 +171,7 @@ export function DeviceCheck({
         </div>
 
         {/* Screen-share check */}
+        {requireScreen ? (
         <div>
           <div className="flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-[13px] font-semibold text-ink">
@@ -221,6 +226,7 @@ export function DeviceCheck({
             </p>
           )}
         </div>
+        ) : null}
       </div>
 
       <div className="flex flex-col gap-3 border-t border-line px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
@@ -232,7 +238,9 @@ export function DeviceCheck({
         >
           {allPassed
             ? "All checks passed — you're ready to begin."
-            : "Both camera and screen share must be active to continue."}
+            : requireScreen
+              ? "Both camera and screen share must be active to continue."
+              : "Camera access must be active to continue."}
         </p>
         <Button
           variant="primary"

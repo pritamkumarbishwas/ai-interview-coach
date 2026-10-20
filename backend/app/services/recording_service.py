@@ -89,16 +89,37 @@ class RecordingService:
         interview = await self._interviews.find_owned(db, interview_id, user_id)
         if interview is None:
             raise NotFoundError("Interview not found")
+        status = interview.get("status")
+        if status not in ("in_progress", "completed"):
+            raise ConflictError("Recording is only available during the interview.")
 
         bucket = self._bucket(db)
         file_id = f"{interview_id}:{kind}"
+        stored_meta = (interview.get("recordings") or {}).get(kind) or {}
 
-        if seq == 0:
+        if status == "completed":
+            # Preserve evidence: a completed session may finish an in-flight
+            # recording, but may never restart or overwrite a sealed one.
+            if stored_meta.get("finalized"):
+                raise ConflictError("This recording has already been finalized.")
+            if seq == 0 and await self._read_grid_meta(bucket, file_id) is not None:
+                raise ConflictError(
+                    "A completed interview's recording cannot be restarted."
+                )
+        elif seq == 0:
+            # Fresh upload for an in-progress session: replace both chunks and
+            # any stale sealed metadata from a previous recording segment.
             await self._delete_existing(bucket, file_id)
+            await self._interviews.clear_recording_meta(db, interview_id, user_id, kind)
+
+        # A retried chunk may have landed before the response was lost. Replace
+        # it instead of storing duplicate bytes and inflating the size cap.
+        await self._delete_chunk(bucket, f"{file_id}#{seq}")
 
         existing_meta = await self._read_grid_meta(bucket, file_id)
-        prev_size = int(existing_meta.get("size_bytes", 0)) if existing_meta else 0
-        total = prev_size + len(chunk)
+        # Sum the surviving chunks instead of trusting the highest chunk's
+        # running total: retrying an older seq removes bytes that total counted.
+        total = await self._total_bytes(bucket, file_id) + len(chunk)
         if total > settings.max_recording_bytes:
             raise PayloadTooLargeError(
                 f"Recording exceeds the "
@@ -145,8 +166,12 @@ class RecordingService:
         interview_id: str,
         kind: RecordingKind,
         content_type: str,
-    ) -> RecordingMeta:
-        """Sum this kind's chunks, delete strays, and persist `RecordingMeta`."""
+    ) -> RecordingMeta | None:
+        """Sum this kind's chunks and persist `RecordingMeta`.
+
+        An empty final marker (no media data) removes the marker and any stale
+        metadata instead of advertising a zero-byte recording.
+        """
         bucket = self._bucket(db)
         prefix = f"{interview_id}:{kind}#"
         cursor = bucket.find({"filename": {"$regex": f"^{prefix}\\d+$"}})
@@ -155,6 +180,11 @@ class RecordingService:
         async for grid_out in cursor:
             total += int(grid_out.length)
             count += 1
+
+        if total == 0:
+            await self._delete_existing(bucket, f"{interview_id}:{kind}")
+            await self._interviews.clear_recording_meta(db, interview_id, user_id, kind)
+            return None
 
         chunk_meta = await self._read_grid_meta(bucket, f"{interview_id}:{kind}")
         now = datetime.now(UTC)
@@ -190,7 +220,7 @@ class RecordingService:
             raise NotFoundError("Interview not found")
         interview = Interview(**doc)
         meta = interview.recordings.get(kind)
-        if meta is None or not meta.finalized:
+        if meta is None or not meta.finalized or meta.size_bytes <= 0:
             raise NotFoundError("Recording not found")
 
         bucket = self._bucket(db)
@@ -205,7 +235,18 @@ class RecordingService:
             raise NotFoundError("Recording data missing")
 
         data = b"".join(chunks[seq] for seq in sorted(chunks))
+        if not data:
+            raise NotFoundError("Recording data missing")
         return data, meta.content_type
+
+    async def _delete_chunk(self, bucket: AsyncIOMotorGridFSBucket, filename: str) -> None:
+        """Delete one chunk filename if present (idempotent retry handling)."""
+        cursor = bucket.find({"filename": filename})
+        async for grid_out in cursor:
+            try:
+                await bucket.delete(grid_out._id)
+            except Exception as exc:
+                logger.warning("Failed to replace recording chunk %s: %s", filename, exc)
 
     async def _delete_existing(self, bucket: AsyncIOMotorGridFSBucket, file_id: str) -> None:
         """Delete all existing chunks for a logical recording (fresh upload)."""
@@ -217,6 +258,17 @@ class RecordingService:
                 await bucket.delete(grid_id)
             except Exception as exc:
                 logger.warning("Failed to delete old recording chunk: %s", exc)
+
+    async def _total_bytes(
+        self, bucket: AsyncIOMotorGridFSBucket, file_id: str
+    ) -> int:
+        """Sum the byte length of every surviving chunk for a recording."""
+        prefix = f"{file_id}#"
+        cursor = bucket.find({"filename": {"$regex": f"^{prefix}\\d+$"}})
+        total = 0
+        async for grid_out in cursor:
+            total += int(grid_out.length)
+        return total
 
     async def _read_grid_meta(
         self, bucket: AsyncIOMotorGridFSBucket, file_id: str
