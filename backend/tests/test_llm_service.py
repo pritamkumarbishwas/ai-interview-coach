@@ -15,8 +15,11 @@ class MockResponseSchema(BaseModel):
 class MockAsyncOpenAI:
     """Mimics the `client.chat.completions.create(...)` surface."""
 
-    def __init__(self, responses: list[str]) -> None:
+    def __init__(
+        self, responses: list[str], finish_reasons: list[str | None] | None = None
+    ) -> None:
         self.responses = responses
+        self.finish_reasons = finish_reasons or [None] * len(responses)
         self.call_count = 0
         self.last_kwargs: dict = {}
         self.chat = SimpleNamespace(
@@ -27,9 +30,14 @@ class MockAsyncOpenAI:
         self.last_kwargs = kwargs
         index = min(self.call_count, len(self.responses) - 1)
         content = self.responses[index]
+        finish_reason = self.finish_reasons[min(index, len(self.finish_reasons) - 1)]
         self.call_count += 1
         message = SimpleNamespace(content=content)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=message, finish_reason=finish_reason)
+            ]
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +77,40 @@ async def test_generate_structured_supports_compact_system_prompt() -> None:
         "role": "system",
         "content": "Return only the requested JSON object.",
     }
+
+
+@pytest.mark.asyncio
+async def test_generate_structured_passes_output_budget_and_reasoning_effort() -> None:
+    service = LLMService()
+    mock_client = MockAsyncOpenAI(['{"score": 8, "feedback": "Good job!"}'])
+    service.client = mock_client
+
+    await service.generate_structured(
+        "Extract this",
+        MockResponseSchema,
+        max_completion_tokens=4096,
+        reasoning_effort="low",
+    )
+
+    assert mock_client.last_kwargs["max_completion_tokens"] == 4096
+    assert mock_client.last_kwargs["reasoning_effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_generate_structured_fails_fast_on_length_truncation() -> None:
+    from app.services.llm_service import IncompleteCompletionError
+
+    service = LLMService()
+    mock_client = MockAsyncOpenAI(
+        ['{"score": 8, "feedback": "cut off'],
+        finish_reasons=["length"],
+    )
+    service.client = mock_client
+
+    with pytest.raises(IncompleteCompletionError):
+        await service.generate_structured("Extract this", MockResponseSchema)
+
+    assert mock_client.call_count == 1
 
 
 @pytest.mark.asyncio

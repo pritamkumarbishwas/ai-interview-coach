@@ -26,6 +26,7 @@ from app.schemas.resume import (
 )
 from app.services.parsers import parse_docx, parse_pdf
 from app.services.resume_processing import (
+    ANALYSIS_VERSION,
     RESUME_PROCESS_JOB,
     ResumeProcessingError,
     resume_processing_service,
@@ -194,12 +195,14 @@ class ResumeService:
     ) -> ResumeUploadResponse:
         status = _analysis_status(doc)
         resume_id = str(doc["_id"])
-        if status in {"pending", "partial", "failed"}:
+        stored_version = str((doc.get("analysis") or {}).get("version") or "")
+        outdated = status == "ready" and stored_version != ANALYSIS_VERSION
+        if status in {"pending", "partial", "failed"} or outdated:
             if status == "pending":
                 await self._process_or_enqueue(db, resume_id, user_id)
             else:
                 # Re-uploading is the user's natural way to retry; never hand
-                # back a stale partial/failed analysis for the same file.
+                # back stale or outdated analysis for the same file.
                 await self.retry_analysis(db, user_id, resume_id)
             refreshed = await self._resumes.find_owned(db, resume_id, user_id)
             if refreshed is not None:

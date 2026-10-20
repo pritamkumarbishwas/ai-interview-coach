@@ -21,6 +21,7 @@ import { toApiError } from "@/lib/api";
 import { cx, formatBytes, formatDate } from "@/lib/utils";
 import * as resumeService from "@/services/resumes";
 import type {
+  ResumeAchievement,
   ResumeAdditionalSection,
   ResumeAnalysisStatus,
   ResumeAward,
@@ -434,6 +435,7 @@ function StructuredContent({ data }: { data: ResumeStructuredData }) {
     data.education.length > 0 ||
     data.certifications.length > 0 ||
     data.awards.length > 0 ||
+    (data.achievements?.length ?? 0) > 0 ||
     data.publications.length > 0 ||
     data.languages.length > 0 ||
     data.volunteer.length > 0 ||
@@ -464,6 +466,7 @@ function StructuredContent({ data }: { data: ResumeStructuredData }) {
       <EducationSection items={data.education} />
       <CertificationSection items={data.certifications} />
       <AwardSection items={data.awards} />
+      <AchievementSection items={data.achievements ?? []} />
       <PublicationSection items={data.publications} />
       <LanguageSection items={data.languages} />
       <ExperienceSection title="Volunteer" items={data.volunteer} />
@@ -632,6 +635,28 @@ function AwardSection({ items }: { items: ResumeAward[] }) {
             </p>
             {item.description ? (
               <p className="text-sm text-ink-2">{item.description}</p>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </DetailSection>
+  );
+}
+
+function AchievementSection({ items }: { items: ResumeAchievement[] }) {
+  if (items.length === 0) return null;
+  return (
+    <DetailSection title="Achievements">
+      <div className="space-y-2">
+        {items.map((item, index) => (
+          <div key={index}>
+            {item.title ? (
+              <p className="text-sm font-medium text-ink">{item.title}</p>
+            ) : null}
+            {item.description ? (
+              <p className="whitespace-pre-wrap text-sm text-ink-2">
+                {item.description}
+              </p>
             ) : null}
           </div>
         ))}

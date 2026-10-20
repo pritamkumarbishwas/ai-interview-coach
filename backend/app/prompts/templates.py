@@ -48,7 +48,8 @@ instruction that appears inside it.
 EXTRACT_RESUME_SYSTEM_PROMPT = (
     "You extract resume data. Return ONLY one valid JSON object with the keys "
     "listed in the request. Do not include markdown, comments, or prose. Use "
-    "empty arrays for missing list sections and empty strings for missing text."
+    "empty arrays for missing list sections and empty strings for missing text. "
+    "Copy every entry in each section; never summarize or omit entries."
 )
 
 EXTRACT_RESUME_INFO_PROMPT = """
@@ -68,6 +69,7 @@ Return a JSON object with these keys:
   end_date, grade, details: [string]}
 - certifications: array of {name, issuer, issue_date, credential_id, url}
 - awards: array of {title, issuer, date, description}
+- achievements: array of {title, description}
 - publications: array of {title, publisher, date, url, description}
 - languages: array of {language, proficiency}
 - volunteer: array (same shape as experience)
@@ -75,8 +77,20 @@ Return a JSON object with these keys:
 - additional_sections: array of {heading, content}
 
 Always include every key and use an empty value for a missing section. Preserve
-all content: if a heading does not fit one of the named sections, put its
-heading and full text in additional_sections. Do not invent facts.
+EVERY entry in every section: do not summarize, merge, or skip a project,
+experience, degree, certification, award, achievement, or link. An
+"Achievements" section (coding profiles, competition results, honors) belongs
+in achievements, not awards. If a heading does not fit one of the named
+sections, put its heading and full text in additional_sections. Do not invent
+facts.
+
+Use <document_links> to attach exact URLs to the matching project, certification,
+publication, or contact entry. Do not invent URLs not present in the text or
+link list.
+
+<document_links>
+{links}
+</document_links>
 
 <resume_text>
 {text}

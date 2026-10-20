@@ -10,6 +10,38 @@ def validate_docx(file_bytes: bytes) -> None:
     Document(io.BytesIO(file_bytes))
 
 
+def parse_docx_links(file_bytes: bytes) -> list[dict[str, str]]:
+    """Extract hyperlink targets that are not always present in paragraph text."""
+    doc = Document(io.BytesIO(file_bytes))
+    links: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def add_links(paragraphs) -> None:
+        for paragraph in paragraphs:
+            for hyperlink in paragraph.hyperlinks:
+                url = str(hyperlink.address or "").strip()
+                key = url.rstrip("/").casefold()
+                if not url or key in seen:
+                    continue
+                seen.add(key)
+                links.append(
+                    {
+                        "label": clean_text(hyperlink.text),
+                        "url": url,
+                    }
+                )
+
+    add_links(doc.paragraphs)
+    for table in doc.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                add_links(cell.paragraphs)
+    for section in doc.sections:
+        add_links(section.header.paragraphs)
+        add_links(section.footer.paragraphs)
+    return links
+
+
 def parse_docx_blocks(file_bytes: bytes) -> list[dict]:
     """Extract paragraphs, tables, headers and footers as ordered text blocks."""
     doc = Document(io.BytesIO(file_bytes))

@@ -18,7 +18,7 @@ class ResumeAnalysis(BaseModel):
     """
 
     status: ResumeAnalysisStatus = "pending"
-    version: str = "resume-v2"
+    version: str = "resume-v3"
     model: str = ""
     started_at: ISTDateTime | None = None
     completed_at: ISTDateTime | None = None

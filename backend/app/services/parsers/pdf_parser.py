@@ -1,6 +1,42 @@
+from urllib.parse import urlsplit
+
 import fitz  # PyMuPDF
 
 from app.services.parsers.text_cleaner import clean_text
+
+_SAFE_LINK_SCHEMES = {"http", "https", "mailto"}
+
+
+def _extract_page_links(page, number: int) -> list[dict[str, object]]:
+    """Read hyperlink annotations, which are not part of the page text."""
+    links: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for link in page.get_links():
+        url = str(link.get("uri") or "").strip()
+        if not url or urlsplit(url).scheme.lower() not in _SAFE_LINK_SCHEMES:
+            continue
+        key = url.rstrip("/").casefold()
+        if key in seen:
+            continue
+        label = ""
+        top = 0.0
+        rect = link.get("from")
+        if rect is not None:
+            top = float(rect.y0)
+            try:
+                label = clean_text(page.get_textbox(rect))
+            except Exception:
+                label = ""
+        seen.add(key)
+        links.append(
+            {
+                "label": label,
+                "url": url,
+                "page": number,
+                "top": round(top, 2),
+            }
+        )
+    return links
 
 
 def validate_pdf(file_bytes: bytes) -> None:
@@ -31,6 +67,7 @@ def parse_pdf_pages(file_bytes: bytes) -> list[dict]:
                     "number": number,
                     "text": text,
                     "blocks": blocks,
+                    "links": _extract_page_links(page, number),
                     "width": round(float(page.rect.width), 2),
                     "height": round(float(page.rect.height), 2),
                     "method": "text_layer" if text else "none",

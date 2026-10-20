@@ -29,10 +29,11 @@ from app.prompts.templates import (
 )
 from app.repositories.resume_repository import ResumeRepository, resume_repository
 from app.schemas.resume import ContactInfo, ContactLink, ResumeStructuredData
-from app.services.llm_service import llm_service
+from app.services.llm_service import is_incomplete_output, llm_service
 from app.services.parsers import (
     clean_text,
     parse_docx_blocks,
+    parse_docx_links,
     parse_pdf_pages,
     validate_docx,
     validate_pdf,
@@ -41,11 +42,15 @@ from app.services.resume_storage import ResumeStorage, resume_storage
 
 logger = logging.getLogger(__name__)
 
-ANALYSIS_VERSION = "resume-v2"
+ANALYSIS_VERSION = "resume-v3"
 RESUME_PROCESS_JOB = "resume.process"
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 PHONE_RE = re.compile(r"(?<![\w])\+?\(?\d(?:[ \t().-]*\d){7,14}(?![\w])")
 URL_RE = re.compile(r"https?://[^\s<>()]+", re.IGNORECASE)
+CHUNK_OVERLAP_CHARS = 400
+MIN_SPLIT_RETRY_CHARS = 1_600
+MAX_COMPLETION_TOKENS = 4_096
+EXTRACTION_REASONING_EFFORT = "low"
 
 
 class ResumeProcessingError(Exception):
@@ -208,7 +213,9 @@ def _valid_phone(value: str) -> bool:
     return 10 <= len(digits) <= 15
 
 
-def _extract_contact(text: str) -> ContactInfo:
+def _extract_contact(
+    text: str, document_links: list[dict[str, Any]] | None = None
+) -> ContactInfo:
     emails = [match.group(0) for match in EMAIL_RE.finditer(text)]
     phones = [
         match.group(0).strip(" .-")
@@ -217,16 +224,84 @@ def _extract_contact(text: str) -> ContactInfo:
     ]
     links: list[ContactLink] = []
     seen: set[str] = set()
-    for match in URL_RE.finditer(text):
-        url = match.group(0).rstrip(".,;:)]}")
-        if url not in seen:
-            seen.add(url)
-            links.append(ContactLink(url=url))
+
+    def add_link(label: object, url: object) -> None:
+        link = ContactLink(label=str(label or ""), url=str(url or ""))
+        key = link.url.rstrip("/").casefold()
+        if link.url and key not in seen:
+            seen.add(key)
+            links.append(link)
+
+    # Contact links usually sit in the first page header. Project links are
+    # preserved separately for the extraction prompt instead of polluting the
+    # candidate's contact block.
+    for item in document_links or []:
+        if item.get("page") == 1 and float(item.get("top") or 0) <= 260:
+            add_link(item.get("label"), item.get("url"))
+    for match in URL_RE.finditer(text[:2_000]):
+        add_link("", match.group(0).rstrip(".,;:)]}"))
     return ContactInfo(
         email=emails[0] if emails else "",
         phone=phones[0] if phones else "",
         links=links[:12],
     )
+
+
+def _document_links(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    links: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for page in pages:
+        for item in page.get("links", []):
+            link = ContactLink(
+                label=str(item.get("label") or ""), url=str(item.get("url") or "")
+            )
+            key = link.url.rstrip("/").casefold()
+            if not link.url or key in seen:
+                continue
+            seen.add(key)
+            links.append(
+                {
+                    "label": link.label,
+                    "url": link.url,
+                    "page": item.get("page"),
+                    "top": item.get("top"),
+                }
+            )
+    return links
+
+
+def _attach_native_links(
+    pages: list[dict[str, Any]], links: list[dict[str, str]]
+) -> None:
+    """Attach DOCX hyperlinks to the first page for prompt/LLM mapping."""
+    if not pages or not links:
+        return
+    existing = {
+        str(item.get("url") or "").rstrip("/").casefold()
+        for item in pages[0].get("links", [])
+    }
+    page_links = pages[0].setdefault("links", [])
+    for item in links:
+        link = ContactLink(
+            label=str(item.get("label") or ""), url=str(item.get("url") or "")
+        )
+        key = link.url.rstrip("/").casefold()
+        if not link.url or key in existing:
+            continue
+        existing.add(key)
+        page_links.append(
+            {"label": link.label, "url": link.url, "page": 1, "top": 999}
+        )
+
+
+def _link_context(links: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for item in links[:40]:
+        label = str(item.get("label") or "link").replace("\n", " ")[:120]
+        page = item.get("page")
+        suffix = f" (page {page})" if page else ""
+        lines.append(f"- {label}: {item.get('url')}{suffix}")
+    return "\n".join(lines) or "(no embedded document links)"
 
 
 def _redact_contact_pii(text: str) -> str:
@@ -240,6 +315,18 @@ def _redact_contact_pii(text: str) -> str:
     return text
 
 
+def _find_split(text: str, start: int, end: int) -> int:
+    """Find a natural boundary near the end of a chunk."""
+    # Prefer a boundary close to the limit; taking the first paragraph break
+    # after the midpoint can produce tiny chunks and orphaned entry bodies.
+    minimum = start + int((end - start) * 0.7)
+    for separator in ("\n\n", "\n", ". ", " "):
+        index = text.rfind(separator, minimum, end)
+        if index > start:
+            return index + len(separator)
+    return end
+
+
 def _chunk_text(text: str) -> list[str]:
     if len(text) <= settings.resume_extraction_chunk_chars:
         return [text] if text.strip() else []
@@ -249,12 +336,29 @@ def _chunk_text(text: str) -> list[str]:
     while start < len(text) and len(chunks) < settings.resume_max_extraction_chunks:
         end = min(len(text), start + limit)
         if end < len(text):
-            newline = text.rfind("\n", start + limit // 2, end)
-            if newline > start:
-                end = newline
+            end = _find_split(text, start, end)
         chunks.append(text[start:end])
-        start = end
+        if end >= len(text):
+            break
+        # Overlap keeps a heading and its body in the same later chunk when a
+        # natural paragraph boundary still falls inside an entry.
+        start = max(end - CHUNK_OVERLAP_CHARS, start + 1)
     return chunks
+
+
+def _split_chunk_for_retry(text: str) -> tuple[str, str] | None:
+    """Split an oversized chunk after the provider truncates its JSON."""
+    if len(text) < MIN_SPLIT_RETRY_CHARS:
+        return None
+    split = _find_split(text, int(len(text) * 0.3), int(len(text) * 0.7))
+    if split <= 0 or split >= len(text):
+        split = len(text) // 2
+    left = text[:split].strip()
+    # A little overlap keeps a project/experience heading with its bullets.
+    right = text[max(0, split - CHUNK_OVERLAP_CHARS) :].strip()
+    if not left or not right:
+        return None
+    return left, right
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:
@@ -320,7 +424,7 @@ def _merge_structured(
     results: list[ResumeStructuredData], contact: ContactInfo
 ) -> ResumeStructuredData:
     merged: dict[str, Any] = {
-        "version": 2,
+        "version": 3,
         "contact": {"name": "", "email": "", "phone": "", "location": "", "links": []},
         "summary": "",
         "skills": [],
@@ -329,6 +433,7 @@ def _merge_structured(
         "education": [],
         "certifications": [],
         "awards": [],
+        "achievements": [],
         "publications": [],
         "languages": [],
         "volunteer": [],
@@ -353,6 +458,7 @@ def _merge_structured(
             "education",
             "certifications",
             "awards",
+            "achievements",
             "publications",
             "languages",
             "volunteer",
@@ -368,6 +474,7 @@ def _merge_structured(
         ("education", ("institution", "degree")),
         ("certifications", ("name", "issuer")),
         ("awards", ("title", "issuer")),
+        ("achievements", ("title",)),
         ("publications", ("title",)),
         ("languages", ("language",)),
         ("volunteer", ("company", "role", "duration")),
@@ -388,12 +495,14 @@ def _merge_structured(
     seen_links: set[str] = set()
     links: list[dict[str, str]] = []
     for link in [*merged["contact"].get("links", []), *deterministic_links]:
-        url = str(link.get("url") or "").strip()
-        key = url.rstrip("/").lower()
+        normalized = ContactLink(
+            label=str(link.get("label") or ""), url=str(link.get("url") or "")
+        )
+        key = normalized.url.rstrip("/").lower()
         if not key or key in seen_links:
             continue
         seen_links.add(key)
-        links.append({"label": str(link.get("label") or ""), "url": url})
+        links.append(normalized.model_dump())
     merged["contact"]["links"] = links[:20]
     return ResumeStructuredData.model_validate(merged)
 
@@ -475,7 +584,10 @@ class ResumeProcessingService:
                 has_text_layer=has_text_layer,
                 warnings=warnings,
             )
-            structured, failed_chunks = await self._extract_structured(raw_text)
+            document_links = _document_links(pages)
+            structured, failed_chunks = await self._extract_structured(
+                raw_text, document_links
+            )
             status = "partial" if failed_chunks else "ready"
             chunk_budget = (
                 settings.resume_extraction_chunk_chars
@@ -620,6 +732,7 @@ class ResumeProcessingService:
     ) -> tuple[list[dict[str, Any]], str, list[int], bool]:
         blocks = await run_in_threadpool(parse_docx_blocks, original)
         native_text = clean_text("\n".join(block["text"] for block in blocks))
+        native_links = await run_in_threadpool(parse_docx_links, original)
         pdf_bytes = await run_in_threadpool(_convert_docx_to_pdf, original)
         if pdf_bytes is None:
             warnings.append(
@@ -633,6 +746,7 @@ class ResumeProcessingService:
                     "method": "docx" if native_text else "none",
                 }
             ]
+            _attach_native_links(pages, native_links)
             full_text = native_text
             return pages, full_text, [], bool(native_text)
 
@@ -642,6 +756,7 @@ class ResumeProcessingService:
             warnings.append(
                 f"Content extraction is limited to {settings.resume_max_pages} pages."
             )
+        _attach_native_links(pages, native_links)
         ocr_numbers = {
             page["number"]
             for page in pages
@@ -768,38 +883,79 @@ class ResumeProcessingService:
             await self._storage.delete_original(db, old_content_id)
 
     async def _extract_structured(
-        self, raw_text: str
+        self,
+        raw_text: str,
+        document_links: list[dict[str, Any]] | None = None,
     ) -> tuple[ResumeStructuredData, int]:
-        contact = _extract_contact(raw_text)
+        contact = _extract_contact(raw_text, document_links)
         chunks = _chunk_text(_redact_contact_pii(raw_text))
         if not chunks:
             return ResumeStructuredData(contact=contact), 0
+        links_context = _link_context(document_links or [])
         results: list[ResumeStructuredData] = []
         failed = 0
         for chunk in chunks:
-            prompt = EXTRACT_RESUME_INFO_PROMPT.replace("{text}", chunk)
-            try:
-                results.append(
-                    await llm_service.generate_structured(
-                        prompt,
-                        ResumeStructuredData,
-                        max_retries=3,
-                        system_prompt=EXTRACT_RESUME_SYSTEM_PROMPT,
-                    )
-                )
-            except Exception as exc:
-                failed += 1
-                logger.warning(
-                    "Resume extraction chunk failed (%s: %s)",
-                    type(exc).__name__,
-                    str(exc)[:200],
-                )
+            chunk_results, chunk_failed = await self._extract_chunk(
+                chunk, links_context
+            )
+            results.extend(chunk_results)
+            failed += chunk_failed
         if not results:
             raise ResumeProcessingError(
                 "llm_failed",
                 "AI analysis is unavailable right now. You can retry it later.",
             )
         return _merge_structured(results, contact), failed
+
+    async def _extract_chunk(
+        self,
+        chunk: str,
+        links_context: str,
+        depth: int = 0,
+    ) -> tuple[list[ResumeStructuredData], int]:
+        prompt = EXTRACT_RESUME_INFO_PROMPT.replace("{links}", links_context).replace(
+            "{text}", chunk
+        )
+        try:
+            request: dict[str, Any] = {
+                "max_retries": 3,
+                "system_prompt": EXTRACT_RESUME_SYSTEM_PROMPT,
+                "max_completion_tokens": MAX_COMPLETION_TOKENS,
+            }
+            if llm_service.supports_reasoning_effort:
+                request["reasoning_effort"] = EXTRACTION_REASONING_EFFORT
+            result = await llm_service.generate_structured(
+                prompt,
+                ResumeStructuredData,
+                **request,
+            )
+            return [result], 0
+        except Exception as exc:
+            split = (
+                _split_chunk_for_retry(chunk)
+                if depth < 2 and is_incomplete_output(exc)
+                else None
+            )
+            if split is not None:
+                logger.warning(
+                    "Resume extraction output was truncated; retrying as %d smaller chunks",
+                    2,
+                )
+                results: list[ResumeStructuredData] = []
+                failed = 0
+                for part in split:
+                    part_results, part_failed = await self._extract_chunk(
+                        part, links_context, depth + 1
+                    )
+                    results.extend(part_results)
+                    failed += part_failed
+                return results, failed
+            logger.warning(
+                "Resume extraction chunk failed (%s: %s)",
+                type(exc).__name__,
+                str(exc)[:200],
+            )
+            return [], 1
 
     async def load_full_text(
         self, db: AsyncIOMotorDatabase, doc: dict

@@ -1,11 +1,44 @@
-from pydantic import BaseModel, Field
+import re
+from urllib.parse import urlsplit
+
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.timeutil import ISTDateTime
+
+_SAFE_SCHEMES = {"http", "https", "mailto"}
+_BARE_DOMAIN_RE = re.compile(r"^[a-z0-9.-]+\.[a-z]{2,}(?:[/:?#].*)?$", re.IGNORECASE)
+
+
+def normalize_link_url(value: object) -> str:
+    """Normalize user/LLM supplied URLs and drop unsafe schemes."""
+    url = str(value or "").strip()
+    if not url:
+        return ""
+    if url.startswith("//"):
+        url = f"https:{url}"
+    scheme = url.split(":", 1)[0].lower() if ":" in url else ""
+    if scheme in _SAFE_SCHEMES:
+        parsed = urlsplit(url)
+        if scheme == "mailto":
+            return url if parsed.path else ""
+        if not parsed.netloc:
+            return ""
+        return url
+    if scheme or url.startswith("/"):
+        return ""
+    if not _BARE_DOMAIN_RE.match(url):
+        return ""
+    return f"https://{url}"
 
 
 class ContactLink(BaseModel):
     label: str = ""
     url: str = ""
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def _normalize_url(cls, value: object) -> str:
+        return normalize_link_url(value)
 
 
 class ContactInfo(BaseModel):
@@ -53,11 +86,21 @@ class Certification(BaseModel):
     credential_id: str = ""
     url: str = ""
 
+    @field_validator("url", mode="before")
+    @classmethod
+    def _normalize_url(cls, value: object) -> str:
+        return normalize_link_url(value)
+
 
 class Award(BaseModel):
     title: str = ""
     issuer: str = ""
     date: str = ""
+    description: str = ""
+
+
+class Achievement(BaseModel):
+    title: str = ""
     description: str = ""
 
 
@@ -67,6 +110,11 @@ class Publication(BaseModel):
     date: str = ""
     url: str = ""
     description: str = ""
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def _normalize_url(cls, value: object) -> str:
+        return normalize_link_url(value)
 
 
 class Language(BaseModel):
@@ -90,7 +138,7 @@ class ResumeStructuredData(BaseModel):
     ``additional_sections`` instead of being silently discarded.
     """
 
-    version: int = 2
+    version: int = 3
     contact: ContactInfo = Field(default_factory=ContactInfo)
     summary: str = ""
     skills: list[str] = Field(
@@ -107,6 +155,7 @@ class ResumeStructuredData(BaseModel):
     )
     certifications: list[Certification] = Field(default_factory=list)
     awards: list[Award] = Field(default_factory=list)
+    achievements: list[Achievement] = Field(default_factory=list)
     publications: list[Publication] = Field(default_factory=list)
     languages: list[Language] = Field(default_factory=list)
     volunteer: list[Experience] = Field(default_factory=list)

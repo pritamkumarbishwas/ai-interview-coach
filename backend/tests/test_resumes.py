@@ -578,6 +578,149 @@ def test_chunk_merge_keeps_llm_contact_name_and_local_contact_details() -> None:
     ]
 
 
+def test_duplicate_upload_reprocesses_an_outdated_ready_analysis(
+    client: TestClient, auth_headers: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+
+    async def counting_extraction(prompt: str, schema, **kwargs):
+        nonlocal calls
+        calls += 1
+        return schema(skills=["Python"], experience=[], projects=[], education=[])
+
+    monkeypatch.setattr(RESUME_SERVICE_LLM, counting_extraction)
+    payload = make_pdf("Jane Doe - outdated analysis check.")
+    created = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={"file": ("resume.pdf", payload, "application/pdf")},
+    )
+    assert created.status_code == 201, created.text
+    resume_id = created.json()["id"]
+    assert calls == 1
+
+    async def mark_outdated(db) -> None:
+        await db.resumes.update_one(
+            {"_id": ObjectId(resume_id)},
+            {
+                "$set": {
+                    "analysis.status": "ready",
+                    "analysis.version": "resume-v2",
+                    "structured_data.skills": ["stale"],
+                }
+            },
+        )
+
+    _with_mongo(mark_outdated)
+
+    retried = client.post(
+        "/api/resumes/upload",
+        headers=auth_headers,
+        files={"file": ("resume.pdf", payload, "application/pdf")},
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["deduplicated"] is True
+    assert retried.json()["structured_data"]["skills"] == ["Python"]
+    assert calls == 2
+
+
+def test_chunks_overlap_and_keep_a_project_heading_with_its_body() -> None:
+    from app.services.resume_processing import _chunk_text
+
+    text = f"{'A' * 4800}\n\nMomentify\n{'B' * 2000}"
+    chunks = _chunk_text(text)
+    assert len(chunks) >= 2
+    assert "Momentify" not in chunks[0]
+    assert "Momentify" in chunks[1]
+    assert chunks[0][-300:] in chunks[1]
+
+
+@pytest.mark.asyncio
+async def test_truncated_chunk_is_split_and_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.llm_service import IncompleteCompletionError
+    from app.services.resume_processing import resume_processing_service
+
+    calls = 0
+
+    async def truncated_then_ok(prompt: str, schema, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise IncompleteCompletionError("length")
+        return schema(skills=["Python"])
+
+    monkeypatch.setattr(
+        "app.services.resume_processing.llm_service.generate_structured",
+        truncated_then_ok,
+    )
+    text = "Python " * 600
+    structured, failed = await resume_processing_service._extract_structured(text)
+    assert calls == 3
+    assert failed == 0
+    assert structured.skills == ["Python"]
+
+
+def test_pdf_annotations_are_extracted_as_links() -> None:
+    import fitz
+
+    from app.services.parsers import parse_pdf_pages
+
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "LinkedIn")
+    page.insert_link(
+        {
+            "kind": fitz.LINK_URI,
+            "from": fitz.Rect(70, 58, 140, 78),
+            "uri": "https://linkedin.com/in/jane",
+        }
+    )
+    payload = doc.tobytes()
+    doc.close()
+
+    pages = parse_pdf_pages(payload)
+    assert pages[0]["links"][0]["label"] == "LinkedIn"
+    assert pages[0]["links"][0]["url"] == "https://linkedin.com/in/jane"
+
+
+def test_links_are_normalized_and_unsafe_schemes_are_dropped() -> None:
+    from app.schemas.resume import ContactLink, Project
+
+    assert ContactLink(url="javascript:alert(1)").url == ""
+    assert ContactLink(url="algostra.definedgesecurities.com").url == (
+        "https://algostra.definedgesecurities.com"
+    )
+    assert ContactLink(url="mailto:jane@example.com").url == "mailto:jane@example.com"
+
+    project = Project(
+        name="Demo",
+        links=[ContactLink(label="Live", url="example.com/demo")],
+    )
+    assert project.links[0].url == "https://example.com/demo"
+
+
+def test_achievements_are_first_class_and_deduplicated() -> None:
+    from app.schemas.resume import Achievement, ContactInfo, ResumeStructuredData
+    from app.services.resume_processing import _merge_structured
+
+    merged = _merge_structured(
+        [
+            ResumeStructuredData(
+                achievements=[Achievement(title="Coding profiles", description="300+ problems")]
+            ),
+            ResumeStructuredData(
+                achievements=[Achievement(title="Coding profiles", description="300+ problems")]
+            ),
+        ],
+        ContactInfo(),
+    )
+    assert merged.version == 3
+    assert len(merged.achievements) == 1
+    assert merged.achievements[0].title == "Coding profiles"
+
+
 def test_missing_resume_sections_default_to_empty_lists() -> None:
     """A section the model omits must not fail extraction (e.g. no education)."""
     from app.schemas.resume import ResumeStructuredData

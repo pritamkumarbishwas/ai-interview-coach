@@ -126,6 +126,11 @@ export interface ResumeAward {
   description: string;
 }
 
+export interface ResumeAchievement {
+  title: string;
+  description: string;
+}
+
 export interface ResumePublication {
   title: string;
   publisher: string;
@@ -154,6 +159,7 @@ export interface ResumeStructuredData {
   education: ResumeEducation[];
   certifications: ResumeCertification[];
   awards: ResumeAward[];
+  achievements: ResumeAchievement[];
   publications: ResumePublication[];
   languages: ResumeLanguage[];
   volunteer: ResumeExperience[];

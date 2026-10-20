@@ -42,6 +42,10 @@ class EmptyCompletionError(RuntimeError):
     """Raised when the model returns no content at all (e.g. reasoning only)."""
 
 
+class IncompleteCompletionError(RuntimeError):
+    """Raised when the provider stopped because the output token cap was hit."""
+
+
 async def _record_usage(provider: str, model: str, response: object) -> None:
     """Extract token counts from a completion and record them (best-effort)."""
     usage = getattr(response, "usage", None)
@@ -103,6 +107,11 @@ def _provider_rejected_json(error: Exception) -> bool:
     if isinstance(body, dict):
         text = f"{text} {body}"
     return any(marker in text for marker in PROVIDER_JSON_ERROR_MARKERS)
+
+
+def is_incomplete_output(error: Exception) -> bool:
+    """Whether a smaller prompt/chunk may allow the same extraction to succeed."""
+    return isinstance(error, IncompleteCompletionError) or _provider_rejected_json(error)
 
 
 def _is_retryable(error: Exception) -> bool:
@@ -204,6 +213,10 @@ class LLMService:
         self._client: AsyncOpenAI | None = None
 
     @property
+    def supports_reasoning_effort(self) -> bool:
+        return self.provider == "groq" and "gpt-oss" in self.model.lower()
+
+    @property
     def client(self) -> AsyncOpenAI:
         if self._client is None:
             self._client = self._build_client()
@@ -245,6 +258,8 @@ class LLMService:
         max_retries: int = 3,
         *,
         system_prompt: str | None = None,
+        max_completion_tokens: int | None = None,
+        reasoning_effort: str | None = None,
     ) -> T:
         """Ask the model for JSON and validate it against `schema`.
 
@@ -255,6 +270,10 @@ class LLMService:
         `system_prompt` can replace the full JSON-schema system message for
         prompts that already describe their keys. The schema is still enforced
         locally by Pydantic; this mainly saves prompt tokens on low-TPM tiers.
+
+        `max_completion_tokens` should be set explicitly for large extraction
+        tasks: provider defaults can silently truncate JSON. Completion-length
+        stops raise `IncompleteCompletionError` without burning retries.
         """
         # Refuse to spend past the configured monthly ceiling (Phase 9).
         await _enforce_budget()
@@ -285,17 +304,30 @@ class LLMService:
                     {"role": "user", "content": _correction_hint(last_error)}
                 )
             try:
-                response = await self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    response_format={"type": "json_object"},
-                    temperature=0,
-                )
-                raw_json = response.choices[0].message.content or ""
+                request: dict[str, object] = {
+                    "model": self.model,
+                    "messages": messages,
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0,
+                }
+                if max_completion_tokens is not None:
+                    request["max_completion_tokens"] = max_completion_tokens
+                if reasoning_effort is not None:
+                    request["reasoning_effort"] = reasoning_effort
 
-                # Tokens are spent whether or not the JSON validates, so record
-                # usage as soon as the response arrives (best-effort).
+                response = await self.client.chat.completions.create(**request)
+                choice = response.choices[0]
+                raw_json = choice.message.content or ""
+
+                # Tokens are spent whether or not the output is usable, so
+                # record usage as soon as the response arrives (best-effort).
                 await _record_usage(self.provider, self.model, response)
+
+                finish_reason = getattr(choice, "finish_reason", None)
+                if finish_reason == "length":
+                    raise IncompleteCompletionError(
+                        "model stopped because max_completion_tokens was reached"
+                    )
 
                 # Strip markdown code blocks if the LLM includes them
                 raw_json = raw_json.strip()
@@ -315,6 +347,8 @@ class LLMService:
                 return schema.model_validate_json(raw_json)
             except LLMConfigurationError:
                 raise  # no API key configured: retrying cannot help
+            except IncompleteCompletionError:
+                raise  # retrying the same oversized request would just truncate
             except Exception as exc:
                 last_error = exc
                 logger.warning(
