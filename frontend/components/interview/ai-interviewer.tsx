@@ -60,8 +60,8 @@ export function AIInterviewer({
   }, [status, question, speak, stop]);
 
   useEffect(() => {
-    if (muted) stop();
-  }, [muted, stop]);
+    if (muted) stop(status === "speaking");
+  }, [muted, status, stop]);
 
   // Use the actual speaking status from the TTS engine for the waveform animation
   const isSpeaking = status === "speaking" && speaking;

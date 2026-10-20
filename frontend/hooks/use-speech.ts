@@ -8,44 +8,80 @@ const SpeechRecognition = typeof window !== "undefined" ? (window.SpeechRecognit
 export function useTTS(muted = false) {
   const [speaking, setSpeaking] = useState(false);
   const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const utteranceSeqRef = useRef(0);
+  const onEndRef = useRef<(() => void) | null>(null);
 
   const speak = useCallback((text: string, onEnd?: () => void) => {
-    if (!synth || muted) {
+    const seq = ++utteranceSeqRef.current;
+    activeUtteranceRef.current = null;
+    onEndRef.current = null;
+
+    if (synth) synth.cancel();
+    setSpeaking(false);
+
+    if (!synth || muted || !text) {
       if (onEnd) onEnd();
       return;
     }
-    
-    synth.cancel(); // clear previous
-    
-    if (!text) return;
-    
+
     const utterance = new SpeechSynthesisUtterance(text);
     // Optionally set voice/pitch/rate here
     utterance.rate = 1.0;
-    
-    utterance.onstart = () => setSpeaking(true);
-    utterance.onend = () => {
+
+    let settled = false;
+    const isCurrent = () =>
+      utteranceSeqRef.current === seq &&
+      activeUtteranceRef.current === utterance;
+
+    const finish = (notify: boolean) => {
+      if (settled || !isCurrent()) return;
+      settled = true;
+      activeUtteranceRef.current = null;
+      onEndRef.current = null;
       setSpeaking(false);
-      if (onEnd) onEnd();
+      if (notify) onEnd?.();
     };
-    utterance.onerror = (e) => {
-      console.warn("TTS Error:", e);
-      setSpeaking(false);
-      if (onEnd) onEnd();
+
+    utterance.onstart = () => {
+      if (isCurrent()) setSpeaking(true);
     };
-    
-    synth.speak(utterance);
+    utterance.onend = () => finish(true);
+    utterance.onerror = (event) => {
+      const code = event.error;
+      if (code !== "canceled" && code !== "interrupted") {
+        console.warn(`TTS error: ${code || "unknown"}`);
+      }
+      finish(true);
+    };
+
+    activeUtteranceRef.current = utterance;
+    onEndRef.current = onEnd ?? null;
+
+    try {
+      synth.speak(utterance);
+    } catch (error) {
+      console.warn("TTS start failed:", error);
+      finish(true);
+    }
   }, [synth, muted]);
 
-  const stop = useCallback(() => {
-    if (synth) {
-      synth.cancel();
-      setSpeaking(false);
-    }
+  const stop = useCallback((notify = false) => {
+    const active = activeUtteranceRef.current;
+    const onEnd = onEndRef.current;
+    utteranceSeqRef.current += 1;
+    activeUtteranceRef.current = null;
+    onEndRef.current = null;
+    if (synth) synth.cancel();
+    setSpeaking(false);
+    if (notify && active) onEnd?.();
   }, [synth]);
 
   useEffect(() => {
     return () => {
+      utteranceSeqRef.current += 1;
+      activeUtteranceRef.current = null;
+      onEndRef.current = null;
       if (synth) synth.cancel();
     };
   }, [synth]);
