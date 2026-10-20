@@ -1,4 +1,5 @@
 import pytest
+from bson import ObjectId
 from fastapi.testclient import TestClient
 
 from app.models.answer import Answer, Evaluation, ScoreBreakdown
@@ -9,7 +10,7 @@ from app.services.interview_service import (
     _performance_payload,
     aggregate_scores,
 )
-from tests.conftest import INTERVIEW_LLM, Env
+from tests.conftest import INTERVIEW_LLM, Env, _with_mongo
 from tests.test_answers import answer
 
 
@@ -76,6 +77,9 @@ def test_report_is_generated_on_completion_and_cached(
     assert body["preparation_plan"][0]["focus"] == "Failure modes"
     assert body["preparation_plan"][0]["actions"]
     assert body["generated_at"] is not None
+    assert body["partial"] is False
+    assert body["evaluated_answers"] == 2
+    assert body["total_answers"] == 2
 
     # Cached: a second read returns the same report without another LLM call.
     again = get_report(client, auth_headers, ctx["id"])
@@ -172,6 +176,37 @@ def test_evaluation_failure_does_not_cache_a_partial_report(
     recovered = get_report(client, auth_headers, ctx["id"])
     assert recovered.status_code == 200, recovered.text
     assert recovered.json()["narrative"]
+
+
+def test_legacy_partial_report_exposes_unevaluated_counts(
+    client: TestClient, auth_headers: dict, env: Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ctx = env.setup(target=2)
+    complete_interview(client, auth_headers, ctx)
+    cached = get_report(client, auth_headers, ctx["id"])
+    assert cached.status_code == 200, cached.text
+    assert cached.json()["partial"] is False
+
+    async def unset_evaluation(db) -> None:
+        await db.interviews.update_one(
+            {"_id": ObjectId(ctx["id"])},
+            {"$set": {"answers.0.evaluation": None}},
+        )
+
+    _with_mongo(unset_evaluation)
+
+    async def eval_down(prompt: str, schema, **kwargs):
+        if schema.__name__ == "EvaluationGeneration":
+            raise RuntimeError("evaluation down")
+        return await env.dispatcher(prompt, schema, **kwargs)
+
+    monkeypatch.setattr(INTERVIEW_LLM, eval_down)
+    response = get_report(client, auth_headers, ctx["id"])
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["partial"] is True
+    assert body["evaluated_answers"] == 1
+    assert body["total_answers"] == 2
 
 
 def test_report_generation_failure_returns_503_then_recovers(

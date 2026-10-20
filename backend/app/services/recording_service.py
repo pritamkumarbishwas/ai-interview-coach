@@ -8,7 +8,10 @@ onto the interview document. Bytes live in GridFS; only metadata is ever
 returned in API JSON.
 """
 
+import inspect
 import logging
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorGridFSBucket
@@ -28,6 +31,21 @@ logger = logging.getLogger(__name__)
 RecordingKind = str  # "camera" (screen+camera composite) — validated by the API layer
 ALLOWED_RECORDING_KINDS = ("camera",)
 ALLOWED_RECORDING_CONTENT_TYPES = ("video/webm", "video/mp4", "video/x-matroska")
+
+
+@dataclass(frozen=True)
+class RecordingChunk:
+    seq: int
+    file_id: object
+    length: int
+
+
+@dataclass(frozen=True)
+class RecordingStream:
+    kind: str
+    size_bytes: int
+    content_type: str
+    chunks: tuple[RecordingChunk, ...]
 
 
 def _parse_datetime(value: object) -> datetime | None:
@@ -205,14 +223,91 @@ class RecordingService:
             raise ConflictError("Interview is no longer available.")
         return meta
 
-    async def read_recording(
-        self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str, kind: RecordingKind
-    ) -> tuple[bytes, str]:
-        """Return the full concatenated recording bytes and content type.
+    async def playback_info(
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        interview_id: str,
+        kind: RecordingKind,
+    ) -> RecordingMeta:
+        """Return sealed metadata after checking ownership and availability."""
+        _, meta = await self._require_recording(db, user_id, interview_id, kind)
+        return meta
 
-        Chunked GridFS files are concatenated in `seq` order. Ownership is
-        enforced via the interview document.
-        """
+    async def open_recording(
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        interview_id: str,
+        kind: RecordingKind,
+    ) -> RecordingStream:
+        """Load only chunk metadata so a Range request can stream one slice."""
+        _, meta = await self._require_recording(db, user_id, interview_id, kind)
+        bucket = self._bucket(db)
+        prefix = f"{interview_id}:{kind}#"
+        cursor = bucket.find({"filename": {"$regex": f"^{prefix}\\d+$"}})
+        chunks: list[RecordingChunk] = []
+        async for grid_out in cursor:
+            seq = int(str(grid_out.filename).rsplit("#", 1)[-1])
+            chunks.append(
+                RecordingChunk(seq=seq, file_id=grid_out._id, length=int(grid_out.length))
+            )
+        if not chunks:
+            raise NotFoundError("Recording data missing")
+        chunks.sort(key=lambda chunk: chunk.seq)
+        total = sum(chunk.length for chunk in chunks)
+        if total <= 0:
+            raise NotFoundError("Recording data missing")
+        return RecordingStream(
+            kind=kind,
+            size_bytes=total,
+            content_type=meta.content_type,
+            chunks=tuple(chunks),
+        )
+
+    async def iter_recording(
+        self,
+        db: AsyncIOMotorDatabase,
+        stream: RecordingStream,
+        start: int,
+        end: int,
+    ) -> AsyncIterator[bytes]:
+        """Yield the requested inclusive byte range without loading the file."""
+        bucket = self._bucket(db)
+        offset = 0
+        for chunk in stream.chunks:
+            chunk_start = offset
+            chunk_end = offset + chunk.length - 1
+            offset += chunk.length
+            if chunk_end < start:
+                continue
+            if chunk_start > end:
+                break
+            try:
+                grid_out = await bucket.open_download_stream(chunk.file_id)
+                data = grid_out.read()
+                if inspect.isawaitable(data):
+                    data = await data
+            except Exception as exc:
+                logger.warning(
+                    "Failed to read recording chunk %s#%s: %s",
+                    stream.kind,
+                    chunk.seq,
+                    exc,
+                )
+                raise NotFoundError("Recording data missing") from exc
+            local_start = max(0, start - chunk_start)
+            local_end = min(chunk.length, end - chunk_start + 1)
+            if local_end > local_start:
+                yield data[local_start:local_end]
+
+    async def _require_recording(
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        interview_id: str,
+        kind: RecordingKind,
+    ) -> tuple[Interview, RecordingMeta]:
         if kind not in ALLOWED_RECORDING_KINDS:
             raise NotFoundError(f"Unknown recording kind: {kind}")
         doc = await self._interviews.find_owned(db, interview_id, user_id)
@@ -222,7 +317,17 @@ class RecordingService:
         meta = interview.recordings.get(kind)
         if meta is None or not meta.finalized or meta.size_bytes <= 0:
             raise NotFoundError("Recording not found")
+        return interview, meta
 
+    async def read_recording(
+        self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str, kind: RecordingKind
+    ) -> tuple[bytes, str]:
+        """Return the full concatenated recording bytes and content type.
+
+        Chunked GridFS files are concatenated in `seq` order. Ownership is
+        enforced via the interview document.
+        """
+        _, meta = await self._require_recording(db, user_id, interview_id, kind)
         bucket = self._bucket(db)
         prefix = f"{interview_id}:{kind}#"
         cursor = bucket.find({"filename": {"$regex": f"^{prefix}\\d+$"}})

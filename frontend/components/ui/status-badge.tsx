@@ -1,8 +1,8 @@
 import { Badge } from "@/components/ui/badge";
-import type { SessionStatus } from "@/data/mock";
+import type { InterviewStatus } from "@/types";
 import { cx } from "@/lib/utils";
 
-export function StatusBadge({ status }: { status: SessionStatus }) {
+export function StatusBadge({ status }: { status: InterviewStatus }) {
   if (status === "in_progress") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-semibold text-brand-hover">

@@ -20,8 +20,10 @@ LIST_PROJECTION = {
     "proctoring_mode": 1,
     "target_questions": 1,
     "created_at": 1,
+    "completed_at": 1,
     "questions.id": 1,
     "answers.id": 1,
+    "report.overall_score": 1,
 }
 
 # Dashboard stats need counts plus the cached report's scores/topics — never
@@ -66,6 +68,83 @@ class InterviewRepository:
             .sort("created_at", -1)
         )
         return [self._shape(doc) async for doc in cursor]
+
+    async def results_for_user(
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        sort: str,
+        limit: int,
+    ) -> tuple[list[dict], dict]:
+        """Completed interviews plus aggregate score stats, in one query.
+
+        Aggregation happens server-side across every completed interview, so
+        the stats stay correct even though the response only returns `limit`
+        rows. Unscored reports are ordered after scored ones and excluded from
+        the average/best by MongoDB's numeric aggregators.
+        """
+        sort_specs = {
+            "recent": {"completed_at": -1, "created_at": -1},
+            "score_desc": {
+                "_has_score": -1,
+                "report.overall_score": -1,
+                "completed_at": -1,
+            },
+            "score_asc": {
+                "_has_score": -1,
+                "report.overall_score": 1,
+                "completed_at": -1,
+            },
+        }
+        pipeline = [
+            {"$match": {"user_id": user_id, "status": "completed"}},
+            {
+                "$facet": {
+                    "items": [
+                        {
+                            "$addFields": {
+                                "_has_score": {"$isNumber": "$report.overall_score"}
+                            }
+                        },
+                        {"$sort": sort_specs.get(sort, sort_specs["recent"])},
+                        {"$limit": limit},
+                        {"$project": LIST_PROJECTION},
+                    ],
+                    "stats": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "total": {"$sum": 1},
+                                "scored_count": {
+                                    "$sum": {
+                                        "$cond": [
+                                            {"$isNumber": "$report.overall_score"},
+                                            1,
+                                            0,
+                                        ]
+                                    }
+                                },
+                                "average_score": {
+                                    "$avg": "$report.overall_score"
+                                },
+                                "best_score": {
+                                    "$max": "$report.overall_score"
+                                },
+                            }
+                        }
+                    ],
+                }
+            },
+        ]
+        cursor = db[self.collection_name].aggregate(pipeline)
+        rows = [row async for row in cursor]
+        if not rows:
+            return [], {}
+        facets = rows[0]
+        stats_list = facets.get("stats") or []
+        stats = stats_list[0] if stats_list else {}
+        items = [self._shape(doc) for doc in facets.get("items") or []]
+        return items, stats
 
     async def find_owned(
         self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str

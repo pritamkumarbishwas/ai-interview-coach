@@ -18,6 +18,8 @@ import type { AnswerRecord, Evaluation, Question } from "@/types";
 interface AnswerReviewProps {
   questions: Question[];
   answers: AnswerRecord[];
+  /** A partial report will never fill in the remaining evaluations. */
+  evaluationsFinal?: boolean;
 }
 
 interface ReviewEntry {
@@ -31,7 +33,11 @@ interface ReviewEntry {
  * improved model answer. Entries without an evaluation (still pending) are
  * shown with a gentle "evaluating" note.
  */
-export function AnswerReview({ questions, answers }: AnswerReviewProps) {
+export function AnswerReview({
+  questions,
+  answers,
+  evaluationsFinal = false,
+}: AnswerReviewProps) {
   const questionMap = new Map(questions.map((q) => [q.id, q]));
   const entries: ReviewEntry[] = [];
   for (const answer of answers) {
@@ -59,12 +65,14 @@ export function AnswerReview({ questions, answers }: AnswerReviewProps) {
         </p>
       </header>
       <div className="divide-y divide-line">
-        {entries.map(({ question, answer }) => (
+        {entries.map(({ question, answer }, index) => (
           <ReviewItem
             key={answer.id}
             question={question}
             answer={answer}
             evaluation={answer.evaluation}
+            defaultOpen={index === 0}
+            evaluationsFinal={evaluationsFinal}
           />
         ))}
       </div>
@@ -76,12 +84,16 @@ function ReviewItem({
   question,
   answer,
   evaluation,
+  defaultOpen,
+  evaluationsFinal,
 }: {
   question: Question;
   answer: AnswerRecord;
   evaluation: Evaluation | null;
+  defaultOpen: boolean;
+  evaluationsFinal: boolean;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
     <div>
@@ -99,9 +111,12 @@ function ReviewItem({
           {evaluation ? (
             <p className="mt-0.5 text-xs text-ink-3">
               Overall score: {evaluation.overall}/100
+              {evaluation.competency ? ` · ${evaluation.competency}` : ""}
             </p>
           ) : (
-            <p className="mt-0.5 text-xs text-ink-3">Evaluating…</p>
+            <p className="mt-0.5 text-xs text-ink-3">
+              {evaluationsFinal ? "Not evaluated" : "Evaluating…"}
+            </p>
           )}
         </div>
         {evaluation ? (
@@ -214,6 +229,25 @@ function ReviewItem({
                 </div>
               ) : null}
 
+              {evaluation.evidence.length > 0 ? (
+                <div>
+                  <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-3">
+                    <MessageSquare className="h-3.5 w-3.5" aria-hidden />
+                    Evidence from your answer
+                  </h4>
+                  <ul className="mt-1.5 space-y-1">
+                    {evaluation.evidence.map((quote, i) => (
+                      <li
+                        key={i}
+                        className="rounded-lg border border-line bg-card px-3 py-2 text-[13px] italic leading-relaxed text-ink-2"
+                      >
+                        “{quote}”
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
               {/* Improved answer */}
               {evaluation.improved_answer ? (
                 <div>
@@ -229,8 +263,14 @@ function ReviewItem({
             </>
           ) : (
             <div className="flex items-center gap-2 rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink-3">
-              <span className="h-2 w-2 rounded-full bg-brand animate-pulse-dot" />
-              This answer is still being evaluated. Refresh in a moment.
+              {evaluationsFinal ? (
+                <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
+              ) : (
+                <span className="h-2 w-2 animate-pulse-dot rounded-full bg-brand" />
+              )}
+              {evaluationsFinal
+                ? "This answer could not be evaluated."
+                : "This answer is still being evaluated. Refresh in a moment."}
             </div>
           )}
         </div>

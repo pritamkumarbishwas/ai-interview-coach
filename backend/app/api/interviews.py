@@ -1,27 +1,35 @@
 from datetime import datetime
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, File, Form, Header, Query, UploadFile, status
+from fastapi.responses import Response, StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.api.deps import get_current_user, get_interview_service, get_recording_service
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.exceptions import PayloadTooLargeError
+from app.core.exceptions import AuthenticationError, PayloadTooLargeError
 from app.core.rate_limit import rate_limit
+from app.core.security import (
+    create_recording_playback_token,
+    decode_recording_playback_token,
+)
 from app.models.user import User
 from app.schemas.interview import (
     CurrentQuestionOut,
     InterviewCreate,
     InterviewOut,
+    InterviewResultsOut,
     InterviewSummary,
     ProctoringConsent,
     ProctoringEventCreate,
+    RecordingPlaybackOut,
+    ResultsSort,
 )
 from app.schemas.report import ReportOut
 from app.schemas.transcript import TranscriptionOut
 from app.services.interview_service import InterviewService
-from app.services.recording_service import RecordingService
+from app.services.recording_service import RecordingService, RecordingStream
 
 router = APIRouter()
 
@@ -44,6 +52,18 @@ async def list_interviews(
     limit: int = Query(default=50, ge=1, le=100),
 ) -> list[InterviewSummary]:
     return await service.list(db, current_user.id, limit)
+
+
+@router.get("/results", response_model=InterviewResultsOut)
+async def list_interview_results(
+    current_user: User = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: InterviewService = Depends(get_interview_service),
+    sort: ResultsSort = Query(default="recent"),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> InterviewResultsOut:
+    """All completed interviews with server-side score stats and sorting."""
+    return await service.results(db, current_user.id, sort, limit)
 
 
 @router.get("/{interview_id}", response_model=InterviewOut)
@@ -227,25 +247,126 @@ async def transcribe_answer(
     return TranscriptionOut(text=text)
 
 
-@router.get("/{interview_id}/recordings/{kind}")
-async def download_recording(
+def _parse_byte_range(value: str | None, size: int) -> tuple[int, int, int] | None:
+    """Parse one HTTP byte range; `None` means the range is unsatisfiable."""
+    if not value:
+        return 0, size - 1, status.HTTP_200_OK
+    if not value.startswith("bytes="):
+        return None
+    spec = value.removeprefix("bytes=").strip()
+    if not spec or "," in spec or "-" not in spec:
+        return None
+    start_raw, end_raw = spec.split("-", 1)
+    try:
+        if start_raw:
+            start = int(start_raw)
+            end = int(end_raw) if end_raw else size - 1
+        else:
+            suffix = int(end_raw)
+            if suffix <= 0:
+                return None
+            start = max(size - suffix, 0)
+            end = size - 1
+    except ValueError:
+        return None
+    if start < 0 or start >= size or end < start:
+        return None
+    return start, min(end, size - 1), status.HTTP_206_PARTIAL_CONTENT
+
+
+def _recording_response(
+    service: RecordingService,
+    db: AsyncIOMotorDatabase,
+    stream: RecordingStream,
+    range_header: str | None,
+    *,
+    signed: bool,
+) -> Response:
+    byte_range = _parse_byte_range(range_header, stream.size_bytes)
+    if byte_range is None:
+        return Response(
+            status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Range": f"bytes */{stream.size_bytes}",
+            },
+        )
+    start, end, status_code = byte_range
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(end - start + 1),
+        "Content-Disposition": f'inline; filename="{stream.kind}.webm"',
+        "Cache-Control": "private, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if signed:
+        headers["Referrer-Policy"] = "no-referrer"
+    if status_code == status.HTTP_206_PARTIAL_CONTENT:
+        headers["Content-Range"] = f"bytes {start}-{end}/{stream.size_bytes}"
+    return StreamingResponse(
+        service.iter_recording(db, stream, start, end),
+        status_code=status_code,
+        media_type=stream.content_type,
+        headers=headers,
+    )
+
+
+@router.post(
+    "/{interview_id}/recordings/{kind}/playback-url",
+    response_model=RecordingPlaybackOut,
+)
+async def create_recording_playback_url(
     interview_id: str,
     kind: str,
     current_user: User = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: RecordingService = Depends(get_recording_service),
     _: None = Depends(rate_limit("recording_download")),
+) -> RecordingPlaybackOut:
+    """Mint a short-lived URL for `<video>`, which cannot send bearer auth."""
+    await service.playback_info(db, current_user.id, interview_id, kind)
+    token, expires_at = create_recording_playback_token(
+        current_user.id, interview_id, kind
+    )
+    path = (
+        f"/interviews/{interview_id}/recordings/{kind}/playback"
+        f"?token={quote(token)}"
+    )
+    return RecordingPlaybackOut(
+        path=path,
+        expires_at=expires_at,
+        expires_in=settings.recording_playback_ttl_seconds,
+    )
+
+
+@router.get("/{interview_id}/recordings/{kind}/playback")
+async def playback_recording(
+    interview_id: str,
+    kind: str,
+    token: str = Query(...),
+    range_header: str | None = Header(default=None, alias="Range"),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: RecordingService = Depends(get_recording_service),
+    _: None = Depends(rate_limit("recording_playback")),
 ) -> Response:
-    """Stream a finalized recording (ownership-checked)."""
-    data, content_type = await service.read_recording(
-        db, current_user.id, interview_id, kind
-    )
-    return Response(
-        content=data,
-        media_type=content_type,
-        headers={
-            "Content-Length": str(len(data)),
-            "Content-Disposition": f'inline; filename="{kind}.webm"',
-            "Cache-Control": "private, max-age=3600",
-        },
-    )
+    """Stream a recording using a signed, expiring URL (Range supported)."""
+    payload = decode_recording_playback_token(token)
+    if payload.interview_id != interview_id or payload.kind != kind:
+        raise AuthenticationError("Invalid playback link")
+    stream = await service.open_recording(db, payload.sub, interview_id, kind)
+    return _recording_response(service, db, stream, range_header, signed=True)
+
+
+@router.get("/{interview_id}/recordings/{kind}")
+async def download_recording(
+    interview_id: str,
+    kind: str,
+    range_header: str | None = Header(default=None, alias="Range"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: RecordingService = Depends(get_recording_service),
+    _: None = Depends(rate_limit("recording_download")),
+) -> Response:
+    """Stream a finalized recording (ownership-checked, Range supported)."""
+    stream = await service.open_recording(db, current_user.id, interview_id, kind)
+    return _recording_response(service, db, stream, range_header, signed=False)

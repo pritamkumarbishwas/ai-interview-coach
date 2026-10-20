@@ -39,9 +39,11 @@ from app.schemas.interview import (
     CurrentQuestionOut,
     InterviewCreate,
     InterviewOut,
+    InterviewResultsOut,
     InterviewSummary,
     QuestionGeneration,
     QuestionOut,
+    ResultsSort,
 )
 from app.schemas.report import ReportGeneration, ReportOut
 from app.services.llm_service import llm_service
@@ -218,6 +220,8 @@ def aggregate_scores(interview: Interview) -> ScoreAggregates:
 def _report_out(interview: Interview) -> ReportOut:
     report = interview.report
     assert report is not None  # callers checked before converting
+    evaluated = sum(1 for answer in interview.answers if answer.evaluation is not None)
+    total = len(interview.answers)
     return ReportOut(
         interview_id=interview.id or "",
         overall_score=report.overall_score,
@@ -229,6 +233,30 @@ def _report_out(interview: Interview) -> ReportOut:
         narrative=report.narrative,
         preparation_plan=report.preparation_plan,
         generated_at=report.generated_at,
+        partial=evaluated < total,
+        evaluated_answers=evaluated,
+        total_answers=total,
+    )
+
+
+def _summary_out(doc: dict) -> InterviewSummary:
+    report = doc.get("report")
+    raw_score = report.get("overall_score") if isinstance(report, dict) else None
+    score = float(raw_score) if isinstance(raw_score, (int, float)) else None
+    return InterviewSummary(
+        id=doc["_id"],
+        role=doc.get("role", ""),
+        kind=doc.get("kind", "practice"),
+        type=doc.get("type", "technical"),
+        difficulty=doc.get("difficulty", "intermediate"),
+        status=doc.get("status", "created"),
+        proctoring_mode=doc.get("proctoring_mode", "strict"),
+        question_count=len(doc.get("questions") or []),
+        answered_count=len(doc.get("answers") or []),
+        target_questions=doc.get("target_questions", DEFAULT_TARGET_QUESTIONS),
+        score=score,
+        created_at=doc["created_at"],
+        completed_at=doc.get("completed_at"),
     )
 
 
@@ -326,22 +354,31 @@ class InterviewService:
         self, db: AsyncIOMotorDatabase, user_id: str, limit: int
     ) -> list[InterviewSummary]:
         docs = await self._interviews.list_for_user(db, user_id, limit)
-        return [
-            InterviewSummary(
-                id=doc["_id"],
-                role=doc.get("role", ""),
-                kind=doc.get("kind", "practice"),
-                type=doc.get("type", "technical"),
-                difficulty=doc.get("difficulty", "intermediate"),
-                status=doc.get("status", "created"),
-                proctoring_mode=doc.get("proctoring_mode", "strict"),
-                question_count=len(doc.get("questions") or []),
-                answered_count=len(doc.get("answers") or []),
-                target_questions=doc.get("target_questions", DEFAULT_TARGET_QUESTIONS),
-                created_at=doc["created_at"],
-            )
-            for doc in docs
-        ]
+        return [_summary_out(doc) for doc in docs]
+
+    async def results(
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        sort: ResultsSort = "recent",
+        limit: int = 50,
+    ) -> InterviewResultsOut:
+        docs, stats = await self._interviews.results_for_user(
+            db, user_id, sort, limit
+        )
+        average = stats.get("average_score")
+        best = stats.get("best_score")
+        return InterviewResultsOut(
+            items=[_summary_out(doc) for doc in docs],
+            total=int(stats.get("total") or 0),
+            scored_count=int(stats.get("scored_count") or 0),
+            average_score=(
+                round(float(average), 1)
+                if isinstance(average, (int, float))
+                else None
+            ),
+            best_score=round(float(best), 1) if isinstance(best, (int, float)) else None,
+        )
 
     async def get(self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str) -> InterviewOut:
         interview = await self._require(db, user_id, interview_id)

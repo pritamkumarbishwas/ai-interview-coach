@@ -51,6 +51,18 @@ def test_requires_auth(client: TestClient) -> None:
     )
     assert r.status_code == 401
     assert client.get(f"/api/interviews/{iid}/recordings/camera").status_code == 401
+    assert (
+        client.post(
+            f"/api/interviews/{iid}/recordings/camera/playback-url"
+        ).status_code
+        == 401
+    )
+    assert (
+        client.get(
+            f"/api/interviews/{iid}/recordings/camera/playback?token=bad"
+        ).status_code
+        == 401
+    )
 
 
 def test_nonexistent_interview_is_404(
@@ -92,6 +104,68 @@ def test_upload_and_download_round_trip(
     assert r.status_code == 200
     assert r.content == c0 + c1 + c2
     assert r.headers["content-type"].startswith("video/webm")
+
+
+def test_range_requests_return_partial_content(
+    client: TestClient, auth_headers: dict, env: Env
+) -> None:
+    ctx = env.setup()
+    iid = ctx["id"]
+    blob = bytes(range(256)) * 40  # 10240 bytes
+    assert (
+        upload_chunk(client, auth_headers, iid, seq=0, finalize=True, blob=blob).status_code
+        == 204
+    )
+
+    middle = client.get(
+        f"/api/interviews/{iid}/recordings/camera",
+        headers={**auth_headers, "Range": "bytes=10-20"},
+    )
+    assert middle.status_code == 206, middle.text
+    assert middle.content == blob[10:21]
+    assert middle.headers["content-range"] == f"bytes 10-20/{len(blob)}"
+    assert middle.headers["accept-ranges"] == "bytes"
+    assert middle.headers["content-length"] == "11"
+
+    suffix = client.get(
+        f"/api/interviews/{iid}/recordings/camera",
+        headers={**auth_headers, "Range": "bytes=-10"},
+    )
+    assert suffix.status_code == 206
+    assert suffix.content == blob[-10:]
+
+    unsatisfiable = client.get(
+        f"/api/interviews/{iid}/recordings/camera",
+        headers={**auth_headers, "Range": "bytes=999999-"},
+    )
+    assert unsatisfiable.status_code == 416
+    assert unsatisfiable.headers["content-range"] == f"bytes */{len(blob)}"
+
+
+def test_signed_playback_url_streams_without_bearer(
+    client: TestClient, auth_headers: dict, env: Env
+) -> None:
+    ctx = env.setup()
+    iid = ctx["id"]
+    blob = b"signed-playback" * 100
+    assert (
+        upload_chunk(client, auth_headers, iid, seq=0, finalize=True, blob=blob).status_code
+        == 204
+    )
+
+    minted = client.post(
+        f"/api/interviews/{iid}/recordings/camera/playback-url",
+        headers=auth_headers,
+    )
+    assert minted.status_code == 200, minted.text
+    body = minted.json()
+    assert body["path"].startswith(f"/interviews/{iid}/recordings/camera/playback?token=")
+    assert body["expires_in"] > 0
+
+    playback = client.get(f"/api{body['path']}", headers={"Range": "bytes=0-5"})
+    assert playback.status_code == 206, playback.text
+    assert playback.content == blob[:6]
+    assert playback.headers["referrer-policy"] == "no-referrer"
 
 
 def test_finalize_writes_recording_meta(
@@ -177,6 +251,13 @@ def test_non_owner_cannot_upload_or_download(
     assert upload_chunk(client, other_headers, iid).status_code == 404
     assert (
         client.get(f"/api/interviews/{iid}/recordings/camera", headers=other_headers).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            f"/api/interviews/{iid}/recordings/camera/playback-url",
+            headers=other_headers,
+        ).status_code
         == 404
     )
 

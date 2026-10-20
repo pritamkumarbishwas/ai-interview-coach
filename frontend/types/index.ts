@@ -256,7 +256,27 @@ export interface InterviewSummary {
   question_count: number;
   answered_count: number;
   target_questions: number;
+  score: number | null;
   created_at: string;
+  completed_at: string | null;
+}
+
+export type ResultsSort = "recent" | "score_desc" | "score_asc";
+
+/** Response of `GET /api/interviews/results`. */
+export interface InterviewResults {
+  items: InterviewSummary[];
+  total: number;
+  scored_count: number;
+  average_score: number | null;
+  best_score: number | null;
+}
+
+export interface RecordingPlaybackUrl {
+  path: string;
+  url: string;
+  expires_at: string;
+  expires_in: number;
 }
 
 export interface CreateInterviewInput {
@@ -393,6 +413,9 @@ export interface Report {
   narrative: string;
   preparation_plan: PreparationStep[];
   generated_at: string;
+  partial: boolean;
+  evaluated_answers: number;
+  total_answers: number;
 }
 
 export interface DashboardInterview {

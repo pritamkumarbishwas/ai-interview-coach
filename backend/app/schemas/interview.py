@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.core.timeutil import ISTDateTime
@@ -47,7 +49,26 @@ class InterviewSummary(BaseModel):
     question_count: int = 0
     answered_count: int = 0
     target_questions: int = DEFAULT_TARGET_QUESTIONS
+    score: float | None = None
     created_at: ISTDateTime
+    completed_at: ISTDateTime | None = None
+
+
+ResultsSort = Literal["recent", "score_desc", "score_asc"]
+
+
+class InterviewResultsOut(BaseModel):
+    items: list[InterviewSummary] = Field(default_factory=list)
+    total: int = 0
+    scored_count: int = 0
+    average_score: float | None = None
+    best_score: float | None = None
+
+
+class RecordingPlaybackOut(BaseModel):
+    path: str
+    expires_at: ISTDateTime
+    expires_in: int
 
 
 class InterviewOut(BaseModel):

@@ -66,6 +66,10 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         await db.interviews.create_index(
             [("user_id", 1), ("created_at", -1)], name="ix_interviews_user_created"
         )
+        await db.interviews.create_index(
+            [("user_id", 1), ("status", 1), ("completed_at", -1)],
+            name="ix_interviews_user_status_completed",
+        )
         await db.templates.create_index("user_id", name="ix_templates_user_id")
         await db.templates.create_index(
             [("user_id", 1), ("created_at", -1)], name="ix_templates_user_created"

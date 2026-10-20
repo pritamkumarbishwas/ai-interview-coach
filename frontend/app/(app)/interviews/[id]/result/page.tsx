@@ -27,7 +27,7 @@ import { AnswerReview } from "@/components/interview/answer-review";
 import { RecordingPlayer } from "@/components/interview/recording-player";
 import { useAsync } from "@/hooks/use-async";
 import { TYPE_LABELS } from "@/lib/interview";
-import { formatDateTime, scoreLabel } from "@/lib/utils";
+import { formatDateTime, scoreLabel, scoreTone } from "@/lib/utils";
 import {
   getInterview,
   getReport,
@@ -39,7 +39,7 @@ function durationLabel(startedAt: string | null, completedAt: string | null) {
   const minutes = Math.round(
     (new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 60000,
   );
-  return `${Math.max(1, minutes)} min`;
+  return minutes < 1 ? "<1 min" : `${minutes} min`;
 }
 
 export default function ResultPage() {
@@ -48,21 +48,24 @@ export default function ResultPage() {
   const interviewState = useAsync(() => getInterview(params.id), [params.id]);
   const reportState = useAsync(() => getReport(params.id), [params.id]);
 
-  const interview = interviewState.data;
-  const report = reportState.data;
+  const interview =
+    interviewState.data?.id === params.id ? interviewState.data : null;
+  const report =
+    reportState.data?.interview_id === params.id ? reportState.data : null;
   const reportError = reportState.error;
   const retryReport = reportState.reload;
   const reloadInterview = interviewState.reload;
   const syncedReportRef = useRef<string | null>(null);
   // The report is fetched in parallel with the interview, so the interview
   // snapshot can predate the persisted evaluations. Refresh it once the report
-  // arrives (keyed by generated_at to avoid a render loop).
+  // arrives (keyed by interview + generated_at to avoid a render loop).
   useEffect(() => {
-    if (!report) return;
-    if (syncedReportRef.current === report.generated_at) return;
-    syncedReportRef.current = report.generated_at;
+    if (!report || report.interview_id !== params.id) return;
+    const key = `${report.interview_id}:${report.generated_at}`;
+    if (syncedReportRef.current === key) return;
+    syncedReportRef.current = key;
     reloadInterview();
-  }, [report, reloadInterview]);
+  }, [report, reloadInterview, params.id]);
   // The report endpoint blocks (per-interview lock) until evaluation and
   // generation finish, so a single request covers the whole wait — this
   // loading flag stays true for as long as that request is in flight.
@@ -70,9 +73,7 @@ export default function ResultPage() {
 
   const notFound =
     reportError?.status === 404 || interviewState.error?.status === 404;
-  // 409 means the interview was left early and is still in progress — a
-  // permanent state until it is resumed, not a transient "still evaluating".
-  const notFinished = reportError?.status === 409;
+  const reportPending = reportError?.status === 409;
 
   if (interviewState.loading && !interview && !interviewState.error) {
     return (
@@ -102,13 +103,18 @@ export default function ResultPage() {
     );
   }
 
-  if (notFinished) {
+  if (interview && interview.status !== "completed") {
+    const started = interview.status === "in_progress";
     return (
       <div className="mx-auto max-w-2xl py-10">
         <EmptyState
           icon={<ClipboardList className="h-6 w-6" />}
-          title="Interview still in progress"
-          description="This session hasn't been completed yet. Return to the interview to finish it, or use End Interview to score the answers given so far."
+          title={started ? "Interview still in progress" : "Interview not started"}
+          description={
+            started
+              ? "This session hasn't been completed yet. Return to the interview to finish it, or use End Interview to score the answers given so far."
+              : "This interview hasn't been started yet. Start it to answer the questions and generate a report."
+          }
           action={
             <div className="flex justify-center gap-3">
               <ButtonLink
@@ -116,7 +122,7 @@ export default function ResultPage() {
                 variant="primary"
                 icon={<Mic className="h-4 w-4" />}
               >
-                Resume interview
+                {started ? "Resume interview" : "Start interview"}
               </ButtonLink>
               <ButtonLink href="/interviews" variant="outline">
                 Back to interviews
@@ -160,11 +166,13 @@ export default function ResultPage() {
     );
   }
 
-  if (reportError && !report) {
+  if (interview && reportError && !report) {
     return (
       <div className="mx-auto max-w-xl py-16">
-        <Alert tone="error">
-          {reportError.message || "Could not load the report."}
+        <Alert tone={reportPending ? "info" : "error"}>
+          {reportPending
+            ? "The interview is complete, but its report is still being generated. Try again in a moment."
+            : reportError.message || "Could not load the report."}
         </Alert>
         <div className="mt-4 flex justify-center gap-3">
           <Button variant="outline" onClick={retryReport}>
@@ -188,16 +196,26 @@ export default function ResultPage() {
   }
 
   const duration = durationLabel(interview.started_at, interview.completed_at);
+  const answered = interview.answers.length;
+  const endedEarly = answered < interview.target_questions;
   const meta = [
     interview.role,
     TYPE_LABELS[interview.type],
     formatDateTime(interview.completed_at ?? interview.created_at),
     duration,
+    endedEarly ? `Ended early · ${answered} of ${interview.target_questions} answered` : null,
   ]
     .filter(Boolean)
     .join(" · ");
 
   const hasRecording = hasSessionRecording(interview);
+  const unevaluated = Math.max(
+    0,
+    report.total_answers - report.evaluated_answers,
+  );
+  const extraStudyTopics = report.topics_to_study.filter(
+    (topic) => !report.weak_topics.includes(topic),
+  );
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -226,11 +244,25 @@ export default function ResultPage() {
             </span>
             <span className="pb-1.5 text-xl font-semibold text-ink-3">/100</span>
           </div>
-          <Badge tone="brand">{scoreLabel(report.overall_score)}</Badge>
+          <Badge tone={scoreTone(report.overall_score)}>
+            {scoreLabel(report.overall_score)}
+          </Badge>
         </div>
       </section>
 
-      <RecordingPlayer interviewId={interview.id} available={hasRecording} />
+      {report.partial ? (
+        <Alert tone="warning">
+          {unevaluated} of {report.total_answers} answer
+          {report.total_answers === 1 ? "" : "s"} could not be evaluated. This
+          score is based on the answers that were evaluated.
+        </Alert>
+      ) : null}
+
+      <RecordingPlayer
+        interviewId={interview.id}
+        available={hasRecording}
+        sizeBytes={interview.recordings.camera?.size_bytes}
+      />
 
       <section
         className="grid grid-cols-1 gap-4 sm:grid-cols-3"
@@ -315,10 +347,10 @@ export default function ResultPage() {
                 ))
               )}
             </div>
-            {report.topics_to_study.length > 0 ? (
+            {extraStudyTopics.length > 0 ? (
               <p className="text-[13px] text-ink-2">
-                <span className="font-medium text-ink">Study next:</span>{" "}
-                {report.topics_to_study.join(", ")}
+                <span className="font-medium text-ink">Also study:</span>{" "}
+                {extraStudyTopics.join(", ")}
               </p>
             ) : null}
           </CardContent>
@@ -367,6 +399,7 @@ export default function ResultPage() {
       <AnswerReview
         questions={interview.questions}
         answers={interview.answers}
+        evaluationsFinal={report.partial}
       />
 
       <section className="flex flex-wrap items-center justify-center gap-3 pb-4">

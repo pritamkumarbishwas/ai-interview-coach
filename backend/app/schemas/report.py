@@ -25,3 +25,6 @@ class ReportOut(BaseModel):
     narrative: str
     preparation_plan: list[PreparationStep]
     generated_at: ISTDateTime
+    partial: bool = False
+    evaluated_answers: int = 0
+    total_answers: int = 0

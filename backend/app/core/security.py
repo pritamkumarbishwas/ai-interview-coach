@@ -17,12 +17,21 @@ _password_hasher = PasswordHasher()
 
 ALGORITHM = settings.jwt_algorithm
 TOKEN_TYPE = "access"
+RECORDING_PLAYBACK_TOKEN_TYPE = "recording_playback"
 
 
 class TokenPayload(BaseModel):
     sub: str
     exp: int
     type: str = TOKEN_TYPE
+
+
+class RecordingPlaybackPayload(BaseModel):
+    sub: str
+    interview_id: str
+    kind: str
+    exp: int
+    type: str = RECORDING_PLAYBACK_TOKEN_TYPE
 
 
 def hash_password(password: str) -> str:
@@ -60,6 +69,53 @@ def create_access_token(
         "type": TOKEN_TYPE,
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
+
+
+def create_recording_playback_token(
+    subject: str,
+    interview_id: str,
+    kind: str,
+    expires_delta: timedelta | None = None,
+) -> tuple[str, datetime]:
+    now = datetime.now(UTC)
+    expires_at = now + (
+        expires_delta
+        if expires_delta is not None
+        else timedelta(seconds=settings.recording_playback_ttl_seconds)
+    )
+    payload: dict[str, Any] = {
+        "sub": str(subject),
+        "interview_id": interview_id,
+        "kind": kind,
+        "iat": now,
+        "exp": expires_at,
+        "type": RECORDING_PLAYBACK_TOKEN_TYPE,
+    }
+    token = jwt.encode(payload, settings.jwt_secret, algorithm=ALGORITHM)
+    return token, expires_at
+
+
+def decode_recording_playback_token(token: str) -> RecordingPlaybackPayload:
+    try:
+        data = jwt.decode(token, settings.jwt_secret, algorithms=[ALGORITHM])
+    except jwt.ExpiredSignatureError as exc:
+        raise AuthenticationError("Playback link has expired") from exc
+    except jwt.PyJWTError as exc:
+        raise AuthenticationError("Invalid playback link") from exc
+
+    if data.get("type") != RECORDING_PLAYBACK_TOKEN_TYPE:
+        raise AuthenticationError("Invalid playback link")
+
+    try:
+        return RecordingPlaybackPayload(
+            sub=str(data["sub"]),
+            interview_id=str(data["interview_id"]),
+            kind=str(data["kind"]),
+            exp=int(data["exp"]),
+            type=data["type"],
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AuthenticationError("Invalid playback link") from exc
 
 
 def decode_access_token(token: str) -> TokenPayload:

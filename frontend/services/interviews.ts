@@ -1,12 +1,15 @@
-import { api, toApiError } from "@/lib/api";
+import { API_URL, api, toApiError } from "@/lib/api";
 import type {
   AnswerResult,
   CreateInterviewInput,
   CurrentQuestion,
   InterviewDetail,
+  InterviewResults,
   InterviewSummary,
   Question,
+  RecordingPlaybackUrl,
   Report,
+  ResultsSort,
 } from "@/types";
 
 /** LLM-backed endpoints need far more headroom than the default 30s. */
@@ -17,6 +20,20 @@ const UPLOAD_TIMEOUT_MS = 60_000;
 export async function listInterviews(): Promise<InterviewSummary[]> {
   try {
     const { data } = await api.get<InterviewSummary[]>("/interviews");
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+/** Completed interviews plus server-side score stats, across all results. */
+export async function getResults(
+  sort: ResultsSort = "recent",
+): Promise<InterviewResults> {
+  try {
+    const { data } = await api.get<InterviewResults>("/interviews/results", {
+      params: { sort },
+    });
     return data;
   } catch (error) {
     throw toApiError(error);
@@ -134,7 +151,27 @@ export async function submitAnswer(
   }
 }
 
-export async function getReport(interviewId: string): Promise<Report> {
+const reportRequests = new Map<string, Promise<Report>>();
+
+export function getReport(interviewId: string): Promise<Report> {
+  const inFlight = reportRequests.get(interviewId);
+  if (inFlight) return inFlight;
+
+  const request = fetchReport(interviewId);
+  reportRequests.set(interviewId, request);
+  void request
+    .finally(() => {
+      if (reportRequests.get(interviewId) === request) {
+        reportRequests.delete(interviewId);
+      }
+    })
+    .catch(() => {
+      /* The caller handles the original rejection. */
+    });
+  return request;
+}
+
+async function fetchReport(interviewId: string): Promise<Report> {
   try {
     const { data } = await api.get<Report>(
       `/interviews/${interviewId}/report`,
@@ -189,16 +226,20 @@ export async function uploadRecordingChunk(
 }
 
 /**
- * Fetch the finalized session recording as a blob (authenticated via the axios
- * interceptor). Callers should `URL.createObjectURL` and revoke on unmount.
+ * Mint a short-lived signed URL for the finalized recording. `<video>` cannot
+ * attach the bearer header, so playback must use this URL instead of a blob.
  */
-export async function getRecordingBlob(interviewId: string): Promise<Blob> {
+export async function getRecordingPlaybackUrl(
+  interviewId: string,
+): Promise<RecordingPlaybackUrl> {
   try {
-    const { data } = await api.get<Blob>(
-      `/interviews/${interviewId}/recordings/camera`,
-      { responseType: "blob", timeout: UPLOAD_TIMEOUT_MS },
-    );
-    return data;
+    const { data } = await api.post<{
+      path: string;
+      expires_at: string;
+      expires_in: number;
+    }>(`/interviews/${interviewId}/recordings/camera/playback-url`);
+    const base = API_URL.replace(/\/$/, "");
+    return { ...data, url: `${base}${data.path}` };
   } catch (error) {
     throw toApiError(error);
   }

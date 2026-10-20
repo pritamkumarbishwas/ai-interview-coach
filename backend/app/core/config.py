@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     max_recording_chunk_bytes: int = 16 * 1024 * 1024
     max_recording_bytes: int = 500 * 1024 * 1024
     recording_bucket_name: str = "interview_recordings"
+    # Short-lived signed URL lifetime for browser <video> playback, which
+    # cannot attach the Authorization header.
+    recording_playback_ttl_seconds: int = 60 * 60
 
     jwt_secret: str = DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
@@ -97,6 +100,8 @@ class Settings(BaseSettings):
         "interview_complete": (20, 60),
         # Recruiter playback of a finalized session (occasional, not bulk).
         "recording_download": (30, 60),
+        # <video> Range requests hit the signed playback URL repeatedly.
+        "recording_playback": (240, 60),
         # Programmatic API clients poll; give them a generous budget.
         "public_api": (300, 60),
     }

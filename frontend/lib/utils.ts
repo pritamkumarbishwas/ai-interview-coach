@@ -23,16 +23,19 @@ export function greeting(): string {
 }
 
 export function scoreLabel(score: number): string {
-  if (score >= 8.5) return "Excellent";
-  if (score >= 7) return "Good";
-  if (score >= 5) return "Average";
+  if (score >= 85) return "Excellent";
+  if (score >= 70) return "Good";
+  if (score >= 50) return "Average";
   return "Needs work";
 }
 
-export function scoreTone(score: number): "emerald" | "amber" | "rose" {
-  if (score >= 7) return "emerald";
-  if (score >= 5) return "amber";
-  return "rose";
+export function scoreTone(
+  score: number,
+): "success" | "brand" | "warning" | "danger" {
+  if (score >= 85) return "success";
+  if (score >= 70) return "brand";
+  if (score >= 50) return "warning";
+  return "danger";
 }
 
 export function titleCase(value: string): string {
