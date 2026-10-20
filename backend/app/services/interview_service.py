@@ -4,8 +4,8 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -342,7 +342,8 @@ class InterviewService:
             )
 
         if interview.proctoring_mode != "off":
-            if not interview.proctoring_session or not interview.proctoring_session.consent_given_at:
+            consent = interview.proctoring_session and interview.proctoring_session.consent_given_at
+            if not consent:
                 raise ConflictError("Proctoring consent must be recorded before starting.")
 
         first = await self._generate_question(db, interview, asked=[])
@@ -520,7 +521,9 @@ class InterviewService:
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
 
-    async def _finalize_interview(self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str) -> None:
+    async def _finalize_interview(
+        self, db: AsyncIOMotorDatabase, interview_id: str, user_id: str
+    ) -> None:
         """Background pipeline: evaluate all answers, then cache the report."""
         try:
             async with _report_lock(interview_id):
@@ -573,7 +576,7 @@ class InterviewService:
         results = await asyncio.gather(
             *(_eval_one(answer) for answer in pending), return_exceptions=True
         )
-        for answer, result in zip(pending, results):
+        for answer, result in zip(pending, results, strict=False):
             if isinstance(result, Exception):
                 logger.error(
                     "Evaluation failed for answer %s: %s: %s",
@@ -774,17 +777,19 @@ class InterviewService:
         interview = await self._require(db, user_id, interview_id)
         if interview.status != "created":
             raise ConflictError("Can only record consent before the interview starts.")
-            
+
         if not consent:
             raise ConflictError("Proctoring consent is required to continue.")
-            
+
         now = datetime.now(UTC)
         if interview.proctoring_session is None:
             interview.proctoring_session = ProctoringSession(consent_given_at=now)
         else:
             interview.proctoring_session.consent_given_at = now
-            
-        await self._interviews.update_proctoring_session(db, interview_id, user_id, interview.proctoring_session.model_dump())
+
+        await self._interviews.update_proctoring_session(
+            db, interview_id, user_id, interview.proctoring_session.model_dump()
+        )
 
     async def record_proctoring_event(
         self, db: AsyncIOMotorDatabase, user_id: str, interview_id: str,

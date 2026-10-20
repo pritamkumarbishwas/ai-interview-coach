@@ -255,7 +255,7 @@ class InterviewRepository:
             return None
         doc = await db[self.collection_name].find_one_and_update(
             {"_id": object_id, "user_id": user_id},
-            {f"$set": {f"recordings.{kind}": meta}},
+            {"$set": {f"recordings.{kind}": meta}},
             return_document=ReturnDocument.AFTER,
         )
         return self._shape(doc) if doc else None

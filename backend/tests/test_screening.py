@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from bson import ObjectId
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from tests.conftest import _with_mongo
 
 INTERVIEW_LLM = "app.services.interview_service.llm_service.generate_structured"
@@ -119,7 +120,7 @@ def test_candidate_runs_the_full_flow(
     job_id = _job_with_template(client, staff_headers, target=2)
     invitation = _invite(client, staff_headers, job_id)
     assert invitation["status"] == "pending"
-    assert invitation["accept_url"]
+    assert invitation["accept_url"].startswith(f"{settings.frontend_url}/interview/")
     token = _token(invitation)
 
     # Pre-check (no account).

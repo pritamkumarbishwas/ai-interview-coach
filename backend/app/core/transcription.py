@@ -8,7 +8,7 @@ provider keys. Adding a provider means implementing :class:`Transcriber`,
 registering the name in ``SUPPORTED_TRANSCRIPTION_PROVIDERS`` and extending
 :func:`build_transcriber`.
 """
- 
+
 from __future__ import annotations
 
 import logging

@@ -37,7 +37,7 @@ def test_invite_accept_and_login(client: TestClient, admin_headers: dict) -> Non
     body = created.json()
     assert body["role"] == "recruiter"
     assert body["status"] == "pending"
-    assert body["accept_url"]
+    assert body["accept_url"].startswith(f"{settings.frontend_url}/staff/accept?token=")
 
     accepted = client.post(
         "/api/staff/invitations/accept",

@@ -215,7 +215,7 @@ class RecordingService:
         for grid_id in ids:
             try:
                 await bucket.delete(grid_id)
-            except Exception as exc:  # noqa: BLE001 - best-effort cleanup
+            except Exception as exc:
                 logger.warning("Failed to delete old recording chunk: %s", exc)
 
     async def _read_grid_meta(
@@ -312,7 +312,7 @@ class RecordingService:
                 try:
                     await bucket.delete(grid_out._id)
                     deleted += 1
-                except Exception as exc:  # noqa: BLE001 - best-effort cleanup
+                except Exception as exc:
                     logger.warning("Failed to delete orphan chunk: %s", exc)
                 continue
             interview = Interview(**doc)
@@ -323,7 +323,7 @@ class RecordingService:
             try:
                 await bucket.delete(grid_out._id)
                 deleted += 1
-            except Exception as exc:  # noqa: BLE001 - best-effort cleanup
+            except Exception as exc:
                 logger.warning("Failed to delete stale chunk: %s", exc)
         return deleted
 

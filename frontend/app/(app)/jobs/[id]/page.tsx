@@ -501,7 +501,7 @@ function JobDetail() {
             title="Candidates"
             description={
               canManage
-                ? "Invite candidates by magic link."
+                ? "Create a magic link, then share it with the candidate."
                 : "Candidates invited to this role."
             }
           />
@@ -519,7 +519,8 @@ function JobDetail() {
                   <CopyLinkButton url={link} />
                 </div>
                 <p className="mt-1.5 text-xs text-info-ink">
-                  Share this link with the candidate — it expires and works once.
+                  Keep this link private — it is the candidate&apos;s credential
+                  until it expires.
                 </p>
               </div>
             ) : null}
@@ -682,7 +683,10 @@ function InviteForm({ jobId, onInvited }: InviteFormProps) {
       className="rounded-btn border border-line bg-surface p-4"
       noValidate
     >
-      <h4 className="text-[13px] font-semibold text-ink">Invite a candidate</h4>
+      <h4 className="text-[13px] font-semibold text-ink">Create a candidate invite</h4>
+      <p className="mt-1 text-xs text-ink-2">
+        The link is created immediately. Copy it and send it to the candidate.
+      </p>
       {error ? (
         <div className="mt-3">
           <Alert tone="error">{error}</Alert>
@@ -737,7 +741,7 @@ function InviteForm({ jobId, onInvited }: InviteFormProps) {
           </Field>
         </div>
         <Button type="submit" loading={submitting} className="mb-0.5">
-          Send invite
+          Create invite link
         </Button>
       </div>
     </form>

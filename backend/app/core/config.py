@@ -28,9 +28,9 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "AI Interview Coach"
-    # Public base URL of the SPA — used to build links in outbound emails
-    # (staff invitations now; candidate magic links in a later phase).
-    frontend_url: str = "http://localhost:5173"
+    # Public base URL of the SPA, used to build candidate magic links and staff
+    # invitation links. It must match the origin the user actually opens.
+    frontend_url: str = "http://localhost:3000"
     environment: str = Field(default="development")
     api_prefix: str = "/api"
     log_level: str = "INFO"
@@ -74,7 +74,12 @@ class Settings(BaseSettings):
         "public_api": (300, 60),
     }
     trust_proxy_headers: bool = False
-    cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "https://resume-builder-rho-woad.vercel.app"]
+    cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://resume-builder-rho-woad.vercel.app",
+    ]
 
     llm_provider: str = "openai"
     openai_api_key: str | None = None
@@ -119,10 +124,10 @@ class Settings(BaseSettings):
     jobs_max_attempts: int = Field(default=3, ge=1)
     jobs_backoff_seconds: float = Field(default=30.0, gt=0)
 
-    # --- Feature flags (staged rollout of the screening platform) -----------
+    # --- Registration mode ---------------------------------------------------
+    # Screening deployments provision staff by invitation and let candidates
+    # enter through magic links, so public self-registration is closed.
     feature_screening_enabled: bool = False
-    feature_magic_links_enabled: bool = False
-    feature_proctoring_integrity_enabled: bool = False
 
     # --- Staff bootstrap ---------------------------------------------------
     # Optional seed admin, created on startup when set. This is how a fresh

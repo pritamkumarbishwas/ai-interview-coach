@@ -1,15 +1,23 @@
 # AI Interview Coach
 
-An AI-powered platform where a candidate uploads their resume and a job description, runs a mock interview with adaptive AI follow-up questions, receives a structured evaluation after every answer, and gets a final performance report with a personalized preparation plan.
+An AI interview platform with two connected products:
 
-> **Status: Phase 9 (hardening) complete.** The full stack is live end-to-end: FastAPI backend (auth, resumes, job descriptions, interviews, evaluations, reports, dashboard stats, RAG-assisted question generation), Next.js frontend wired to the real API, and a **128-test** pytest suite. Operational hardening is in place: rate limiting with `Retry-After`/`X-RateLimit-*` headers, CORS lockdown, structured (JSON) logging with `X-Request-ID` correlation, and uniform error envelopes for every failure path.
+- **Practice:** a candidate uploads a resume and job description, runs an adaptive mock interview, and gets scored feedback plus a preparation plan.
+- **Recruiting and screening:** a recruiter creates a requisition and interview template, invites candidates through magic links, reviews scorecards, integrity signals, recordings, and analytics, and records a human decision.
+
+The AI is advisory. It generates questions, evaluates answers, and surfaces signals; it never makes the hiring decision.
+
+> **Status:** practice, recruiting, screening, review, and compliance surfaces are implemented end to end. The backend has **300+ tests**, including role/ownership access control, screening, recordings, retention, webhooks, quotas, and usage accounting.
 >
-> **Data-layer note:** the backend uses **MongoDB (Motor)** — connection settings live in `backend/.env` (`MONGO_URI`, `MONGO_DB_NAME`). Indexes are created automatically on startup; there are no migration files to run.
+> **Data layer:** MongoDB (Motor). Indexes are created on startup; there are no migration files. Recordings use GridFS. Qdrant is used for RAG question generation.
 
 ## Quickstart
 
 ```bash
-cp .env.example .env        # add GROQ_API_KEY (or OPENAI_API_KEY) + a real JWT_SECRET
+cp .env.example .env
+cp backend/.env.example backend/.env
+# Set GROQ_API_KEY (or OPENAI_API_KEY), JWT_SECRET, and BOOTSTRAP_ADMIN_*
+# in backend/.env. FRONTEND_URL belongs in the root .env for Docker.
 docker compose up --build
 ```
 
@@ -18,229 +26,270 @@ docker compose up --build
 | `frontend`| 3000 | Next.js app (production build) |
 | `backend` | 8000 | FastAPI API (`/api`, interactive docs at `/api/docs`) |
 | `mongo`   | 27017 | MongoDB 7 (healthcheck) |
-| `qdrant`  | 6333 | Qdrant vector store for RAG (healthcheck via volume; set `RAG_ENABLED=false` to skip) |
+| `qdrant`  | 6333 | Qdrant vector store for RAG (set `RAG_ENABLED=false` to skip) |
 
 Open `http://localhost:3000`. The frontend calls the API at `http://localhost:8000/api` (baked in at build time via `NEXT_PUBLIC_API_URL`).
 
----
+### First admin (required for recruiting and screening)
+
+Public registration creates **candidate** accounts only. Recruiting and screening
+require a staff account, and staff accounts are provisioned by an admin. On a
+fresh database, set a seed admin in `backend/.env` before the first start:
+
+```dotenv
+BOOTSTRAP_ADMIN_EMAIL=admin@example.com
+BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-password
+BOOTSTRAP_ADMIN_NAME=Admin
+```
+
+Start the stack, log in, and invite recruiters/reviewers from **Team**. Once the
+real admin accounts exist, blank the bootstrap password so the seed is not
+recreated or promoted on later starts.
+
+### Environment precedence
+
+- **Root `.env`** is read by Docker Compose for interpolation and for the
+  variables Compose explicitly passes into the backend.
+- **`backend/.env`** is read directly by FastAPI. Put bootstrap admin settings,
+  mail settings, feature switches, and any backend-only settings there.
+- **`frontend/.env.local`** is read by Next.js. Only `NEXT_PUBLIC_API_URL` is
+  required.
+
+`FRONTEND_URL` must match the origin users actually open
+(`http://localhost:3000` locally). It is used to build candidate magic links and
+staff invitation links.
 
 ## Architecture
 
-```
-┌──────────────┐     ┌─────────────────────────────────────────────┐
-│   Frontend   │────▶│  FastAPI (API layer - routes only)          │
-│  Next.js     │     ├─────────────────────────────────────────────┤
-└──────────────┘     │  Service layer (business logic, AppErrors)  │
-                     │  Repository layer (DB queries, owns Mongo)  │
-                     │  AI layer (llm_service, rag_service)        │
-                     │  Cross-cutting: auth · rate limit · logging │
-                     │                 CORS · error handlers       │
-                     ├─────────────────────────────────────────────┤
-                     │  MongoDB (Motor async)  ──▶  indexes        │
-                     │  Qdrant (RAG vector store)                  │
-                     └─────────────────────────────────────────────┘
+```text
+Next.js frontend
+      |
+      v
+FastAPI routes (validation, auth, rate limits, response models)
+      |
+      v
+Service layer (business rules, AppError)
+      |
+      v
+Repository layer (all MongoDB queries)
+      |
+      +--> MongoDB (users, jobs, invitations, interviews, audits, jobs queue)
+      +--> GridFS (recordings)
+      +--> Qdrant (RAG knowledge chunks)
+      +--> LLM provider (Groq/OpenAI)
 ```
 
 Design rules:
 
-- **API layer** only validates input/output, applies auth/rate-limit dependencies, and delegates to services.
-- **Service layer** owns business logic; raises typed `AppError`s — never returns HTTP responses itself.
-- **Repository layer** owns every MongoDB query (`by_alias=True`, responses expose `id`, never `_id`).
-- **AI layer** is isolated behind `llm_service.generate_structured(prompt, Schema)` (retries on transient failures) and `rag_service` (Qdrant + fastembed). LLM calls never appear in routes.
-- Dependency injection via FastAPI `Depends`, Pydantic v2 models for every request/response (`response_model` on every route).
+- Routes validate input/output and delegate; services own business logic.
+- Repositories own every MongoDB query and map `_id` to `id`.
+- LLM and RAG access stay behind `llm_service` / `rag_service`.
+- Pydantic v2 schemas define every request and response.
+- Errors use a uniform `{"detail": ..., "code": ...}` envelope.
+
+## Product flows
+
+### Practice
+
+1. A candidate registers and uploads a PDF/DOCX resume.
+2. They save a job description and create a practice interview.
+3. The first question is generated from the role, resume, and retrieved knowledge.
+4. Each answer is evaluated, and the next question adapts to the result.
+5. The final report contains scores, strengths, weaknesses, and a preparation plan.
+
+### Recruiting and screening
+
+1. An admin invites staff; the invitee sets a name/password and receives a role.
+2. A recruiter creates a requisition and an optional interview template.
+3. The recruiter assigns reviewers and creates a candidate invitation.
+4. The invitation returns a magic link (`/interview/{token}`); the candidate
+   opens it without an account.
+5. If proctoring is enabled, the candidate consents and completes a device check.
+6. Starting the interview creates a server-side deadline and a guest interview.
+7. Answers, recording chunks, and advisory integrity events are stored as they arrive.
+8. On completion, the scorecard is built from stored evaluations.
+9. Recruiters/reviewers see the pipeline, shortlist, analytics, shadow-mode
+   comparison, scorecard, integrity summary, and recording timeline.
+10. A human records the decision. If the requisition has a webhook configured,
+    an outbound `candidate.decided` event is queued for delivery.
+
+Screening candidates are guests: they do not get `User` rows. The token is the
+credential and can be resumed until the invitation expires or the interview is
+completed. Treat the link as sensitive.
 
 ## Features
 
-**Product (all live against the real API):**
+### Candidate
 
-- Registration (Argon2), login returning a JWT, `GET`/`PATCH /api/auth/me`
-- Resume upload (PDF/DOCX, magic-byte checked, size limited), list, detail, delete
-- Job-description create/list/get/delete
-- Interview lifecycle: create (JD required, resume optional) → `start` → `current-question` → `POST /api/questions/{id}/answer` with AI evaluation, adaptive follow-up questions and LLM timeouts → `report` (score, strengths, weaknesses, preparation plan)
-- Dashboard statistics (totals, recent interviews, completion rate)
-- RAG-assisted question generation (knowledge base ingested into Qdrant by `scripts/ingest_knowledge_base.py`)
-- Practice wizard, interview workspace, and result pages in the frontend wired to the live backend
+- Registration/login, JWT session, profile update
+- Resume upload/list/detail/delete with magic-byte and size validation
+- Job-description create/list/detail/delete
+- Practice interview lifecycle, adaptive questions, answer evaluation, final report
+- Dashboard stats and interview history
 
-**Operational (Phase 9):**
+### Recruiting and screening
 
-- Per-client-IP rate limiting on 8 sensitive scopes (register, login, resume upload, JD create, answer submit, interview start/question/report) with `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining` on `429`, and `X-RateLimit-Limit` on allowed requests
-- CORS lockdown: explicit origin allow-list, methods (`GET, POST, PATCH, DELETE`) and headers (`Authorization, Content-Type`), **credentials disabled** (the SPA uses a Bearer token, never cookies)
-- Structured logging: JSON in production (`LOG_FORMAT=auto|text|json`), request-scoped `X-Request-ID` correlation header, per-request log line (method/path/status/duration/client IP), never logs authorization material
-- Uniform error envelopes (`{"detail": ..., "code": ...}`) for `400/401/403/404/405/409/413/422/429/500/503`; unhandled exceptions return a generic `500 internal_error` with the stack trace only in server logs
-- Oversized-body rejection (413) before the body is read; health check degrades to `503` when Mongo is unreachable
+- Jobs/requisitions with owner, admin, and assigned-reviewer access
+- Interview templates with rounds, response modes, proctoring mode, rubric, and threshold
+- Staff invitations, role changes, reviewer assignment
+- Candidate invitations with reminders, expiry extension, revocation, and audit trail
+- Token-based guest screening with consent, round deadline, and resume support
+- Camera/screen recording chunks in GridFS and review timeline
+- Advisory integrity signals (camera off, tab blur, paste, and related events)
+- Scorecards, shortlist ranking, funnel analytics, and human decisions
+- Shadow mode: how often the advisory AI would have matched recorded decisions
+- CSV and PDF exports, candidate data export, erasure, and configured retention
+- ATS webhooks for Greenhouse, Lever, and generic payloads
 
-## Tech Stack
+### Platform and operations
+
+- Per-process rate limiting with `Retry-After` and `X-RateLimit-*` headers
+- Structured logging with `X-Request-ID`
+- CORS allow-list and security headers
+- Usage and cost tracking, monthly LLM budget cap, per-role daily quotas
+- Staff seat cap
+- API keys for the owner-scoped public API
+- Audit log, compliance record, secure webhook secret storage
+- Mongo-backed background queue for webhooks and retention jobs
+- CI: backend lint/format/tests, frontend typecheck/build
+
+## Tech stack
 
 | Layer     | Technology |
 |-----------|------------|
 | Backend   | Python 3.12+, FastAPI, Pydantic v2, Uvicorn |
-| Database  | MongoDB (Motor async) |
+| Database  | MongoDB (Motor), GridFS |
 | Auth      | JWT (PyJWT), Argon2 password hashing |
-| AI        | OpenAI-compatible client (`openai` or `groq` provider), 90s timeout, retries, structured-output generation |
+| AI        | OpenAI-compatible client (`openai` or `groq`), structured output generation |
 | RAG       | Qdrant + fastembed (`BAAI/bge-small-en-v1.5`) |
-| Frontend  | Next.js 16, TypeScript, Tailwind CSS v4, Lucide React, React 19 |
-| Infra     | Docker, Docker Compose |
+| Frontend  | Next.js 16, React 19, TypeScript, Tailwind CSS v4, Lucide |
+| Infra     | Docker, Docker Compose, GitHub Actions |
 
-## Folder Structure
+## Folder structure
 
-```
+```text
 ai-interview-coach/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                 # app, lifespan, middleware, error handlers, CORS, request logging
-│   │   ├── api/                    # API layer (routes + dependency wiring)
-│   │   │   ├── auth.py  resumes.py  job_descriptions.py
-│   │   │   ├── interviews.py       # create/list/start/current-question/report
-│   │   │   ├── questions.py        # POST /{question_id}/answer
-│   │   │   ├── dashboard.py        # GET /stats
-│   │   │   └── deps.py
-│   │   ├── core/                   # config, security, database, logging, exceptions, rate_limit
-│   │   ├── models/  schemas/       # domain models, request/response schemas
-│   │   ├── services/               # auth, resume, JD, interview, dashboard, llm, rag,
-│   │   │                           # embedding, knowledge_loader, parsers/
-│   │   ├── repositories/           # user, resume, JD, interview queries
-│   │   ├── prompts/                # LLM prompt templates
-│   ├── scripts/ingest_knowledge_base.py
-│   ├── tests/                      # 128 tests (see "Testing")
-│   ├── .env.example  requirements*.txt  ruff.toml  Dockerfile
-├── frontend/                       # Next.js app (Dockerfile, .env.example, see "Running Frontend")
-├── data/knowledge_base/            # RAG sources ingested into Qdrant
-├── docker-compose.yml              # frontend + backend + mongo + qdrant
-├── .env.example                    # root template (compose interpolation + backend/.env)
+│   │   ├── api/             # routes and dependency wiring
+│   │   ├── core/            # config, database, jobs, webhooks, mail, logging
+│   │   ├── models/          # domain models
+│   │   ├── schemas/         # request/response schemas
+│   │   ├── services/        # business logic and orchestration
+│   │   ├── repositories/    # MongoDB queries
+│   │   ├── prompts/         # LLM prompts
+│   │   └── main.py          # app lifecycle, middleware, routers
+│   ├── scripts/             # knowledge-base ingestion and utilities
+│   ├── tests/               # backend test suite
+│   └── Dockerfile
+├── frontend/
+│   ├── app/                 # App Router pages
+│   ├── components/          # UI, recruiting, interview components
+│   ├── hooks/               # auth, media, recorder, integrity, async state
+│   ├── services/            # typed API clients
+│   ├── lib/                 # API client, formatting, role labels
+│   └── Dockerfile
+├── docs/features/           # screening and access-control documentation
+├── data/knowledge_base/     # RAG source documents
+├── docker-compose.yml
 └── README.md
 ```
 
-## Environment Variables
+## Environment variables
 
-Copy `.env.example` to `.env` (repo root, read by docker compose) **and** to `backend/.env` (read by the FastAPI app). The frontend reads `frontend/.env.local` (from `frontend/.env.example`).
+Copy `.env.example` to `.env` and `backend/.env.example` to `backend/.env`.
+The examples contain the full annotated list; the most important settings are:
 
 | Variable | Description | Default |
 |---|---|---|
-| `APP_NAME` | Application name | `AI Interview Coach` |
-| `ENVIRONMENT` | `development` / `test` / `production` | `development` |
-| `DEBUG` | Debug flag | `false` |
-| `API_PREFIX` | API mount path | `/api` |
-| `LOG_LEVEL` | Python log level | `INFO` |
-| `LOG_FORMAT` | Log shape: `auto` (JSON in production, text elsewhere), `text`, `json` | `auto` |
-| `CORS_ORIGINS` | Allowed origins (comma-separated or JSON array; `*` rejected in production) | `http://localhost:3000,...` |
-| `MONGO_URI` / `MONGO_DB_NAME` | MongoDB connection / database | `mongodb://localhost:27017` / `ai_interview_coach` |
-| `STORAGE_DIR` | Resume storage directory (gitignored) | `data/resumes` |
-| `MAX_UPLOAD_BYTES` | Upload size limit (413 above) | `5242880` |
-| `MAX_BODY_BYTES` | Refuse whole request bodies above this size (413) | `10485760` |
-| `JWT_SECRET` | Signing secret (**required in production**) | dev-only value |
-| `JWT_ALGORITHM` / `JWT_EXPIRES_MINUTES` | Token algorithm / lifetime | `HS256` / `1440` |
-| `RATE_LIMIT_ATTEMPTS` / `RATE_LIMIT_WINDOW_SECONDS` | Sliding-window budget per client IP and scope | `20` / `60` |
-| `TRUST_PROXY_HEADERS` | Trust `X-Forwarded-For` for rate limiting (only behind your own proxy) | `false` |
-| `LLM_PROVIDER` | `openai` or `groq` | `groq` |
-| `GROQ_API_KEY` / `OPENAI_API_KEY` | Provider credentials (never exposed to the frontend) | — |
-| `GROQ_MODEL` / `OPENAI_MODEL` | Model names | `openai/gpt-oss-20b` / `gpt-4o` |
-| `RAG_ENABLED` | Turn RAG-assisted question generation on/off | `true` |
-| `QDRANT_URL` / `QDRANT_API_KEY` | Qdrant server URL (`http(s)://…`), embedded path, or `:memory:` | `http://localhost:6333` |
-| `RAG_TOP_K` | Knowledge chunks injected per question (3–5) | `5` |
-| `NEXT_PUBLIC_API_URL` | Backend base URL — **baked into the frontend at build time** | `http://localhost:8000/api` |
+| `FRONTEND_URL` | Public SPA origin used in magic/invite links | `http://localhost:3000` |
+| `CORS_ORIGINS` | Allowed browser origins (comma-separated or JSON) | localhost:3000/5173 |
+| `MONGO_URI` / `MONGO_DB_NAME` | MongoDB connection and database | local Mongo / `ai_interview_coach` |
+| `JWT_SECRET` | JWT signing secret; required in production | dev-only value |
+| `BOOTSTRAP_ADMIN_*` | Optional seed admin created on startup | unset |
+| `FEATURE_SCREENING_ENABLED` | Close public registration for staff-invite deployments | `false` |
+| `LLM_PROVIDER` | `groq` or `openai` | `groq` |
+| `GROQ_API_KEY` / `OPENAI_API_KEY` | Provider credentials | unset |
+| `RAG_ENABLED` / `QDRANT_URL` | Toggle and locate the vector store | `true` / local Qdrant |
+| `TRANSCRIPTION_PROVIDER` | `none`, `openai`, or `groq` | `none` |
+| `MAIL_PROVIDER` | Currently only `console` | `console` |
+| `JOBS_ENABLED` | Run the background worker in this process | `false` (Compose: `true`) |
+| `INVITATION_TTL_DAYS` | Default candidate link lifetime | `7` |
+| `MAX_STAFF_SEATS` | Provisioned staff cap, `0` = unlimited | `0` |
+| `MONTHLY_LLM_BUDGET_USD` | AI spend cap, `0` = unlimited | `0` |
+| `DATA_RETENTION_DAYS` | Candidate session retention window | `365` |
+| `RETENTION_PURGE_ENABLED` | Allow the admin purge endpoint | `false` |
+| `FIELD_ENCRYPTION_KEY` | Encrypt webhook secrets at rest | unset (development only) |
+| `NEXT_PUBLIC_API_URL` | Backend URL baked into the frontend build | `http://localhost:8000/api` |
 
-> Production boot fails fast if `JWT_SECRET` still holds the default value and if `CORS_ORIGINS` contains `*`.
+Production startup fails if `JWT_SECRET` is still the default or if
+`CORS_ORIGINS` contains `*`.
 
-## Installation (without Docker)
+## Local installation (without Docker)
 
-### Prerequisites
-
-- Python 3.12+, MongoDB (local, Docker, or Atlas)
-- Node.js 20+ (frontend)
-- A Groq or OpenAI API key for LLM features (everything else runs without one; LLM-backed calls return `503` when the provider is unreachable)
-
-### Backend
+Prerequisites: Python 3.12+, Node.js 20+, MongoDB, and an LLM key. Qdrant is
+optional when `RAG_ENABLED=false`.
 
 ```bash
 cd backend
 python -m venv venv
-# Linux/macOS: source venv/bin/activate   Windows: venv\Scripts\activate
+# Windows: venv\Scripts\activate
+# Linux/macOS: source venv/bin/activate
 pip install -r requirements-dev.txt
-cp ../.env.example .env      # point MONGO_URI at a MongoDB you can reach, add your LLM key
+cp ../.env.example .env
+# edit MONGO_URI, FRONTEND_URL, JWT_SECRET, LLM key, BOOTSTRAP_ADMIN_*
 uvicorn app.main:app --reload
 ```
-
-- API base: `http://localhost:8000/api` · Health: `GET /api/health` · Docs: `http://localhost:8000/api/docs` (disabled when `ENVIRONMENT=production`)
-
-### Frontend
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:8000/api
-npm run dev                   # http://localhost:3000
-# production: npm run build && npm run start
+cp .env.example .env.local
+npm run dev
 ```
 
-## Running the Full Stack with Docker
+- API: `http://localhost:8000/api`
+- Health: `GET /api/health`
+- Docs: `http://localhost:8000/api/docs` (disabled in production)
 
-```bash
-cp .env.example .env         # set GROQ_API_KEY (or OPENAI_API_KEY) and JWT_SECRET
-docker compose up --build
-```
+## API surface
 
-- `backend` mounts `./backend` (so a `--reload`-style dev loop still works by swapping the command) and seeds env from `docker-compose.yml` + `backend/.env`.
-- `frontend` is built with `NEXT_PUBLIC_API_URL` as a build arg (defaults to `http://localhost:8000/api`) and starts only after the backend healthcheck passes.
-- `qdrant` data lives in the `qdrant_data` volume; run `docker compose run --rm backend python -m scripts.ingest_knowledge_base` to (re)ingest the knowledge base.
-- There is **no Redis service — by design** (see "Operational decisions").
+The interactive OpenAPI reference is the source of truth while the backend runs.
+The main groups are:
 
-## API Documentation
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /api/auth/register`, `POST /api/auth/login`, `GET/PATCH /api/auth/me` |
+| Practice | `/api/resumes`, `/api/job-descriptions`, `/api/interviews`, `/api/questions/{id}/answer`, `/api/dashboard/stats` |
+| Jobs | `GET/POST /api/jobs`, `GET/PATCH/DELETE /api/jobs/{id}`, `PUT /api/jobs/{id}/reviewers` |
+| Templates | `GET/POST /api/templates`, `GET/PATCH/DELETE /api/templates/{id}`, `POST /api/templates/{id}/preview` |
+| Staff | `/api/staff/invitations`, `POST /api/staff/invitations/accept`, `/api/staff/users`, `PATCH /api/staff/users/{id}/role`, `GET /api/staff/reviewers` |
+| Recruiter screening | `/api/invitations` (create/list), `/{id}/remind`, `/{id}/extend`, `/{id}/decision`, `/{id}/scorecard`, `/{id}/integrity`, `/{id}/timeline`, `/{id}/data`, `/{id}/erase`, `/shortlist`, `/analytics`, `/shadow`, `/export`, `/export.pdf`, `/retention/purge` |
+| Candidate screening | `GET /api/screening/{token}`, `POST /{token}/start`, `GET /{token}/current-question`, `POST /{token}/questions/{id}/answer`, `POST /{token}/recordings/chunk`, `POST /{token}/proctoring/events`, `POST /{token}/transcribe` |
+| Platform | `/api/api-keys`, `/api/public/jobs`, `/api/public/jobs/{id}/candidates`, `/api/public/jobs/{id}/metrics`, `/api/usage/summary`, `/api/usage/quotas`, `/api/compliance`, `/api/audit-logs` |
+| Health | `GET /api/health` |
 
-Interactive OpenAPI docs are at **`/api/docs`** while the server runs.
+## Operating model and limitations
 
-### Endpoints
-
-| Method | Path | Auth | Description | Success |
-|---|---|---|---|---|
-| `POST` | `/api/auth/register` | — | Create account (rate limited) | `201` |
-| `POST` | `/api/auth/login` | — | Get JWT (rate limited) | `200` |
-| `GET`/`PATCH` | `/api/auth/me` | Bearer | Current user / update profile | `200` |
-| `POST` | `/api/resumes/upload` | Bearer | Upload PDF/DOCX resume (rate limited) | `201` |
-| `GET` | `/api/resumes` | Bearer | List resumes (without raw text) | `200` |
-| `GET` | `/api/resumes/{id}` | Bearer | Resume detail | `200` |
-| `DELETE` | `/api/resumes/{id}` | Bearer | Delete resume + file | `204` |
-| `POST` | `/api/job-descriptions` | Bearer | Save a job description (rate limited) | `201` |
-| `GET` | `/api/job-descriptions` | Bearer | List summaries | `200` |
-| `GET` | `/api/job-descriptions/{id}` | Bearer | Job description detail | `200` |
-| `DELETE` | `/api/job-descriptions/{id}` | Bearer | Delete job description | `204` |
-| `POST` | `/api/interviews` | Bearer | Create interview (`jd_id` required, `resume_id` optional) | `201` |
-| `GET` | `/api/interviews` | Bearer | List your interviews (summaries) | `200` |
-| `GET` | `/api/interviews/{id}` | Bearer | Interview detail | `200` |
-| `POST` | `/api/interviews/{id}/start` | Bearer | Generate the first question (rate limited) | `200` |
-| `GET` | `/api/interviews/{id}/current-question` | Bearer | Resume at the current question (rate limited) | `200` |
-| `POST` | `/api/questions/{question_id}/answer` | Bearer | Submit an answer → evaluation + next question (rate limited) | `200` |
-| `GET` | `/api/interviews/{id}/report` | Bearer | Final report + preparation plan (rate limited) | `200` |
-| `GET` | `/api/dashboard/stats` | Bearer | Dashboard statistics | `200` |
-| `GET` | `/api/health` | — | Health check (DB ping → `503` if down) | `200` |
-
-Errors: `401` missing/invalid/expired token · `404` unknown id · `409` duplicate email / already completed · `413` oversized body · `422` validation · `429` rate limited · `503` LLM/database unavailable.
-
-#### Error envelope
-
-```json
-{ "detail": "Human readable message", "code": "conflict" }
-```
-
-- `422` responses carry a **list** in `detail` (one entry per field, each with `msg`).
-- `429` additionally carries `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining: 0`.
-- Every response includes `X-Request-ID`; the same value is attached to that request's log line.
-
-#### Rate-limited scopes
-
-`register` · `login` · `resume_upload` · `job_description_create` · `answer_submission` · `interview_start` · `interview_question` · `interview_report` — each with an independent budget (`RATE_LIMIT_ATTEMPTS` per `RATE_LIMIT_WINDOW_SECONDS`, keyed by client IP).
-
-## Operational decisions
-
-- **Rate limiting is in-process — no Redis.** The deployment target is a single Uvicorn process; there are no background jobs and no other shared state (long LLM calls stay on the request path with 90s timeouts). An in-memory sliding window in `app/core/rate_limit.py` is honest about that: no extra service, no serialization layer, and a `429` that is always accurate for the process serving the request. If you scale horizontally, the limiter is one self-contained module — swap its storage for Redis before running multiple replicas.
-- **CORS allows only `GET/POST/PATCH/DELETE` + `Authorization/Content-Type`, credentials off.** The SPA authenticates with a `Bearer` header from `localStorage`, never cookies, so `Access-Control-Allow-Credentials` would add CSRF surface without benefit.
-- **Structured logs carry a `X-Request-ID`.** `LOG_FORMAT=auto` emits JSON in production (one line per request: method, path, status, duration, client IP, request id) and human-readable text elsewhere; error envelopes never contain stack traces, and authorization headers are never logged.
-- **Timestamps are UTC in storage, IST on display.** MongoDB stores instants in UTC and all scheduling/comparison logic uses `datetime.now(UTC)`; naive values coming back from Motor are treated as UTC. Everything a human reads is rendered in **Asia/Kolkata (+05:30, no DST)** — email/PDF copy, structured log lines, API JSON (via `app/core/timeutil.py`), and the frontend (`lib/datetime.ts`). This is presentation only; it never changes what is stored.
-- **Job-based access control.** Every recruiting row is owned by its creator (`user_id`, or `created_by` on invitations), and access to it is resolved by *role + ownership*, never by guessing an id (a non-owner sees a `404`, so existence never leaks). Roles are `candidate`, `recruiter`, `admin`, `reviewer` (`app/models/user.py`); staff are provisioned by admin invitation.
-  - **Roles:** `recruiter` is the normal owner; `admin` is a **cross-owner override** (full parity — can list, open, edit, and delete any owner's jobs/templates and read/erase any invitation's candidate data, with every cross-owner mutation written to the audit log); `reviewer` is **read/decide only** on the specific requisitions assigned to it.
-  - **Ownership:** `find_owned_document` (`app/repositories/base.py`) scopes single-row reads/writes to `{_id, <owner>}`; `JobRepository`/`TemplateRepository` add `*_all` / `*_any` variants used only behind the admin branch.
-  - **Requisition access** is the single gate (`find_accessible_job` / `can_access_job` in `app/services/job_access.py`): owner ∨ admin ∨ assigned reviewer. Screening invitations derive their access from *their job*, with a fallback to the invitation's own `created_by` — so an invitation whose requisition was since deleted is never orphaned from revoke/decide/erase/export — and the whole pipeline (invitations, shortlist, analytics, scorecard, timeline, recording, decision) is reachable by exactly whoever can reach the job. Managing a job (edit/delete, attach template, invite/revoke/extend, assign reviewers) additionally requires owner-or-admin (`find_manageable_job`).
-  - **Reviewer assignment:** `PUT /api/jobs/{id}/reviewers` (recruiter/admin) sets `reviewer_ids`; `GET /api/staff/reviewers` lists assignable reviewer accounts. The public API (`X-API-Key`) is always **owner-scoped** regardless of the key owner's role.
-  - **Full spec:** access matrix, endpoint guards, frontend rules, and known limitations live in `docs/features/job-access-control.md`.
+- **Email is not delivered by default.** Only the `console` mail provider ships.
+  Invitations are returned to the recruiter in the API response and shown in the
+  UI; copy the link and send it manually. Adding SMTP/SES requires implementing
+  the `Mailer` interface.
+- **Webhooks need a worker.** Delivery uses the MongoDB-backed queue. Docker
+  Compose enables it (`JOBS_ENABLED=true`); for a non-Docker run, enable it in
+  `backend/.env`. With no worker, decisions are recorded but webhooks stay queued.
+- **Retention is manual.** `POST /api/invitations/retention/purge` erases expired
+  session data and anonymizes invitation rows, but no scheduler enqueues it
+  automatically. Run it from an admin/cron process if automatic retention is required.
+- **Rate limiting is in-process.** It is accurate for one backend process. Use
+  Redis before scaling to multiple replicas.
+- **`FEATURE_SCREENING_ENABLED` only closes public registration.** It is not a
+  router-level feature gate.
+- **Ownership is single-tenant per user.** Recruiters own their requisitions;
+  admins can cross owner boundaries; reviewers are limited to assigned jobs.
+- **Recordings are sensitive.** They live in GridFS and are access-checked through
+  the invitation/requisition, but anyone holding a live candidate token can
+  continue the interview session.
 
 ## Testing
 
@@ -252,33 +301,47 @@ cd backend
 .venv/bin/python -m pytest -q
 ```
 
-- Requires a reachable MongoDB: `MONGO_URI` comes from `backend/.env`. Tests run against a dedicated database (`test_ai_interview_coach`) dropped before and after the run — your data in `ai_interview_coach` is untouched.
-- `ENVIRONMENT=test` disables rate limiting for the suite (the dedicated `test_rate_limit.py` flips it back on where it is under test) and forces an in-memory Qdrant.
-- LLM calls are mocked; no real LLM API calls are made during test runs.
-- Lint/format: `ruff check app tests scripts` and `ruff format --check app tests scripts` (config in `backend/ruff.toml`).
+- The suite boots an ephemeral MongoDB and uses a dedicated test database.
+- LLM calls are mocked; Qdrant runs in memory.
+- CI enforces `ruff check app tests scripts`. `ruff format app tests scripts`
+  is available locally but is not yet enforced.
 
-**Current suite: 128 tests** — auth (register/login/me, throttling, envelopes), config/settings validation, resumes, job descriptions, interview lifecycle + answers + report, dashboard, RAG, `LLMService` retry policy, **CORS preflight/lockdown**, **rate limiting (headers, scope isolation, window expiry, test no-op, proxy keying)**, **error handlers (405/400/500/413/422, health degraded)**, and **logging (JSON formatter, format resolution, request-id middleware, no auth material logged)**.
+Coverage includes auth, config, uploads, practice interviews, jobs/templates,
+staff roles, owner/admin/reviewer access, invitations, screening, recordings,
+integrity, scorecards, shortlist, analytics, shadow mode, exports, retention,
+erasure, audit logs, quotas, usage, API keys, webhooks, CORS, rate limits, error
+envelopes, and logging.
 
-## Frontend Checks
+## Frontend checks
 
 ```bash
 cd frontend
-npm run typecheck     # tsc --noEmit (noUnusedLocals/Parameters enabled)
+npm run typecheck
 npm run build
 ```
 
-No ESLint/Prettier is configured yet.
+There is no frontend test runner or ESLint/Prettier configuration yet. CI runs
+typecheck and build.
 
-## Security Notes
+## Security notes
 
-- Passwords hashed with Argon2 (never stored or logged in plaintext)
-- JWT signed with `JWT_SECRET`; production startup fails on the default secret and on `CORS_ORIGINS=*`
-- Protected routes validated per request; Pydantic input validation on every endpoint
-- Per-IP, per-scope in-process rate limiting; `429` carries `Retry-After` and `X-RateLimit-*`; `TRUST_PROXY_HEADERS` stays off unless a proxy you control sets `X-Forwarded-For`
-- Uploads validated for extension, magic bytes, and size; stored outside the web root and never served publicly
-- CORS restricted to configured origins with an explicit method/header allow-list and no credentials; security headers set in `next.config.ts` (`X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`)
-- Auth failures are real `401`s; an expired token clears storage and redirects to `/login`
-- Untrusted document text is wrapped in tags and capped before it reaches the model (prompt-injection and cost control)
-- Bodies above `MAX_BODY_BYTES` are refused before being read; `/api/docs` is disabled when `ENVIRONMENT=production`
-- Unhandled exceptions return `500 {"detail": "Internal server error", "code": "internal_error"}` — stack traces stay in server logs; request logs never include `Authorization` headers
-- `.env` files are gitignored; only `.env.example` is committed — real keys never belong in the repository
+- Passwords are Argon2-hashed; JWTs are signed with `JWT_SECRET`.
+- Protected routes are validated per request; roles and ownership are enforced
+  server-side, and cross-owner admin mutations are audited.
+- Candidate magic-link and staff-invite tokens are stored as SHA-256 hashes.
+  Raw tokens exist only in the link.
+- Resume uploads are validated by extension, magic bytes, and size and stored
+  outside the web root.
+- Request bodies above `MAX_BODY_BYTES` are rejected before being read.
+- CORS is an explicit allow-list with credentials disabled; the SPA uses a
+  Bearer token.
+- Webhook signing secrets can be encrypted at rest with `FIELD_ENCRYPTION_KEY`.
+  Without it, they are stored in plaintext and should be treated as
+  development-only.
+- `/api/docs` is disabled in production.
+- `.env` files are gitignored; only examples are committed.
+
+## Further documentation
+
+- [Screening flow](docs/features/screening-flow.md)
+- [Job and candidate access control](docs/features/job-access-control.md)

@@ -8,7 +8,6 @@ seq=0 crash-tolerant restart, the size cap, and content-type validation.
 
 import uuid
 
-import pytest
 from bson import ObjectId
 from fastapi.testclient import TestClient
 

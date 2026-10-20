@@ -4,6 +4,10 @@ from pydantic import ValidationError
 from app.core.config import DEFAULT_JWT_SECRET, Settings
 
 
+def test_frontend_url_defaults_to_the_next_dev_server() -> None:
+    assert Settings(_env_file=None).frontend_url == "http://localhost:3000"
+
+
 def test_cors_origins_accepts_comma_separated_list() -> None:
     settings = Settings(cors_origins="http://localhost:3000, http://localhost:5173")
     assert settings.cors_origins == ["http://localhost:3000", "http://localhost:5173"]

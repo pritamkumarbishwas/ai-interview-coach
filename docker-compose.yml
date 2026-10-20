@@ -7,7 +7,11 @@ services:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB_NAME: ${MONGO_DB_NAME:-ai_interview_coach}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me}
+      # Deliver queued ATS webhooks in this single backend process. Set to
+      # false only when a separate worker owns the queue.
+      JOBS_ENABLED: ${JOBS_ENABLED:-true}
       # LLM keys are read from backend/.env (mounted into /app) or from these vars:
       LLM_PROVIDER: ${LLM_PROVIDER:-groq}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
