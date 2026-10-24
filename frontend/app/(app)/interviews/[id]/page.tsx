@@ -34,9 +34,10 @@ import { Modal } from "@/components/ui/modal";
 import { useAsync } from "@/hooks/use-async";
 import { useAuth } from "@/hooks/use-auth";
 import { useIntegritySignals } from "@/hooks/use-integrity-signals";
+import { useInterviewAgent } from "@/hooks/use-interview-agent";
 import { useInterviewRecorder } from "@/hooks/use-interview-recorder";
 import { MediaProvider, useMedia } from "@/hooks/use-media";
-import { toApiError } from "@/lib/api";
+import { clearToken, toApiError } from "@/lib/api";
 import { formatElapsed } from "@/lib/datetime";
 import {
   DIFFICULTY_LABELS,
@@ -44,6 +45,7 @@ import {
   TYPE_LABELS,
   TYPE_TONES,
 } from "@/lib/interview";
+import { isAgUiEnabled } from "@/services/interview-agent";
 import {
   completeInterview,
   deleteInterview,
@@ -55,7 +57,12 @@ import {
   submitAnswer as submitAnswerApi,
   transcribeAnswer,
 } from "@/services/interviews";
-import type { Difficulty, InterviewDetail, Question } from "@/types";
+import type {
+  AnswerResult,
+  Difficulty,
+  InterviewDetail,
+  Question,
+} from "@/types";
 import type { ChatMessage } from "@/data/mock";
 
 const DIFFICULTY_TONES: Record<Difficulty, BadgeTone> = {
@@ -141,6 +148,20 @@ function InterviewWorkspace() {
   const [saving, setSaving] = useState(false);
 
   const seededRef = useRef("");
+
+  const aguiEnabled = isAgUiEnabled();
+  const agentHistory = messages.map((message) => ({
+    id: message.id,
+    role: message.author === "ai" ? ("assistant" as const) : ("user" as const),
+    content: message.text,
+  }));
+  const agentHistorySignature = messages.map((message) => message.id).join("|");
+  const { submitAnswer: submitAnswerWithAgent } = useInterviewAgent({
+    enabled: aguiEnabled,
+    interviewId: params.id,
+    history: agentHistory,
+    historySignature: agentHistorySignature,
+  });
 
   const inProgress = interview?.status === "in_progress";
 
@@ -328,7 +349,32 @@ function InterviewWorkspace() {
     ]);
     setAiStatus("thinking");
     try {
-      const result = await submitAnswerApi(currentQuestion.id, text);
+      let result: AnswerResult;
+      if (aguiEnabled) {
+        try {
+          result = await submitAnswerWithAgent(
+            currentQuestion.id,
+            text,
+            (snapshot) => {
+              setAnsweredCount((current) =>
+                Math.max(current, snapshot.answered_count),
+              );
+            },
+          );
+        } catch (err) {
+          const apiError = toApiError(err);
+          if (apiError.status !== 501) throw err;
+          // The backend flag is off (or the route is absent): only fall back
+          // before any SSE event, so the answer has not been recorded yet.
+          console.warn(
+            "AG-UI is unavailable; falling back to the REST answer endpoint.",
+          );
+          result = await submitAnswerApi(currentQuestion.id, text);
+        }
+      } else {
+        result = await submitAnswerApi(currentQuestion.id, text);
+      }
+
       setAnsweredCount(result.questions_answered);
       if (result.status === "completed") {
         setCompleted(true);
@@ -347,7 +393,7 @@ function InterviewWorkspace() {
         setAiStatus("speaking");
         // The status resets to listening via onSpeechEnd from AIInterviewer.
       } else {
-        // No next question and not completed — treat as finished.
+        // No next question and not completed - treat as finished.
         setCompleted(true);
         await finishAndGoToResult();
       }
@@ -357,6 +403,15 @@ function InterviewWorkspace() {
       setMessages((prev) => prev.filter((item) => item.id !== messageId));
       setAiStatus("listening");
       setAnswerError(apiError.message);
+      if (apiError.status === 409) {
+        // Another tab (or a concurrent submit) advanced the interview.
+        reload();
+      } else if (apiError.status === 401) {
+        clearToken();
+        router.replace(
+          `/login?next=${encodeURIComponent(`/interviews/${params.id}`)}`,
+        );
+      }
       throw err;
     }
   };
