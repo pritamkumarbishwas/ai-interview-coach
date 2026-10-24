@@ -149,7 +149,8 @@ function InterviewWorkspace() {
 
   const seededRef = useRef("");
 
-  const aguiEnabled = isAgUiEnabled();
+  const aguiEnabled =
+    isAgUiEnabled() && interview?.kind === "practice";
   const agentHistory = messages.map((message) => ({
     id: message.id,
     role: message.author === "ai" ? ("assistant" as const) : ("user" as const),

@@ -7,6 +7,9 @@ import type { AgUiInterviewSnapshot, AnswerResult } from "@/types";
 export const AGUI_ENABLED =
   process.env.NEXT_PUBLIC_AGUI_ENABLED === "true";
 
+/** Match the REST answer endpoint's LLM timeout. */
+const AGUI_TIMEOUT_MS = 120_000;
+
 export function isAgUiEnabled(): boolean {
   return AGUI_ENABLED;
 }
@@ -95,12 +98,15 @@ export async function submitAnswerWithAgent(
 
   let result: AnswerResult | null = null;
   let runError: { message: string; code?: string | null } | null = null;
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), AGUI_TIMEOUT_MS);
 
   try {
     const run = await agent.runAgent(
       {
         runId: newId("run"),
         forwardedProps: { question_id: questionId },
+        abortController,
       },
       {
         onStateSnapshotEvent: ({ event }) => {
@@ -139,5 +145,7 @@ export async function submitAnswerWithAgent(
     return finalResult;
   } catch (error) {
     throw toAgentApiError(error);
+  } finally {
+    clearTimeout(timeout);
   }
 }

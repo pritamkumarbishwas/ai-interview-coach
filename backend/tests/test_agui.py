@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
+from app.services.interview_service import InterviewService
 from tests.conftest import INTERVIEW_LLM, Env
 
 ANSWER = "I would add a B-tree index on the foreign key and verify with EXPLAIN."
@@ -183,3 +184,46 @@ def test_agui_failure_after_streaming_is_a_run_error(
     assert streamed[-1]["code"] == "service_unavailable"
     detail = client.get(f"/api/interviews/{ctx['id']}", headers=auth_headers).json()
     assert detail["answers"] == []
+
+
+def test_agui_snapshot_refresh_failure_keeps_the_persisted_answer(
+    client: TestClient,
+    auth_headers: dict,
+    env: Env,
+    agui_enabled: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ctx = env.setup(target=3)
+    original_get = InterviewService.get
+    calls = {"count": 0}
+
+    async def flaky_get(self, db, user_id, interview_id):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("snapshot refresh down")
+        return await original_get(self, db, user_id, interview_id)
+
+    monkeypatch.setattr(InterviewService, "get", flaky_get)
+
+    with client.stream(
+        "POST",
+        f"/api/agui/interviews/{ctx['id']}",
+        headers=auth_headers,
+        json=payload(ctx["id"], ctx["question_id"]),
+    ) as response:
+        assert response.status_code == 200, response.text
+        streamed = events(response)
+
+    assert [event["type"] for event in streamed] == [
+        "RUN_STARTED",
+        "STATE_SNAPSHOT",
+        "STEP_STARTED",
+        "STEP_FINISHED",
+        "TEXT_MESSAGE_START",
+        "TEXT_MESSAGE_CONTENT",
+        "TEXT_MESSAGE_END",
+        "RUN_FINISHED",
+    ]
+    assert streamed[-1]["result"]["status"] == "in_progress"
+    detail = client.get(f"/api/interviews/{ctx['id']}", headers=auth_headers).json()
+    assert len(detail["answers"]) == 1

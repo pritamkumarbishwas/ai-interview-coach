@@ -178,11 +178,10 @@ async def stream_answer_turn(
         updated = await service.get(db, user_id, interview_id)
         yield StateSnapshotEvent(snapshot=_snapshot(updated))
     except Exception:
+        # The answer is already persisted. A cosmetic snapshot refresh failure
+        # must not turn a successful submission into a failed run, which would
+        # make the client roll back a message the server actually stored.
         logger.exception("AG-UI snapshot refresh failed for interview %s", interview_id)
-        yield RunErrorEvent(
-            message="Could not refresh the interview state.", code="internal_error"
-        )
-        return
 
     if result.next_question is not None:
         message_id = uuid.uuid4().hex
