@@ -41,6 +41,20 @@ def _patch_llm(monkeypatch) -> None:
     monkeypatch.setattr(INTERVIEW_LLM, fake)
 
 
+def _patch_llm_fail_first_question(monkeypatch) -> None:
+    state = {"failed": False}
+
+    async def fake(prompt: str, schema, **kwargs: object):
+        if schema.__name__ != "QuestionGeneration":
+            raise AssertionError(f"unexpected schema {schema.__name__}")
+        if not state["failed"]:
+            state["failed"] = True
+            raise RuntimeError("temporary question failure")
+        return schema(question="Recovered question?", topic="recovered")
+
+    monkeypatch.setattr(INTERVIEW_LLM, fake)
+
+
 def _job_with_template(
     client: TestClient, headers: dict, *, proctoring_mode: str = "off", target: int = 2
 ) -> str:
@@ -135,7 +149,11 @@ def test_candidate_runs_the_full_flow(
 
     empty_history = client.get(f"/api/screening/{token}/conversation")
     assert empty_history.status_code == 200
-    assert empty_history.json() == {"messages": [], "started_at": None}
+    assert empty_history.json() == {
+        "messages": [],
+        "started_at": None,
+        "current_question_id": None,
+    }
 
     started = client.post(f"/api/screening/{token}/start", json={"consent": False})
     assert started.status_code == 200, started.text
@@ -144,8 +162,10 @@ def test_candidate_runs_the_full_flow(
 
     started_history = client.get(f"/api/screening/{token}/conversation")
     assert started_history.status_code == 200
+    assert started_history.headers["cache-control"] == "private, no-store"
     started_body = started_history.json()
     assert started_body["started_at"]
+    assert started_body["current_question_id"] == question_id
     assert len(started_body["messages"]) == 1
     assert started_body["messages"][0]["id"] == f"ai-{question_id}"
     assert started_body["messages"][0]["author"] == "ai"
@@ -166,6 +186,7 @@ def test_candidate_runs_the_full_flow(
 
     history = client.get(f"/api/screening/{token}/conversation")
     assert history.status_code == 200
+    assert history.json()["current_question_id"] == next_id
     messages = history.json()["messages"]
     assert [message["author"] for message in messages] == ["ai", "candidate", "ai"]
     assert messages[0]["id"] == f"ai-{question_id}"
@@ -184,6 +205,27 @@ def test_candidate_runs_the_full_flow(
     final = client.get(f"/api/screening/{token}")
     assert final.json()["status"] == "completed"
     assert client.get(f"/api/screening/{token}/conversation").status_code == 409
+
+
+def test_reserved_start_retries_after_question_generation_failure(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    _patch_llm_fail_first_question(monkeypatch)
+    job_id = _job_with_template(client, staff_headers, target=2)
+    token = _token(_invite(client, staff_headers, job_id))
+
+    failed = client.post(f"/api/screening/{token}/start", json={"consent": False})
+    assert failed.status_code == 503, failed.text
+
+    # The resume path asks for the current question first; it must finish the
+    # reserved start rather than reporting the interview as complete.
+    recovered = client.get(f"/api/screening/{token}/current-question")
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["question"]["text"] == "Recovered question?"
+
+    again = client.post(f"/api/screening/{token}/start", json={"consent": False})
+    assert again.status_code == 200, again.text
+    assert again.json()["question"]["id"] == recovered.json()["question"]["id"]
 
 
 def test_conversation_rejects_mismatched_interview_owner(
@@ -235,6 +277,7 @@ def test_revoked_invitation_is_rejected(
     revoked = client.delete(f"/api/invitations/{invitation['id']}", headers=staff_headers)
     assert revoked.status_code == 204
     assert client.get(f"/api/screening/{token}").status_code == 409
+    assert client.get(f"/api/screening/{token}/conversation").status_code == 409
 
 
 def test_expired_invitation_is_rejected(
@@ -244,7 +287,9 @@ def test_expired_invitation_is_rejected(
     invitation = _invite(client, staff_headers, job_id)
     past = datetime.now(UTC) - timedelta(days=1)
     _set_invitation(invitation["id"], {"expires_at": past})
-    assert client.get(f"/api/screening/{_token(invitation)}").status_code == 409
+    token = _token(invitation)
+    assert client.get(f"/api/screening/{token}").status_code == 409
+    assert client.get(f"/api/screening/{token}/conversation").status_code == 409
 
 
 def test_deadline_is_server_enforced(
@@ -262,6 +307,27 @@ def test_deadline_is_server_enforced(
     assert client.get(f"/api/screening/{token}/current-question").status_code == 409
     assert client.get(f"/api/screening/{token}").status_code == 409
     assert client.get(f"/api/screening/{token}/conversation").status_code == 409
+
+
+def test_conversation_enforces_deadline(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    _patch_llm(monkeypatch)
+    job_id = _job_with_template(client, staff_headers, target=3)
+    invitation = _invite(client, staff_headers, job_id)
+    token = _token(invitation)
+
+    assert (
+        client.post(f"/api/screening/{token}/start", json={"consent": False}).status_code
+        == 200
+    )
+    _set_invitation(
+        invitation["id"],
+        {"round_deadline": datetime.now(UTC) - timedelta(minutes=1)},
+    )
+
+    assert client.get(f"/api/screening/{token}/conversation").status_code == 409
+    assert client.get(f"/api/screening/{token}").status_code == 409
 
 
 def test_list_and_remind_rotate_the_token(

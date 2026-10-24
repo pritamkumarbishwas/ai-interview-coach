@@ -82,14 +82,18 @@ function seedMessages(interview: InterviewDetail): ChatMessage[] {
       id: `ai-${question.id}`,
       author: "ai",
       text: question.text,
-      time: formatElapsed(interview.started_at, question.created_at),
+      time:
+        formatElapsed(interview.started_at, question.created_at) ||
+        formatTime(0),
     });
     if (!answer) break;
     out.push({
       id: `c-${answer.id}`,
       author: "candidate",
       text: answer.text,
-      time: formatElapsed(interview.started_at, answer.created_at),
+      time:
+        formatElapsed(interview.started_at, answer.created_at) ||
+        formatTime(0),
     });
   }
   return out;

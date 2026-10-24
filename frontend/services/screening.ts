@@ -45,8 +45,10 @@ export async function getCurrentQuestion(
   token: string,
 ): Promise<CurrentQuestion> {
   try {
+    // May finish a reserved start (LLM call) after a failed first attempt.
     const { data } = await api.get<CurrentQuestion>(
       `/screening/${token}/current-question`,
+      { timeout: LLM_TIMEOUT_MS },
     );
     return data;
   } catch (error) {

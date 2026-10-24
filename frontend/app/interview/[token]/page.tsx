@@ -47,7 +47,7 @@ import type {
 type Stage = "precheck" | "device" | "session" | "done";
 
 function formatTime(totalSeconds: number): string {
-  const clamped = Math.max(0, totalSeconds);
+  const clamped = Math.floor(Math.max(0, totalSeconds));
   const minutes = Math.floor(clamped / 60);
   const seconds = clamped % 60;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
@@ -171,23 +171,44 @@ function ScreeningInterview() {
         if (deadline) setDeadline(deadline.getTime());
       }
       if (current.started) {
-        // Resuming a started interview: restore the transcript, then the
-        // unanswered question. History is best-effort; the current question
-        // remains the source of truth.
-        let history: ScreeningConversation | null = null;
+        // Resuming a started interview: the current question is authoritative,
+        // then restore the stored transcript. History is best-effort.
         try {
-          history = await screening.getConversation(token);
-        } catch (caught) {
-          const apiError = toApiError(caught);
-          if (apiError.status === 409) {
-            setCompleted(true);
-            setStage("done");
-            return;
+          let cq = await screening.getCurrentQuestion(token);
+          let history: ScreeningConversation | null = null;
+          try {
+            history = await screening.getConversation(token);
+          } catch (caught) {
+            const apiError = toApiError(caught);
+            if (apiError.status === 409) {
+              setCompleted(true);
+              setStage("done");
+              return;
+            }
           }
-        }
 
-        try {
-          const cq = await screening.getCurrentQuestion(token);
+          if (
+            history?.current_question_id &&
+            history.current_question_id !== cq.question.id
+          ) {
+            // Another tab may have advanced the interview between calls.
+            // Re-read once; if it is still inconsistent, drop the transcript.
+            try {
+              cq = await screening.getCurrentQuestion(token);
+              history = await screening.getConversation(token);
+            } catch (caught) {
+              const apiError = toApiError(caught);
+              if (apiError.status === 409) throw caught;
+              history = null;
+            }
+            if (
+              history?.current_question_id &&
+              history.current_question_id !== cq.question.id
+            ) {
+              history = null;
+            }
+          }
+
           if (history?.started_at) {
             const started = parseApiDate(history.started_at);
             startedAtRef.current = started?.getTime() ?? Date.now();

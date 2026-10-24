@@ -696,6 +696,7 @@ export interface ScreeningConversationMessage {
 export interface ScreeningConversation {
   messages: ScreeningConversationMessage[];
   started_at: string | null;
+  current_question_id: string | null;
 }
 
 /** Advisory integrity summary for a candidate session (never a verdict). */

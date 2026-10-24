@@ -128,6 +128,7 @@ class ScreeningConversationOut(BaseModel):
 
     messages: list[ConversationMessageOut] = Field(default_factory=list)
     started_at: ISTDateTime | None = None
+    current_question_id: str | None = None
 
 
 class StartInterviewRequest(BaseModel):

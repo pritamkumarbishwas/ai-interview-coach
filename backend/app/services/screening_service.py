@@ -598,6 +598,20 @@ class ScreeningService:
         return ScreeningConversationOut(
             messages=messages,
             started_at=interview.started_at,
+            current_question_id=interview.current_question_id,
+        )
+
+    async def _resume_reserved_start(
+        self, db: AsyncIOMotorDatabase, invitation: ScreeningInvitation
+    ) -> CurrentQuestionOut:
+        """Finish a start whose first-question generation previously failed."""
+        interview_id = invitation.interview_id or ""
+        if invitation.proctoring_mode != "off":
+            await self._interview_service.record_proctoring_consent(
+                db, invitation.guest_user_id, interview_id, True
+            )
+        return await self._interview_service.start(
+            db, invitation.guest_user_id, interview_id
         )
 
     async def start(
@@ -608,6 +622,11 @@ class ScreeningService:
         # Idempotent: a refresh resumes the existing session instead of failing.
         if invitation.interview_id:
             await self._enforce_deadline(db, invitation)
+            doc = await self._interviews.get_by_id(db, invitation.interview_id)
+            if doc is not None and doc.get("status") == "created":
+                # The reservation succeeded but the first question never did.
+                # Retry the transition instead of leaving the invitation stuck.
+                return await self._resume_reserved_start(db, invitation)
             return await self._interview_service.current_question(
                 db, invitation.guest_user_id, invitation.interview_id
             )
@@ -654,6 +673,11 @@ class ScreeningService:
         if not invitation.interview_id:
             raise ConflictError("The interview has not been started yet.")
         await self._enforce_deadline(db, invitation)
+        doc = await self._interviews.get_by_id(db, invitation.interview_id)
+        if doc is not None and doc.get("status") == "created":
+            # A reload after a failed first-question generation must be able
+            # to finish the reserved start rather than looking completed.
+            return await self._resume_reserved_start(db, invitation)
         return await self._interview_service.current_question(
             db, invitation.guest_user_id, invitation.interview_id
         )
