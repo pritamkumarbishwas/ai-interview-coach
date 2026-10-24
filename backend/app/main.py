@@ -12,7 +12,6 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.agui import router as agui_router
 from app.api.api_keys import router as api_keys_router
 from app.api.audit import router as audit_router
 from app.api.auth import router as auth_router
@@ -314,7 +313,6 @@ app.include_router(
     interviews_router, prefix=f"{settings.api_prefix}/interviews", tags=["interviews"]
 )
 app.include_router(questions_router, prefix=f"{settings.api_prefix}/questions", tags=["questions"])
-app.include_router(agui_router, prefix=f"{settings.api_prefix}/agui", tags=["ag-ui"])
 app.include_router(dashboard_router, prefix=f"{settings.api_prefix}/dashboard", tags=["dashboard"])
 
 

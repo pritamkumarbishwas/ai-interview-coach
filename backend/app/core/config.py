@@ -161,11 +161,6 @@ class Settings(BaseSettings):
     # enter through magic links, so public self-registration is closed.
     feature_screening_enabled: bool = False
 
-    # --- AG-UI transport -----------------------------------------------------
-    # Opt-in thin transport for the practice answer turn. The frontend falls
-    # back to the REST answer endpoint when this is false (501).
-    agui_enabled: bool = False
-
     # --- Staff bootstrap ---------------------------------------------------
     # Optional seed admin, created on startup when set. This is how a fresh
     # single-company deployment gets its first privileged account (public

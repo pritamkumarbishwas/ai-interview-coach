@@ -92,7 +92,7 @@ staff invitation links.
 ```mermaid
 flowchart LR
     Browser[Candidate or staff browser] --> Next[Next.js 16 frontend]
-    Next -->|REST API; optional AG-UI transport| API[FastAPI routes and middleware]
+    Next -->|REST API| API[FastAPI routes and middleware]
     API --> Services[Service layer]
     Services --> Repos[Repository layer]
     Repos --> Mongo[(MongoDB)]

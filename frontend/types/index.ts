@@ -414,19 +414,6 @@ export interface CurrentQuestion {
   total_asked: number;
 }
 
-/** Whitelisted state snapshot emitted by the AG-UI answer transport. */
-export interface AgUiInterviewSnapshot {
-  interview_id: string;
-  status: InterviewStatus;
-  question_number: number;
-  total_questions: number;
-  answered_count: number;
-  current_question_id: string | null;
-  current_question: Question | null;
-  started_at: string | null;
-  completed: boolean;
-}
-
 export interface PreparationStep {
   focus: string;
   actions: string[];
