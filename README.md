@@ -7,19 +7,41 @@ An AI interview platform with two connected products:
 
 The AI is advisory. It generates questions, evaluates answers, and surfaces signals; it never makes the hiring decision.
 
-> **Status:** practice, recruiting, screening, review, and compliance surfaces are implemented end to end. The backend has **300+ tests**, including role/ownership access control, screening, recordings, retention, webhooks, quotas, and usage accounting.
+> **Status:** practice, recruiting, screening, review, and compliance surfaces are implemented end to end. The backend suite currently collects **389 tests**, including role/ownership access control, screening, recordings, retention, webhooks, quotas, and usage accounting.
 >
 > **Data layer:** MongoDB (Motor). Indexes are created on startup; there are no migration files. Recordings use GridFS. Qdrant is used for RAG question generation.
 
 ## Quickstart
 
+Prerequisites: Docker Desktop (or Docker Engine) with the Compose plugin, and an
+API key for Groq or OpenAI.
+
+Copy the environment templates:
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+Copy-Item backend/.env.example backend/.env
+```
+
 ```bash
+# macOS / Linux
 cp .env.example .env
 cp backend/.env.example backend/.env
-# Set GROQ_API_KEY (or OPENAI_API_KEY), JWT_SECRET, and BOOTSTRAP_ADMIN_*
-# in backend/.env. FRONTEND_URL belongs in the root .env for Docker.
+```
+
+Set `GROQ_API_KEY` (or `OPENAI_API_KEY`) in the root `.env` for Docker Compose.
+Set `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`, and
+`BOOTSTRAP_ADMIN_NAME` in `backend/.env` if you want to sign in to the
+recruiting and screening workspace on first launch.
+
+```bash
 docker compose up --build
 ```
+
+Before deploying beyond local development, set a strong, unique `JWT_SECRET`
+and configure `CORS_ORIGINS` and `FRONTEND_URL` for the real application
+origins. Never commit populated `.env` files.
 
 | Service   | Port | Purpose |
 |-----------|------|---------|
@@ -29,6 +51,12 @@ docker compose up --build
 | `qdrant`  | 6333 | Qdrant vector store for RAG (set `RAG_ENABLED=false` to skip) |
 
 Open `http://localhost:3000`. The frontend calls the API at `http://localhost:8000/api` (baked in at build time via `NEXT_PUBLIC_API_URL`).
+
+To stop the services without removing their data volumes:
+
+```bash
+docker compose down
+```
 
 ### First admin (required for recruiting and screening)
 
@@ -61,23 +89,30 @@ staff invitation links.
 
 ## Architecture
 
-```text
-Next.js frontend
-      |
-      v
-FastAPI routes (validation, auth, rate limits, response models)
-      |
-      v
-Service layer (business rules, AppError)
-      |
-      v
-Repository layer (all MongoDB queries)
-      |
-      +--> MongoDB (users, jobs, invitations, interviews, audits, jobs queue)
-      +--> GridFS (recordings)
-      +--> Qdrant (RAG knowledge chunks)
-      +--> LLM provider (Groq/OpenAI)
+```mermaid
+flowchart LR
+    Browser[Candidate or staff browser] --> Next[Next.js 16 frontend]
+    Next -->|REST API; optional AG-UI transport| API[FastAPI routes and middleware]
+    API --> Services[Service layer]
+    Services --> Repos[Repository layer]
+    Repos --> Mongo[(MongoDB)]
+    Services --> GridFS[(MongoDB GridFS<br/>resumes, previews, recordings)]
+    Services --> RAG[RAG service]
+    RAG --> Embed[fastembed<br/>local embeddings]
+    RAG --> Qdrant[(Qdrant<br/>knowledge vectors)]
+    Services --> LLM[Groq or OpenAI API]
+    Mongo --> Queue[Persistent background-job queue]
+    Queue --> Worker[Background worker]
+    Worker --> Tasks[Resume ingestion, ATS webhooks,<br/>retention jobs]
+    Tasks --> GridFS
+    Tasks --> External[Configured ATS endpoints]
 ```
+
+MongoDB stores application records and the durable job queue. Large resume
+files, extracted content, previews, and interview recordings use GridFS. The
+worker polls queued jobs; resume OCR/previews use Tesseract and LibreOffice in
+the Docker image. RAG embeds the committed knowledge base locally with
+fastembed, then retrieves relevant chunks from Qdrant for question generation.
 
 Design rules:
 
@@ -155,7 +190,7 @@ completed. Treat the link as sensitive.
 - Audit log, compliance record, secure webhook secret storage
 - Mongo-backed background queue for webhooks, resume ingestion, and retention jobs
 - GridFS-backed resume originals, extracted content, and page previews
-- CI: backend lint/format/tests, frontend typecheck/build
+- Developer checks: backend linting and tests; frontend typecheck and build
 
 ## Tech stack
 
@@ -241,18 +276,23 @@ optional when `RAG_ENABLED=false`.
 ```bash
 cd backend
 python -m venv venv
-# Windows: venv\Scripts\activate
-# Linux/macOS: source venv/bin/activate
+# Windows PowerShell: .\venv\Scripts\Activate.ps1
+# macOS/Linux: source venv/bin/activate
 pip install -r requirements-dev.txt
-cp ../.env.example .env
-# edit MONGO_URI, FRONTEND_URL, JWT_SECRET, LLM key, BOOTSTRAP_ADMIN_*
+# Copy backend/.env.example to backend/.env:
+# Windows PowerShell: Copy-Item .env.example .env
+# macOS/Linux: cp .env.example .env
+# Configure MONGO_URI, FRONTEND_URL, JWT_SECRET, an LLM key, and optional
+# BOOTSTRAP_ADMIN_* values in backend/.env.
 uvicorn app.main:app --reload
 ```
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env.local
+# Copy frontend/.env.example to frontend/.env.local:
+# Windows PowerShell: Copy-Item .env.example .env.local
+# macOS/Linux: cp .env.example .env.local
 npm run dev
 ```
 
@@ -343,8 +383,8 @@ cd backend
 
 - The suite boots an ephemeral MongoDB and uses a dedicated test database.
 - LLM calls are mocked; Qdrant runs in memory.
-- CI enforces `ruff check app tests scripts`. `ruff format app tests scripts`
-  is available locally but is not yet enforced.
+- Run `ruff check app tests scripts` for linting. `ruff format app tests
+  scripts` is available locally; formatting is not enforced automatically.
 
 Coverage includes auth, config, uploads, practice interviews, jobs/templates,
 staff roles, owner/admin/reviewer access, invitations, screening, recordings,
@@ -360,8 +400,8 @@ npm run typecheck
 npm run build
 ```
 
-There is no frontend test runner or ESLint/Prettier configuration yet. CI runs
-typecheck and build.
+There is no frontend test runner or ESLint/Prettier configuration yet; the
+available checks are TypeScript typechecking and a production build.
 
 ## Security notes
 
