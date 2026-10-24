@@ -7,56 +7,50 @@ An AI interview platform with two connected products:
 
 The AI is advisory. It generates questions, evaluates answers, and surfaces signals; it never makes the hiring decision.
 
-> **Status:** practice, recruiting, screening, review, and compliance surfaces are implemented end to end. The backend suite currently collects **389 tests**, including role/ownership access control, screening, recordings, retention, webhooks, quotas, and usage accounting.
+> **Status:** practice, recruiting, screening, review, and compliance surfaces are implemented end to end. The backend suite currently collects **381 tests**, including role/ownership access control, screening, recordings, retention, webhooks, quotas, and usage accounting.
 >
 > **Data layer:** MongoDB (Motor). Indexes are created on startup; there are no migration files. Recordings use GridFS. Qdrant is used for RAG question generation.
 
 ## Quickstart
 
-Prerequisites: Docker Desktop (or Docker Engine) with the Compose plugin, and an
-API key for Groq or OpenAI.
+Prerequisites: Python 3.12+, Node.js 20.9+, MongoDB 7+, and an API key for Groq
+or OpenAI. Qdrant is optional when `RAG_ENABLED=false`.
 
-Copy the environment templates:
-
-```powershell
-# Windows PowerShell
-Copy-Item .env.example .env
-Copy-Item backend/.env.example backend/.env
-```
+### Backend
 
 ```bash
-# macOS / Linux
-cp .env.example .env
-cp backend/.env.example backend/.env
+cd backend
+python -m venv venv
+# Windows PowerShell: .\venv\Scripts\Activate.ps1
+# macOS/Linux: source venv/bin/activate
+pip install -r requirements-dev.txt
+# Copy backend/.env.example to backend/.env:
+# Windows PowerShell: Copy-Item .env.example .env
+# macOS/Linux: cp .env.example .env
+uvicorn app.main:app --reload
 ```
 
-Set `GROQ_API_KEY` (or `OPENAI_API_KEY`) in the root `.env` for Docker Compose.
-Set `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`, and
-`BOOTSTRAP_ADMIN_NAME` in `backend/.env` if you want to sign in to the
-recruiting and screening workspace on first launch.
+Set `MONGO_URI`, `FRONTEND_URL`, a strong `JWT_SECRET`, and either
+`GROQ_API_KEY` or `OPENAI_API_KEY` in `backend/.env`. Set
+`BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`, and
+`BOOTSTRAP_ADMIN_NAME` there to create a seed staff account on first launch.
+
+The API runs at `http://localhost:8000/api`; the interactive reference is at
+`http://localhost:8000/api/docs` (disabled in production).
+
+### Frontend
 
 ```bash
-docker compose up --build
+cd frontend
+npm install
+# Copy frontend/.env.example to frontend/.env.local:
+# Windows PowerShell: Copy-Item .env.example .env.local
+# macOS/Linux: cp .env.example .env.local
+npm run dev
 ```
 
-Before deploying beyond local development, set a strong, unique `JWT_SECRET`
-and configure `CORS_ORIGINS` and `FRONTEND_URL` for the real application
-origins. Never commit populated `.env` files.
-
-| Service   | Port | Purpose |
-|-----------|------|---------|
-| `frontend`| 3000 | Next.js app (production build) |
-| `backend` | 8000 | FastAPI API (`/api`, interactive docs at `/api/docs`) |
-| `mongo`   | 27017 | MongoDB 7 (healthcheck) |
-| `qdrant`  | 6333 | Qdrant vector store for RAG (set `RAG_ENABLED=false` to skip) |
-
-Open `http://localhost:3000`. The frontend calls the API at `http://localhost:8000/api` (baked in at build time via `NEXT_PUBLIC_API_URL`).
-
-To stop the services without removing their data volumes:
-
-```bash
-docker compose down
-```
+Open `http://localhost:3000`. Only `NEXT_PUBLIC_API_URL` is required in
+`frontend/.env.local`; it defaults to `http://localhost:8000/api`.
 
 ### First admin (required for recruiting and screening)
 
@@ -70,16 +64,16 @@ BOOTSTRAP_ADMIN_PASSWORD=replace-with-a-strong-password
 BOOTSTRAP_ADMIN_NAME=Admin
 ```
 
-Start the stack, log in, and invite recruiters/reviewers from **Team**. Once the
+Start the backend, log in, and invite recruiters/reviewers from **Team**. Once the
 real admin accounts exist, blank the bootstrap password so the seed is not
 recreated or promoted on later starts.
 
 ### Environment precedence
 
-- **Root `.env`** is read by Docker Compose for interpolation and for the
-  variables Compose explicitly passes into the backend.
-- **`backend/.env`** is read directly by FastAPI. Put bootstrap admin settings,
-  mail settings, feature switches, and any backend-only settings there.
+- **`backend/.env`** is read directly by FastAPI and holds database, auth, LLM,
+  bootstrap admin, mail, feature-switch, and other backend settings. If a
+  repo-root `.env` exists, the backend reads it too; keep settings in one place
+  to avoid surprises.
 - **`frontend/.env.local`** is read by Next.js. Only `NEXT_PUBLIC_API_URL` is
   required.
 
@@ -110,8 +104,8 @@ flowchart LR
 
 MongoDB stores application records and the durable job queue. Large resume
 files, extracted content, previews, and interview recordings use GridFS. The
-worker polls queued jobs; resume OCR/previews use Tesseract and LibreOffice in
-the Docker image. RAG embeds the committed knowledge base locally with
+worker polls queued jobs; resume OCR/previews use Tesseract and LibreOffice on
+the host. RAG embeds the committed knowledge base locally with
 fastembed, then retrieves relevant chunks from Qdrant for question generation.
 
 Design rules:
@@ -199,10 +193,10 @@ completed. Treat the link as sensitive.
 | Backend   | Python 3.12+, FastAPI, Pydantic v2, Uvicorn |
 | Database  | MongoDB (Motor), GridFS |
 | Auth      | JWT (PyJWT), Argon2 password hashing |
-| AI        | OpenAI-compatible client (`openai` or `groq`), structured output generation |
+| AI        | OpenAI SDK (`AsyncOpenAI`) pointed at OpenAI or Groq, structured output generation |
 | RAG       | Qdrant + fastembed (`BAAI/bge-small-en-v1.5`) |
 | Frontend  | Next.js 16, React 19, TypeScript, Tailwind CSS v4, Lucide |
-| Infra     | Docker, Docker Compose |
+| Infra     | Local Uvicorn + Next.js processes; MongoDB and optional Qdrant |
 
 ## Folder structure
 
@@ -212,31 +206,34 @@ ai-interview-coach/
 │   ├── app/
 │   │   ├── api/             # routes and dependency wiring
 │   │   ├── core/            # config, database, jobs, webhooks, mail, logging
+│   │   ├── emails/          # email templates
+│   │   ├── integrations/    # ATS webhook clients
 │   │   ├── models/          # domain models
 │   │   ├── schemas/         # request/response schemas
-│   │   ├── services/        # business logic and orchestration
+│   │   ├── services/        # business logic, parsers, orchestration
 │   │   ├── repositories/    # MongoDB queries
 │   │   ├── prompts/         # LLM prompts
 │   │   └── main.py          # app lifecycle, middleware, routers
 │   ├── scripts/             # knowledge-base ingestion and utilities
-│   ├── tests/               # backend test suite
-│   └── Dockerfile
+│   └── tests/               # backend test suite
 ├── frontend/
 │   ├── app/                 # App Router pages
 │   ├── components/          # UI, recruiting, interview components
+│   ├── data/                # static demo and seed data
 │   ├── hooks/               # auth, media, recorder, integrity, async state
-│   ├── services/            # typed API clients
 │   ├── lib/                 # API client, formatting, role labels
-│   └── Dockerfile
+│   ├── public/              # static assets
+│   ├── services/            # typed API clients
+│   └── types/               # shared TypeScript types
 ├── data/knowledge_base/     # RAG source documents
-├── docker-compose.yml
 └── README.md
 ```
 
 ## Environment variables
 
-Copy `.env.example` to `.env` and `backend/.env.example` to `backend/.env`.
-The examples contain the full annotated list; the most important settings are:
+Copy `backend/.env.example` to `backend/.env` and `frontend/.env.example` to
+`frontend/.env.local`. The examples contain the full annotated list; the most
+important backend settings are:
 
 | Variable | Description | Default |
 |---|---|---|
@@ -251,8 +248,8 @@ The examples contain the full annotated list; the most important settings are:
 | `RAG_ENABLED` / `QDRANT_URL` | Toggle and locate the vector store | `true` / local Qdrant |
 | `TRANSCRIPTION_PROVIDER` | `none`, `openai`, or `groq` | `none` |
 | `MAIL_PROVIDER` | Currently only `console` | `console` |
-| `JOBS_ENABLED` | Run the background worker in this process | `false` (Compose: `true`) |
-| `RESUME_PROCESSING_INLINE` | Analyze uploads on the request instead of the job worker | `true` (Compose: `false`) |
+| `JOBS_ENABLED` | Run the background worker in this process | `false` |
+| `RESUME_PROCESSING_INLINE` | Analyze uploads on the request instead of the job worker | `true` |
 | `RESUME_OCR_ENABLED` / `RESUME_OCR_LANGUAGES` | Read scanned pages with Tesseract | `true` / `eng` |
 | `RESUME_PREVIEW_DPI` / `RESUME_MAX_PREVIEWS` | Page-preview quality and cap | `144` / `40` |
 | `TESSERACT_CMD` / `LIBREOFFICE_CMD` | Binary names/paths for OCR and DOCX previews | `tesseract` / `soffice` |
@@ -267,42 +264,7 @@ The examples contain the full annotated list; the most important settings are:
 Production startup fails if `JWT_SECRET` is still the default or if
 `CORS_ORIGINS` contains `*`.
 
-## Local installation (without Docker)
-
-Prerequisites: Python 3.12+, Node.js 20+, MongoDB, and an LLM key. Qdrant is
-optional when `RAG_ENABLED=false`.
-
-```bash
-cd backend
-python -m venv venv
-# Windows PowerShell: .\venv\Scripts\Activate.ps1
-# macOS/Linux: source venv/bin/activate
-pip install -r requirements-dev.txt
-# Copy backend/.env.example to backend/.env:
-# Windows PowerShell: Copy-Item .env.example .env
-# macOS/Linux: cp .env.example .env
-# Configure MONGO_URI, FRONTEND_URL, JWT_SECRET, an LLM key, and optional
-# BOOTSTRAP_ADMIN_* values in backend/.env.
-uvicorn app.main:app --reload
-```
-
-```bash
-cd frontend
-npm install
-# Copy frontend/.env.example to frontend/.env.local:
-# Windows PowerShell: Copy-Item .env.example .env.local
-# macOS/Linux: cp .env.example .env.local
-npm run dev
-```
-
-- API: `http://localhost:8000/api`
-- Health: `GET /api/health`
-- Docs: `http://localhost:8000/api/docs` (disabled in production)
-- Resume OCR/previews: install Tesseract and LibreOffice, or accept the
-  text-only fallback. On Windows, set `TESSERACT_CMD`/`LIBREOFFICE_CMD` if the
-  binaries are not on `PATH`.
-
-### Migrating legacy resume files
+## Migrating legacy resume files
 
 Older deployments stored uploads under `backend/data/resumes` and kept only a
 `storage_key` in MongoDB. Move them into GridFS before removing that volume:
@@ -332,7 +294,7 @@ The main groups are:
 | Templates | `GET/POST /api/templates`, `GET/PATCH/DELETE /api/templates/{id}`, `POST /api/templates/{id}/preview` |
 | Staff | `/api/staff/invitations`, `POST /api/staff/invitations/accept`, `/api/staff/users`, `PATCH /api/staff/users/{id}/role`, `GET /api/staff/reviewers` |
 | Recruiter screening | `/api/invitations` (create/list), `/{id}/remind`, `/{id}/extend`, `/{id}/decision`, `/{id}/scorecard`, `/{id}/integrity`, `/{id}/timeline`, `/{id}/data`, `/{id}/erase`, `/shortlist`, `/analytics`, `/shadow`, `/export`, `/export.pdf`, `/retention/purge` |
-| Candidate screening | `GET /api/screening/{token}`, `POST /{token}/start`, `GET /{token}/current-question`, `POST /{token}/questions/{id}/answer`, `POST /{token}/recordings/chunk`, `POST /{token}/proctoring/events`, `POST /{token}/transcribe` |
+| Candidate screening | `GET /api/screening/{token}`, `GET /{token}/conversation`, `POST /{token}/start`, `GET /{token}/current-question`, `POST /{token}/questions/{id}/answer`, `POST /{token}/recordings/chunk`, `POST /{token}/proctoring/events`, `POST /{token}/transcribe` |
 | Platform | `/api/api-keys`, `/api/public/jobs`, `/api/public/jobs/{id}/candidates`, `/api/public/jobs/{id}/metrics`, `/api/usage/summary`, `/api/usage/quotas`, `/api/compliance`, `/api/audit-logs` |
 | Health | `GET /api/health` |
 
@@ -343,13 +305,13 @@ The main groups are:
   UI; copy the link and send it manually. Adding SMTP/SES requires implementing
   the `Mailer` interface.
 - **Webhooks and resume ingestion need a worker.** Both use the MongoDB-backed
-  queue. Docker Compose enables it (`JOBS_ENABLED=true`) and sets
-  `RESUME_PROCESSING_INLINE=false`. For a non-Docker run, either enable the
-  worker in `backend/.env` or keep `RESUME_PROCESSING_INLINE=true`. With no
-  worker and inline processing disabled, uploads stay `pending` and webhooks
-  stay queued.
+  queue. Enable the worker with `JOBS_ENABLED=true`, or keep
+  `RESUME_PROCESSING_INLINE=true` so uploads are analyzed during the request.
+  With no worker and inline processing disabled, uploads stay `pending` and
+  webhooks stay queued.
 - **OCR and DOCX previews need CLI tools.** Scanned PDFs use Tesseract; DOCX
-  previews use LibreOffice. The Docker image installs both. Without them the
+  previews use LibreOffice. Install both on the host (on Windows, set
+  `TESSERACT_CMD`/`LIBREOFFICE_CMD` if they are not on `PATH`). Without them the
   original, text, and structured analysis still work, and the resume records a
   warning instead of failing.
 - **Resume storage is durable and owner-scoped.** Originals, extracted content,
@@ -377,7 +339,7 @@ cd backend
 # Windows
 .\venv\Scripts\python -m pytest -q
 # Linux / macOS
-.venv/bin/python -m pytest -q
+venv/bin/python -m pytest -q
 ```
 
 - The suite boots an ephemeral MongoDB and uses a dedicated test database.
