@@ -228,7 +228,6 @@ ai-interview-coach/
 │   ├── services/            # typed API clients
 │   ├── lib/                 # API client, formatting, role labels
 │   └── Dockerfile
-├── docs/features/           # screening and access-control documentation
 ├── data/knowledge_base/     # RAG source documents
 ├── docker-compose.yml
 └── README.md
@@ -424,8 +423,3 @@ available checks are TypeScript typechecking and a production build.
   development-only.
 - `/api/docs` is disabled in production.
 - `.env` files are gitignored; only examples are committed.
-
-## Further documentation
-
-- [Screening flow](docs/features/screening-flow.md)
-- [Job and candidate access control](docs/features/job-access-control.md)
