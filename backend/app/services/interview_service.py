@@ -38,6 +38,7 @@ from app.schemas.interview import (
     DEFAULT_TARGET_QUESTIONS,
     CurrentQuestionOut,
     InterviewCreate,
+    InterviewListOut,
     InterviewOut,
     InterviewResultsOut,
     InterviewSummary,
@@ -55,6 +56,19 @@ logger = logging.getLogger(__name__)
 # Topic score cutoffs (per-topic scores are means of 0-100 evaluations).
 STRONG_TOPIC_MIN_SCORE = 70.0
 WEAK_TOPIC_MAX_SCORE = 50.0
+
+# Values written by older versions/tests. Normalizing on read keeps one bad
+# legacy document from turning a whole list response into a 500.
+_DIFFICULTIES = {"beginner", "intermediate", "advanced"}
+_DIFFICULTY_ALIASES = {
+    "easy": "beginner",
+    "medium": "intermediate",
+    "hard": "advanced",
+}
+_INTERVIEW_TYPES = {"technical", "behavioral", "hr", "mixed", "system_design"}
+_INTERVIEW_STATUSES = {"created", "in_progress", "completed"}
+_INTERVIEW_KINDS = {"practice", "screening"}
+_PROCTORING_MODES = {"off", "camera_only", "strict"}
 
 # Cap the verbatim quotes stored per answer so a chatty model cannot bloat the
 # evaluation document.
@@ -239,24 +253,56 @@ def _report_out(interview: Interview) -> ReportOut:
     )
 
 
+def _normalize_choice(value: object, allowed: set[str], default: str) -> str:
+    return value if isinstance(value, str) and value in allowed else default
+
+
+def _normalize_difficulty(value: object) -> str:
+    text = value.strip().lower() if isinstance(value, str) else ""
+    text = _DIFFICULTY_ALIASES.get(text, text)
+    return text if text in _DIFFICULTIES else "intermediate"
+
+
+def _normalize_target_questions(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool):
+        return DEFAULT_TARGET_QUESTIONS
+    return max(1, min(20, value))
+
+
 def _summary_out(doc: dict) -> InterviewSummary:
     report = doc.get("report")
     raw_score = report.get("overall_score") if isinstance(report, dict) else None
-    score = float(raw_score) if isinstance(raw_score, (int, float)) else None
+    score = (
+        float(raw_score)
+        if isinstance(raw_score, (int, float)) and not isinstance(raw_score, bool)
+        else None
+    )
+    created_at = doc.get("created_at")
+    if not isinstance(created_at, datetime):
+        # The repository derives this from the ObjectId when possible; this is
+        # the last-resort guard for documents with an unparseable id.
+        created_at = datetime.now(UTC)
+    completed_at = doc.get("completed_at")
+    if not isinstance(completed_at, datetime):
+        completed_at = None
+    questions = doc.get("questions")
+    answers = doc.get("answers")
     return InterviewSummary(
-        id=doc["_id"],
-        role=doc.get("role", ""),
-        kind=doc.get("kind", "practice"),
-        type=doc.get("type", "technical"),
-        difficulty=doc.get("difficulty", "intermediate"),
-        status=doc.get("status", "created"),
-        proctoring_mode=doc.get("proctoring_mode", "strict"),
-        question_count=len(doc.get("questions") or []),
-        answered_count=len(doc.get("answers") or []),
-        target_questions=doc.get("target_questions", DEFAULT_TARGET_QUESTIONS),
+        id=str(doc["_id"]),
+        role=str(doc.get("role") or "Interview"),
+        kind=_normalize_choice(doc.get("kind"), _INTERVIEW_KINDS, "practice"),
+        type=_normalize_choice(doc.get("type"), _INTERVIEW_TYPES, "technical"),
+        difficulty=_normalize_difficulty(doc.get("difficulty")),
+        status=_normalize_choice(doc.get("status"), _INTERVIEW_STATUSES, "created"),
+        proctoring_mode=_normalize_choice(
+            doc.get("proctoring_mode"), _PROCTORING_MODES, "off"
+        ),
+        question_count=len(questions) if isinstance(questions, list) else 0,
+        answered_count=len(answers) if isinstance(answers, list) else 0,
+        target_questions=_normalize_target_questions(doc.get("target_questions")),
         score=score,
-        created_at=doc["created_at"],
-        completed_at=doc.get("completed_at"),
+        created_at=created_at,
+        completed_at=completed_at,
     )
 
 
@@ -351,10 +397,33 @@ class InterviewService:
         return _interview_out(interview)
 
     async def list(
-        self, db: AsyncIOMotorDatabase, user_id: str, limit: int
-    ) -> list[InterviewSummary]:
-        docs = await self._interviews.list_for_user(db, user_id, limit)
-        return [_summary_out(doc) for doc in docs]
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        limit: int,
+        *,
+        offset: int = 0,
+        status: str | None = None,
+        interview_type: str | None = None,
+        query: str | None = None,
+    ) -> InterviewListOut:
+        docs, total = await self._interviews.list_for_user(
+            db,
+            user_id,
+            limit,
+            offset=offset,
+            status=status,
+            interview_type=interview_type,
+            query=query,
+        )
+        items = [_summary_out(doc) for doc in docs]
+        return InterviewListOut(
+            items=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            has_more=offset + len(items) < total,
+        )
 
     async def results(
         self,

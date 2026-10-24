@@ -4,8 +4,9 @@ import type {
   CreateInterviewInput,
   CurrentQuestion,
   InterviewDetail,
+  InterviewList,
+  InterviewListParams,
   InterviewResults,
-  InterviewSummary,
   Question,
   RecordingPlaybackUrl,
   Report,
@@ -17,9 +18,11 @@ const LLM_TIMEOUT_MS = 120_000;
 /** Recording chunks can be large; give uploads generous headroom. */
 const UPLOAD_TIMEOUT_MS = 60_000;
 
-export async function listInterviews(): Promise<InterviewSummary[]> {
+export async function listInterviews(
+  params: InterviewListParams = {},
+): Promise<InterviewList> {
   try {
-    const { data } = await api.get<InterviewSummary[]>("/interviews");
+    const { data } = await api.get<InterviewList>("/interviews", { params });
     return data;
   } catch (error) {
     throw toApiError(error);

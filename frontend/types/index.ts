@@ -261,6 +261,23 @@ export interface InterviewSummary {
   completed_at: string | null;
 }
 
+export interface InterviewListParams {
+  limit?: number;
+  offset?: number;
+  status?: InterviewStatus;
+  type?: InterviewType;
+  q?: string;
+}
+
+/** Response of `GET /api/interviews`. */
+export interface InterviewList {
+  items: InterviewSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+}
+
 export type ResultsSort = "recent" | "score_desc" | "score_asc";
 
 /** Response of `GET /api/interviews/results`. */

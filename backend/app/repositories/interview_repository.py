@@ -1,6 +1,8 @@
+import re
 from datetime import UTC, datetime
 from typing import Any
 
+from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
@@ -60,14 +62,40 @@ class InterviewRepository:
         result = await db[self.collection_name].insert_one(doc)
         return str(result.inserted_id)
 
-    async def list_for_user(self, db: AsyncIOMotorDatabase, user_id: str, limit: int) -> list[dict]:
+    async def list_for_user(
+        self,
+        db: AsyncIOMotorDatabase,
+        user_id: str,
+        limit: int,
+        *,
+        offset: int = 0,
+        status: str | None = None,
+        interview_type: str | None = None,
+        query: str | None = None,
+    ) -> tuple[list[dict], int]:
+        """One page of the user's interviews plus the unpaginated total.
+
+        Filters live in the query so pagination stays correct: filtering in the
+        client would only see the current page.
+        """
+        match: dict[str, Any] = {"user_id": user_id}
+        if status:
+            match["status"] = status
+        if interview_type:
+            match["type"] = interview_type
+        needle = (query or "").strip()
+        if needle:
+            match["role"] = {"$regex": re.escape(needle), "$options": "i"}
+
+        collection = db[self.collection_name]
+        total = await collection.count_documents(match)
         cursor = (
-            db[self.collection_name]
-            .find({"user_id": user_id}, LIST_PROJECTION)
-            .sort("created_at", -1)
+            collection.find(match, LIST_PROJECTION)
+            .sort([("created_at", -1), ("_id", -1)])
+            .skip(offset)
             .limit(limit)
         )
-        return [self._shape(doc) async for doc in cursor]
+        return [self._shape(doc) async for doc in cursor], total
 
     async def stats_for_user(
         self,
@@ -567,7 +595,13 @@ class InterviewRepository:
 
     @staticmethod
     def _shape(doc: dict[str, Any]) -> dict:
-        """Expose `_id` as a string for the Pydantic model."""
+        """Expose `_id` as a string for the Pydantic model.
+
+        Legacy documents can predate `created_at`; the ObjectId embeds the
+        insert time, so use it instead of failing response validation.
+        """
+        if doc.get("created_at") is None and isinstance(doc.get("_id"), ObjectId):
+            doc["created_at"] = doc["_id"].generation_time
         return stringify_id(doc)
 
 

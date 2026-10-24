@@ -29,7 +29,7 @@ from app.api.staff import router as staff_router
 from app.api.templates import router as templates_router
 from app.api.usage import router as usage_router
 from app.core.config import settings
-from app.core.database import close_mongo, connect_to_mongo, ensure_indexes
+from app.core.database import close_mongo, connect_to_mongo, ensure_indexes, wait_for_mongo
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
 from app.core.rate_limit import client_key
@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI):
     client = await connect_to_mongo()
     app.state.mongo = client
     db = client[settings.mongo_db_name]
+    await wait_for_mongo(db)
     await ensure_indexes(db)
     await ensure_bootstrap_admin(db)
 

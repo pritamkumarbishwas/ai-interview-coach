@@ -54,6 +54,16 @@ class InterviewSummary(BaseModel):
     completed_at: ISTDateTime | None = None
 
 
+class InterviewListOut(BaseModel):
+    """Paginated list response; `total` is the count before pagination."""
+
+    items: list[InterviewSummary] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 24
+    offset: int = 0
+    has_more: bool = False
+
+
 ResultsSort = Literal["recent", "score_desc", "score_asc"]
 
 

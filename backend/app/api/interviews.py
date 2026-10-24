@@ -14,13 +14,14 @@ from app.core.security import (
     create_recording_playback_token,
     decode_recording_playback_token,
 )
+from app.models.interview import InterviewStatus, InterviewType
 from app.models.user import User
 from app.schemas.interview import (
     CurrentQuestionOut,
     InterviewCreate,
+    InterviewListOut,
     InterviewOut,
     InterviewResultsOut,
-    InterviewSummary,
     ProctoringConsent,
     ProctoringEventCreate,
     RecordingPlaybackOut,
@@ -44,14 +45,27 @@ async def create_interview(
     return await service.create(db, current_user.id, payload)
 
 
-@router.get("", response_model=list[InterviewSummary])
+@router.get("", response_model=InterviewListOut)
 async def list_interviews(
     current_user: User = Depends(get_current_user),
     db: AsyncIOMotorDatabase = Depends(get_db),
     service: InterviewService = Depends(get_interview_service),
-    limit: int = Query(default=50, ge=1, le=100),
-) -> list[InterviewSummary]:
-    return await service.list(db, current_user.id, limit)
+    limit: int = Query(default=24, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    status_filter: InterviewStatus | None = Query(default=None, alias="status"),
+    type_filter: InterviewType | None = Query(default=None, alias="type"),
+    q: str | None = Query(default=None, max_length=200),
+) -> InterviewListOut:
+    """The user's interviews, newest first, with server-side filters."""
+    return await service.list(
+        db,
+        current_user.id,
+        limit=limit,
+        offset=offset,
+        status=status_filter,
+        interview_type=type_filter,
+        query=q,
+    )
 
 
 @router.get("/results", response_model=InterviewResultsOut)

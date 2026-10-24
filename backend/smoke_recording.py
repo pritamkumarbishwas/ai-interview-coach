@@ -165,7 +165,11 @@ def run() -> int:
         )
         check("upload non-owner -> 404 (find_owned)", r.status_code == 404, f"got {r.status_code}")
         r = client.get(f"/api/interviews/{iid}/recordings/camera", headers=h_b)
-        check("download non-owner -> 404 (find_owned)", r.status_code == 404, f"got {r.status_code}")
+        check(
+            "download non-owner -> 404 (find_owned)",
+            r.status_code == 404,
+            f"got {r.status_code}",
+        )
 
         print("== round-trip ==")
         c0 = bytes(range(256)) * 40  # 10240 bytes

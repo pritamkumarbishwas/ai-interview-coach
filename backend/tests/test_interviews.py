@@ -145,8 +145,12 @@ def test_list_and_get_interview(
 
     listed = client.get("/api/interviews", headers=auth_headers)
     assert listed.status_code == 200
-    summaries = listed.json()
-    match = next(item for item in summaries if item["id"] == created["id"])
+    body = listed.json()
+    assert set(body) == {"items", "total", "limit", "offset", "has_more"}
+    assert body["total"] >= 1
+    assert body["offset"] == 0
+    assert body["has_more"] is False
+    match = next(item for item in body["items"] if item["id"] == created["id"])
     assert match["question_count"] == 0
     # The list projection never ships the question texts.
     assert "questions" not in match
@@ -154,6 +158,97 @@ def test_list_and_get_interview(
     detail = client.get(f"/api/interviews/{created['id']}", headers=auth_headers)
     assert detail.status_code == 200
     assert detail.json()["id"] == created["id"]
+
+
+def test_list_supports_pagination_filtering_and_search(
+    client: TestClient, auth_headers: dict, interview_context: dict
+) -> None:
+    created = [
+        ("Backend Engineer", "technical"),
+        ("Data Engineer", "behavioral"),
+        ("Product Designer", "hr"),
+    ]
+    for role, interview_type in created:
+        response = client.post(
+            "/api/interviews",
+            headers=auth_headers,
+            json=interview_payload(
+                interview_context, role=role, type=interview_type
+            ),
+        )
+        assert response.status_code == 201, response.text
+
+    first = client.get(
+        "/api/interviews", headers=auth_headers, params={"limit": 2}
+    ).json()
+    assert first["total"] == 3
+    assert len(first["items"]) == 2
+    assert first["has_more"] is True
+
+    second = client.get(
+        "/api/interviews",
+        headers=auth_headers,
+        params={"limit": 2, "offset": 2},
+    ).json()
+    assert second["total"] == 3
+    assert len(second["items"]) == 1
+    assert second["has_more"] is False
+    assert {item["id"] for item in first["items"]}.isdisjoint(
+        item["id"] for item in second["items"]
+    )
+
+    typed = client.get(
+        "/api/interviews", headers=auth_headers, params={"type": "behavioral"}
+    ).json()
+    assert typed["total"] == 1
+    assert typed["items"][0]["role"] == "Data Engineer"
+
+    searched = client.get(
+        "/api/interviews", headers=auth_headers, params={"q": "engineer"}
+    ).json()
+    assert searched["total"] == 2
+
+    missing = client.get(
+        "/api/interviews", headers=auth_headers, params={"status": "completed"}
+    ).json()
+    assert missing["total"] == 0
+    assert missing["items"] == []
+
+
+def test_list_normalizes_legacy_documents(
+    client: TestClient, auth_headers: dict, registered_user: dict
+) -> None:
+    from tests.conftest import _with_mongo
+
+    async def insert(db) -> None:
+        user = await db.users.find_one({"email": registered_user["email"]})
+        assert user is not None
+        await db.interviews.insert_one(
+            {
+                "user_id": str(user["_id"]),
+                "role": "Legacy Role",
+                "kind": "practice",
+                "type": "technical",
+                # Values written by old versions; the read path repairs them.
+                "difficulty": "medium",
+                "status": "completed",
+                "proctoring_mode": "bogus",
+                "target_questions": 5,
+                "questions": [{"id": "legacy-question"}],
+            }
+        )
+
+    _with_mongo(insert)
+
+    body = client.get("/api/interviews", headers=auth_headers).json()
+    assert body["total"] == 1
+    item = body["items"][0]
+    assert item["role"] == "Legacy Role"
+    assert item["difficulty"] == "intermediate"
+    assert item["proctoring_mode"] == "off"
+    assert item["question_count"] == 1
+    assert item["created_at"] is not None
+    assert item["completed_at"] is None
 
 
 def test_get_unknown_interview_is_404(client: TestClient, auth_headers: dict) -> None:

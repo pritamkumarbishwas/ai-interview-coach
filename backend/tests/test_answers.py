@@ -58,7 +58,7 @@ def test_answer_defers_evaluation_and_returns_next_question(
 def test_list_shows_progress_counts(client: TestClient, auth_headers: dict, env: Env) -> None:
     ctx = env.setup(target=3)
     answer(client, auth_headers, ctx["question_id"])
-    summaries = client.get("/api/interviews", headers=auth_headers).json()
+    summaries = client.get("/api/interviews", headers=auth_headers).json()["items"]
     item = next(s for s in summaries if s["id"] == ctx["id"])
     assert item["answered_count"] == 1
     assert item["target_questions"] == 3

@@ -72,5 +72,5 @@ def test_practice_interviews_are_tagged_practice(
     detail = client.get(f"/api/interviews/{ctx['id']}", headers=auth_headers).json()
     assert detail["kind"] == "practice"
 
-    summaries = client.get("/api/interviews", headers=auth_headers).json()
+    summaries = client.get("/api/interviews", headers=auth_headers).json()["items"]
     assert next(item for item in summaries if item["id"] == ctx["id"])["kind"] == "practice"
