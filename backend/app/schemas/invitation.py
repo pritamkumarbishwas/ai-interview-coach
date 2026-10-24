@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
@@ -111,6 +112,22 @@ class InvitationSessionOut(BaseModel):
     start_window_start: ISTDateTime | None = None
     start_window_end: ISTDateTime | None = None
     round_deadline: ISTDateTime | None = None
+
+
+class ConversationMessageOut(BaseModel):
+    """One stored turn in the candidate's screening conversation."""
+
+    id: str
+    author: Literal["ai", "candidate"]
+    text: str
+    created_at: ISTDateTime
+
+
+class ScreeningConversationOut(BaseModel):
+    """Compact transcript for resuming a screening interview (no scores)."""
+
+    messages: list[ConversationMessageOut] = Field(default_factory=list)
+    started_at: ISTDateTime | None = None
 
 
 class StartInterviewRequest(BaseModel):

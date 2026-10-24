@@ -36,6 +36,7 @@ from app.schemas.invitation import (
     InvitationExtend,
     InvitationOut,
     InvitationSessionOut,
+    ScreeningConversationOut,
     ShortlistEntry,
     StartInterviewRequest,
 )
@@ -296,6 +297,19 @@ async def get_session(
     """Pre-check: what this interview is and whether it can start now."""
     response.headers["Cache-Control"] = NO_STORE
     return await service.session(db, token)
+
+
+@public_router.get("/{token}/conversation", response_model=ScreeningConversationOut)
+async def get_conversation(
+    token: str,
+    response: Response,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    service: ScreeningService = Depends(get_screening_service),
+    _: None = Depends(rate_limit("screening_session")),
+) -> ScreeningConversationOut:
+    """Restore the stored Q&A transcript when a candidate resumes."""
+    response.headers["Cache-Control"] = NO_STORE
+    return await service.conversation(db, token)
 
 
 @public_router.post("/{token}/start", response_model=CurrentQuestionOut)

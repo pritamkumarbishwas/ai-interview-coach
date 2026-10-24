@@ -312,6 +312,7 @@ export interface Question {
   sequence: number;
   text: string;
   topic: string;
+  created_at: string;
 }
 
 export interface ProctoringSession {
@@ -682,6 +683,19 @@ export interface InvitationSession {
   start_window_start: string | null;
   start_window_end: string | null;
   round_deadline: string | null;
+}
+
+/** Stored transcript returned when a screening candidate resumes. */
+export interface ScreeningConversationMessage {
+  id: string;
+  author: "ai" | "candidate";
+  text: string;
+  created_at: string;
+}
+
+export interface ScreeningConversation {
+  messages: ScreeningConversationMessage[];
+  started_at: string | null;
 }
 
 /** Advisory integrity summary for a candidate session (never a verdict). */

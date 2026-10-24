@@ -3,6 +3,7 @@ import type {
   AnswerResult,
   CurrentQuestion,
   InvitationSession,
+  ScreeningConversation,
 } from "@/types";
 
 /**
@@ -46,6 +47,19 @@ export async function getCurrentQuestion(
   try {
     const { data } = await api.get<CurrentQuestion>(
       `/screening/${token}/current-question`,
+    );
+    return data;
+  } catch (error) {
+    throw toApiError(error);
+  }
+}
+
+export async function getConversation(
+  token: string,
+): Promise<ScreeningConversation> {
+  try {
+    const { data } = await api.get<ScreeningConversation>(
+      `/screening/${token}/conversation`,
     );
     return data;
   } catch (error) {

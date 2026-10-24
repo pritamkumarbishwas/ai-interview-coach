@@ -16,6 +16,23 @@ export function parseApiDate(value: string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/** Session-relative mm:ss for a stored timestamp. */
+export function formatElapsed(
+  startedAt: string | null | undefined,
+  at: string | null | undefined,
+): string {
+  const started = parseApiDate(startedAt);
+  const moment = parseApiDate(at);
+  if (!started || !moment) return "";
+  const total = Math.max(
+    0,
+    Math.floor((moment.getTime() - started.getTime()) / 1000),
+  );
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 export function formatDate(value: string): string {
   const date = parseApiDate(value);
   if (!date) return "";

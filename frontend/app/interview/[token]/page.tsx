@@ -32,12 +32,17 @@ import { MediaProvider, useMedia } from "@/hooks/use-media";
 import { useIntegritySignals } from "@/hooks/use-integrity-signals";
 import { useInterviewRecorder } from "@/hooks/use-interview-recorder";
 import { toApiError, type ApiError } from "@/lib/api";
-import { formatDate, parseApiDate } from "@/lib/datetime";
+import { formatDate, formatElapsed, parseApiDate } from "@/lib/datetime";
 import { DIFFICULTY_LABELS, TYPE_LABELS } from "@/lib/interview";
 import { PROCTORING_LABELS } from "@/lib/recruiting";
 import * as screening from "@/services/screening";
 import type { ChatMessage } from "@/data/mock";
-import type { CurrentQuestion, InvitationSession, Question } from "@/types";
+import type {
+  CurrentQuestion,
+  InvitationSession,
+  Question,
+  ScreeningConversation,
+} from "@/types";
 
 type Stage = "precheck" | "device" | "session" | "done";
 
@@ -81,6 +86,7 @@ function ScreeningInterview() {
   const [leaveOpen, setLeaveOpen] = useState(false);
 
   const startedAtRef = useRef<number>(Date.now());
+  const startedAtIsoRef = useRef<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const warnedRef = useRef<Set<number>>(new Set());
 
@@ -165,11 +171,59 @@ function ScreeningInterview() {
         if (deadline) setDeadline(deadline.getTime());
       }
       if (current.started) {
-        // Resuming a started interview — pick up the unanswered question.
+        // Resuming a started interview: restore the transcript, then the
+        // unanswered question. History is best-effort; the current question
+        // remains the source of truth.
+        let history: ScreeningConversation | null = null;
+        try {
+          history = await screening.getConversation(token);
+        } catch (caught) {
+          const apiError = toApiError(caught);
+          if (apiError.status === 409) {
+            setCompleted(true);
+            setStage("done");
+            return;
+          }
+        }
+
         try {
           const cq = await screening.getCurrentQuestion(token);
-          startedAtRef.current = Date.now();
-          applyQuestion(cq);
+          if (history?.started_at) {
+            const started = parseApiDate(history.started_at);
+            startedAtRef.current = started?.getTime() ?? Date.now();
+            startedAtIsoRef.current = history.started_at;
+          } else {
+            startedAtRef.current = Date.now();
+            startedAtIsoRef.current = null;
+          }
+
+          const restored: ChatMessage[] = (history?.messages ?? []).map(
+            (message) => ({
+              id: message.id,
+              author: message.author,
+              text: message.text,
+              time:
+                formatElapsed(history?.started_at ?? null, message.created_at) ||
+                formatTime(0),
+            }),
+          );
+          const currentMessageId = `ai-${cq.question.id}`;
+          if (!restored.some((message) => message.id === currentMessageId)) {
+            restored.push({
+              id: currentMessageId,
+              author: "ai",
+              text: cq.question.text,
+              time:
+                formatElapsed(
+                  history?.started_at ?? null,
+                  cq.question.created_at,
+                ) || formatTime(0),
+            });
+          }
+          setMessages(restored);
+          setQuestion(cq.question);
+          setQuestionNumber(cq.question_number);
+          setAiStatus("speaking");
           setStage("session");
         } catch (caught) {
           const apiError = toApiError(caught);
@@ -186,7 +240,7 @@ function ScreeningInterview() {
     } finally {
       setLoading(false);
     }
-  }, [token, applyQuestion]);
+  }, [token]);
 
   useEffect(() => {
     void load();
@@ -234,6 +288,7 @@ function ScreeningInterview() {
     try {
       const cq = await screening.startInterview(token, consentValue);
       startedAtRef.current = Date.now();
+      startedAtIsoRef.current = null;
       setMessages([]);
       applyQuestion(cq);
       // Refresh for the server deadline + updated status.
@@ -277,11 +332,13 @@ function ScreeningInterview() {
       }
       const next = result.next_question;
       if (next) {
+        const nextTime =
+          formatElapsed(startedAtIsoRef.current, next.created_at) || timeLabel();
         setQuestion(next);
         setQuestionNumber(result.questions_answered + 1);
         setMessages((prev) => [
           ...prev,
-          { id: `ai-${next.id}`, author: "ai", text: next.text, time: timeLabel() },
+          { id: `ai-${next.id}`, author: "ai", text: next.text, time: nextTime },
         ]);
         setAiStatus("speaking");
       } else {

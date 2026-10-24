@@ -133,9 +133,23 @@ def test_candidate_runs_the_full_flow(
     assert body["started"] is False
     assert session.headers["cache-control"] == "private, no-store"
 
+    empty_history = client.get(f"/api/screening/{token}/conversation")
+    assert empty_history.status_code == 200
+    assert empty_history.json() == {"messages": [], "started_at": None}
+
     started = client.post(f"/api/screening/{token}/start", json={"consent": False})
     assert started.status_code == 200, started.text
     question_id = started.json()["question"]["id"]
+    assert started.json()["question"]["created_at"]
+
+    started_history = client.get(f"/api/screening/{token}/conversation")
+    assert started_history.status_code == 200
+    started_body = started_history.json()
+    assert started_body["started_at"]
+    assert len(started_body["messages"]) == 1
+    assert started_body["messages"][0]["id"] == f"ai-{question_id}"
+    assert started_body["messages"][0]["author"] == "ai"
+    assert started_body["messages"][0]["created_at"]
 
     current = client.get(f"/api/screening/{token}/current-question")
     assert current.status_code == 200
@@ -148,6 +162,17 @@ def test_candidate_runs_the_full_flow(
     assert first.status_code == 200, first.text
     assert first.json()["status"] == "in_progress"
     next_id = first.json()["next_question"]["id"]
+    assert first.json()["next_question"]["created_at"]
+
+    history = client.get(f"/api/screening/{token}/conversation")
+    assert history.status_code == 200
+    messages = history.json()["messages"]
+    assert [message["author"] for message in messages] == ["ai", "candidate", "ai"]
+    assert messages[0]["id"] == f"ai-{question_id}"
+    assert messages[1]["id"].startswith("c-")
+    assert messages[1]["text"] == "An index speeds up reads by avoiding full scans."
+    assert messages[2]["id"] == f"ai-{next_id}"
+    assert all(message["created_at"] for message in messages)
 
     second = client.post(
         f"/api/screening/{token}/questions/{next_id}/answer",
@@ -158,6 +183,28 @@ def test_candidate_runs_the_full_flow(
 
     final = client.get(f"/api/screening/{token}")
     assert final.json()["status"] == "completed"
+    assert client.get(f"/api/screening/{token}/conversation").status_code == 409
+
+
+def test_conversation_rejects_mismatched_interview_owner(
+    client: TestClient, staff_headers: dict, monkeypatch
+) -> None:
+    _patch_llm(monkeypatch)
+    job_id = _job_with_template(client, staff_headers, target=2)
+    token = _token(_invite(client, staff_headers, job_id))
+
+    started = client.post(f"/api/screening/{token}/start", json={"consent": False})
+    assert started.status_code == 200, started.text
+    interview_id = started.json()["interview_id"]
+
+    async def run(db) -> None:
+        await db.interviews.update_one(
+            {"_id": ObjectId(interview_id)},
+            {"$set": {"user_id": "someone-else"}},
+        )
+
+    _with_mongo(run)
+    assert client.get(f"/api/screening/{token}/conversation").status_code == 404
 
 
 def test_proctored_round_requires_consent(
@@ -214,6 +261,7 @@ def test_deadline_is_server_enforced(
     _set_invitation(invitation["id"], {"round_deadline": datetime.now(UTC) - timedelta(minutes=1)})
     assert client.get(f"/api/screening/{token}/current-question").status_code == 409
     assert client.get(f"/api/screening/{token}").status_code == 409
+    assert client.get(f"/api/screening/{token}/conversation").status_code == 409
 
 
 def test_list_and_remind_rotate_the_token(

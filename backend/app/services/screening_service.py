@@ -43,9 +43,11 @@ from app.repositories.template_repository import TemplateRepository
 from app.schemas.answer import AnswerInput, AnswerResultOut
 from app.schemas.interview import CurrentQuestionOut
 from app.schemas.invitation import (
+    ConversationMessageOut,
     InvitationCreate,
     InvitationOut,
     InvitationSessionOut,
+    ScreeningConversationOut,
     ShortlistEntry,
 )
 from app.services.analytics_service import analytics_service
@@ -555,6 +557,47 @@ class ScreeningService:
             start_window_start=invitation.start_window_start,
             start_window_end=invitation.start_window_end,
             round_deadline=invitation.round_deadline,
+        )
+
+    async def conversation(
+        self, db: AsyncIOMotorDatabase, token: str
+    ) -> ScreeningConversationOut:
+        """Return the stored Q&A transcript for resuming an active session."""
+        invitation = await self._require_token(db, token)
+        if not invitation.interview_id:
+            return ScreeningConversationOut()
+
+        await self._enforce_deadline(db, invitation)
+        doc = await self._interviews.get_by_id(db, invitation.interview_id)
+        if doc is None or doc.get("user_id") != invitation.guest_user_id:
+            raise NotFoundError("Interview not found")
+
+        interview = Interview(**doc)
+        answers_by_question = {answer.question_id: answer for answer in interview.answers}
+        messages: list[ConversationMessageOut] = []
+        for question in interview.questions:
+            messages.append(
+                ConversationMessageOut(
+                    id=f"ai-{question.id}",
+                    author="ai",
+                    text=question.text,
+                    created_at=question.created_at,
+                )
+            )
+            answer = answers_by_question.get(question.id)
+            if answer is None:
+                break
+            messages.append(
+                ConversationMessageOut(
+                    id=f"c-{answer.id}",
+                    author="candidate",
+                    text=answer.text,
+                    created_at=answer.created_at,
+                )
+            )
+        return ScreeningConversationOut(
+            messages=messages,
+            started_at=interview.started_at,
         )
 
     async def start(

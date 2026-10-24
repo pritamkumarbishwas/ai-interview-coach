@@ -37,6 +37,7 @@ import { useIntegritySignals } from "@/hooks/use-integrity-signals";
 import { useInterviewRecorder } from "@/hooks/use-interview-recorder";
 import { MediaProvider, useMedia } from "@/hooks/use-media";
 import { toApiError } from "@/lib/api";
+import { formatElapsed } from "@/lib/datetime";
 import {
   DIFFICULTY_LABELS,
   LEVEL_LABELS,
@@ -69,14 +70,6 @@ function formatTime(totalSeconds: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
-function timeSince(startedAt: string | null, iso: string): string {
-  if (!startedAt) return "";
-  const started = new Date(startedAt).getTime();
-  const at = new Date(iso).getTime();
-  if (!Number.isFinite(started) || !Number.isFinite(at)) return "";
-  return formatTime(Math.max(0, Math.floor((at - started) / 1000)));
-}
-
 /** Rebuild the conversation from stored questions + answers. */
 function seedMessages(interview: InterviewDetail): ChatMessage[] {
   const out: ChatMessage[] = [];
@@ -89,16 +82,14 @@ function seedMessages(interview: InterviewDetail): ChatMessage[] {
       id: `ai-${question.id}`,
       author: "ai",
       text: question.text,
-      time: answer
-        ? timeSince(interview.started_at, answer.created_at)
-        : formatTime(0),
+      time: formatElapsed(interview.started_at, question.created_at),
     });
     if (!answer) break;
     out.push({
       id: `c-${answer.id}`,
       author: "candidate",
       text: answer.text,
-      time: timeSince(interview.started_at, answer.created_at),
+      time: formatElapsed(interview.started_at, answer.created_at),
     });
   }
   return out;
@@ -342,10 +333,12 @@ function InterviewWorkspace() {
       }
       const next = result.next_question;
       if (next) {
+        const nextTime =
+          formatElapsed(interview?.started_at ?? null, next.created_at) || time;
         setCurrentQuestion(next);
         setMessages((prev) => [
           ...prev,
-          { id: `ai-${next.id}`, author: "ai", text: next.text, time },
+          { id: `ai-${next.id}`, author: "ai", text: next.text, time: nextTime },
         ]);
         setAiStatus("speaking");
         // The status resets to listening via onSpeechEnd from AIInterviewer.

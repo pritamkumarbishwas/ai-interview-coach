@@ -125,6 +125,7 @@ def _question_out(question: Question) -> QuestionOut:
         sequence=question.sequence,
         text=question.text,
         topic=question.topic,
+        created_at=question.created_at,
     )
 
 

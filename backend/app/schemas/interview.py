@@ -34,6 +34,7 @@ class QuestionOut(BaseModel):
     sequence: int
     text: str
     topic: str = ""
+    created_at: ISTDateTime
 
 
 class InterviewSummary(BaseModel):
